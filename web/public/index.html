@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="myco" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0d0d0d" />
+  <meta name="format-detection" content="telephone=no, date=no, address=no, email=no, url=no" />
+  <link rel="manifest" href="/manifest.json" />
+  <title>myco</title>
+  <link rel="stylesheet" href="/vendor/xterm-css/xterm.css" />
+  <link rel="stylesheet" href="styles.css?v=16" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header>
+        <h1>myco</h1>
+        <button id="btn-collapse" title="Collapse">‹</button>
+        <button id="btn-spawn" title="New session">+</button>
+      </header>
+      <ul id="session-list"></ul>
+    </aside>
+
+    <button id="btn-expand" title="Show sessions" hidden>☰</button>
+
+    <main id="terminal-pane">
+      <div id="no-session">Select a session</div>
+      <div id="terminal-wrap" hidden>
+        <div id="terminal"></div>
+        <div id="keyboard-bar"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- login modal -->
+  <div id="login-modal" hidden>
+    <div id="login-dialog">
+      <h2>Sign in</h2>
+      <p class="login-hint">Enter the access token to continue.</p>
+      <input id="login-token" type="password" placeholder="token" autocomplete="off" />
+      <div id="login-error" hidden></div>
+      <button id="login-ok">Unlock</button>
+    </div>
+  </div>
+
+  <!-- spawn modal -->
+  <div id="spawn-modal" hidden>
+    <div id="spawn-dialog">
+      <h2>New session</h2>
+      <div id="spawn-workspace">Workspace: <code id="spawn-ws-path">…</code></div>
+      <label>Subdirectory (relative to workspace, blank = root)
+        <input id="spawn-cwd" type="text" placeholder="" autocomplete="off" />
+      </label>
+      <div id="spawn-suggestions"></div>
+      <div id="spawn-error" hidden></div>
+      <div id="spawn-actions">
+        <button id="spawn-cancel">Cancel</button>
+        <button id="spawn-ok">Start</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/vendor/xterm/xterm.js"></script>
+  <script src="/vendor/xterm-fit/addon-fit.js"></script>
+  <script src="keyboard.js?v=5"></script>
+  <script src="app.js?v=18"></script>
+</body>
+</html>
