@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.json" />
   <title>myco</title>
   <link rel="stylesheet" href="/vendor/xterm-css/xterm.css" />
-  <link rel="stylesheet" href="styles.css?v=17" />
+  <link rel="stylesheet" href="styles.css?v=25" />
 </head>
 <body>
   <div id="app">
@@ -23,6 +23,10 @@
         <button id="btn-spawn" title="New session">+</button>
       </header>
       <ul id="session-list"></ul>
+      <div id="status-bar">
+        <span id="status-indicator"></span>
+        <span id="status-text">mycod running</span>
+      </div>
     </aside>
 
     <button id="btn-expand" title="Show sessions" hidden>☰</button>
@@ -64,9 +68,20 @@
     </div>
   </div>
 
+  <!-- log panel -->
+  <div id="log-panel" hidden>
+    <div id="log-panel-header">
+      <h2>Server Logs</h2>
+      <button id="log-panel-close">&times;</button>
+    </div>
+    <div id="log-entries"></div>
+  </div>
+
   <script src="/vendor/xterm/xterm.js"></script>
   <script src="/vendor/xterm-fit/addon-fit.js"></script>
-  <script src="keyboard.js?v=5"></script>
-  <script src="app.js?v=19"></script>
+  <script src="/vendor/xterm-webgl/addon-webgl.js"></script>
+  <script src="/vendor/xterm-canvas/addon-canvas.js"></script>
+  <script src="keyboard.js?v=7"></script>
+  <script src="app.js?v=32"></script>
 </body>
 </html>

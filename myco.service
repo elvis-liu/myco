@@ -1,0 +1,17 @@
+[Unit]
+Description=Mycelium Web Terminal
+After=network.target
+
+[Service]
+Type=simple
+User=kkrazy
+Group=kkrazy
+Environment=PORT=3000
+EnvironmentFile=/home/kkrazy/myco/.env
+WorkingDirectory=/home/kkrazy/myco
+ExecStart=/home/kkrazy/.local/node/bin/node server/src/index.js
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

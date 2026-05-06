@@ -2,3 +2,6 @@ node_modules/
 *.log
 /tmp/
 .DS_Store
+.env
+._*
+nohup.out

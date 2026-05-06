@@ -70,6 +70,7 @@ function loadStore() {
     storeCache = { sessions: {} };
   }
   if (!storeCache.sessions) storeCache.sessions = {};
+  if (!storeCache.dismissed) storeCache.dismissed = [];
   return storeCache;
 }
 
@@ -82,7 +83,16 @@ function saveStore() {
 }
 
 function putSession(rec) { loadStore().sessions[rec.id] = rec; saveStore(); }
-function removeSession(id) { delete loadStore().sessions[id]; saveStore(); }
+function removeSession(id) {
+  const store = loadStore();
+  const rec = store.sessions[id];
+  if (rec && rec.absCwd) {
+    store.dismissed = store.dismissed || [];
+    if (!store.dismissed.includes(rec.absCwd)) store.dismissed.push(rec.absCwd);
+  }
+  delete store.sessions[id];
+  saveStore();
+}
 function getSessionRecord(id) { return loadStore().sessions[id] || null; }
 
 // ─── claude transcript helpers ──────────────────────────────────────────────
@@ -142,10 +152,76 @@ async function readCwdFromTranscript(jsonlPath) {
   } catch { return null; }
 }
 
-async function readDescriptionForCwd(absCwd) {
+async function readDescriptionForCwd(absCwd, rec) {
   const dir = path.join(projectsDir(), encodeCwdForClaude(absCwd));
   const newest = await findNewestJsonl(dir);
-  return newest ? readFirstUserPrompt(newest.full) : null;
+  if (!newest) return null;
+  const firstPrompt = await readFirstUserPrompt(newest.full);
+  const status = deriveStatus(newest.mtimeMs);
+
+  // Use cached AI summary if available and fresh
+  let summary = null;
+  if (rec && rec.aiSummary && rec.summaryGeneratedAt) {
+    const generatedAt = new Date(rec.summaryGeneratedAt).getTime();
+    if (newest.mtimeMs <= generatedAt) {
+      summary = rec.aiSummary;
+    }
+  }
+  if (!summary) {
+    summary = await summarizeRecentContext(newest.full);
+  }
+
+  return { description: firstPrompt, summary, status, lastActivity: newest.mtimeMs };
+}
+
+function deriveStatus(mtimeMs) {
+  const ageMs = Date.now() - mtimeMs;
+  if (ageMs < 30 * 60 * 1000) return 'active';       // < 30 min
+  if (ageMs < 4 * 60 * 60 * 1000) return 'recent';   // < 4 hours
+  if (ageMs < 24 * 60 * 60 * 1000) return 'stale';   // < 1 day
+  return 'idle';                                      // >= 1 day
+}
+
+// Read the tail of the transcript to get a sense of what Claude was last doing.
+// We look for the last assistant text reply — that describes the work done,
+// not the ask. Falls back to the last user message if no assistant text found.
+async function summarizeRecentContext(jsonlPath) {
+  try {
+    const raw = await fsp.readFile(jsonlPath, 'utf8');
+    const lines = raw.split('\n').filter(Boolean);
+    if (lines.length < 4) return null;
+
+    // Walk backwards: prefer last assistant text, then last user text.
+    let lastAssistantText = null;
+    let lastUserText = null;
+    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 300); i--) {
+      let obj;
+      try { obj = JSON.parse(lines[i]); } catch { continue; }
+      if (obj.type !== 'assistant' && obj.type !== 'user') continue;
+      const msg = obj.message;
+      if (!msg) continue;
+      const role = msg.role || obj.type;
+      const c = msg.content;
+      let text = '';
+      if (typeof c === 'string') text = c;
+      else if (Array.isArray(c)) {
+        // Pull the first text block (skip thinking/tool_use blocks).
+        const t = c.find((x) => x && x.type === 'text' && x.text && x.text.trim());
+        if (t) text = t.text;
+      }
+      text = text.replace(/\s+/g, ' ').trim();
+      if (!text || text.startsWith('<')) continue;
+      if (role === 'assistant' && !lastAssistantText) lastAssistantText = text;
+      if (role === 'user' && !lastUserText) lastUserText = text;
+      if (lastAssistantText) break; // got what we need
+    }
+
+    const pick = lastAssistantText || lastUserText;
+    if (!pick) return null;
+    // Trim to a card-friendly length.
+    if (pick.length > 80) return pick.slice(0, 77) + '…';
+    return pick;
+  } catch { return null; }
 }
 
 // After spawning claude, poll the projects dir for a new jsonl whose mtime is
@@ -179,7 +255,9 @@ function ownerOf(id) {
 }
 
 function sessionBelongsToUser(sessionId, user) {
-  return ownerOf(sessionId) === user;
+  const rec = getSessionRecord(sessionId);
+  if (!rec) return false;
+  return rec.user === user;
 }
 
 function shortId() { return crypto.randomBytes(4).toString('hex'); }
@@ -193,13 +271,20 @@ function clamp(v, min, max, fallback) {
 async function listSessions(forUser) {
   const all = Object.values(loadStore().sessions);
   const filtered = forUser ? all.filter((r) => r.user === forUser) : all;
-  return Promise.all(filtered.map(async (r) => ({
-    id: r.id,
-    name: r.id,
-    cwd: r.cwd,
-    description: await readDescriptionForCwd(r.absCwd),
-    created_at: r.createdAt,
-  })));
+  return Promise.all(filtered.map(async (r) => {
+    const info = await readDescriptionForCwd(r.absCwd, r);
+    return {
+      id: r.id,
+      name: r.id,
+      cwd: r.cwd,
+      abs_cwd: r.absCwd,
+      description: info?.description || null,
+      summary: info?.summary || null,
+      status: info?.status || 'idle',
+      last_activity: info?.lastActivity || null,
+      created_at: r.createdAt,
+    };
+  }));
 }
 
 async function spawnSession(rawCwd, user = 'default', opts = {}) {
@@ -227,6 +312,7 @@ function ensureLiveSession(sessionId) {
   if (live && live.alive) return live;
   const rec = getSessionRecord(sessionId);
   if (!rec) throw new Error(`unknown session: ${sessionId}`);
+  console.log(`[ensureLive] spawning claude for ${sessionId} cwd=${rec.absCwd} resume=${rec.claudeSessionId || 'none'}`);
   return ptyMod.spawnClaude(sessionId, {
     cwd: rec.absCwd,
     resumeId: rec.claudeSessionId || null,
@@ -265,6 +351,8 @@ async function importExistingTranscripts() {
     if (!cwd) continue;
     if (haveCwds.has(cwd)) continue;
 
+    if (store.dismissed && store.dismissed.includes(cwd)) continue;
+
     const rel = path.relative(WORKSPACE, cwd);
     if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
     const segs = rel.split(path.sep).filter(Boolean);
@@ -302,4 +390,9 @@ module.exports = {
   deleteSession,
   ownerOf,
   importExistingTranscripts,
+  // exposed for summarizer
+  loadStore,
+  saveStore,
+  projectsDir,
+  encodeCwdForClaude,
 };

@@ -1,4 +1,4 @@
-/* global Terminal, FitAddon, Keyboard */
+/* global Terminal, FitAddon, WebglAddon, CanvasAddon, Keyboard */
 
 const state = {
   sessions: [],
@@ -8,6 +8,8 @@ const state = {
   ws: null,
   keyboard: null,
   token: localStorage.getItem('myco_token') || '',
+  logs: [],
+  logWs: null,
 };
 
 // ── auth ──────────────────────────────────────────────────────────────────────
@@ -42,9 +44,86 @@ async function tryToken(token) {
 }
 
 async function bootstrap() {
+  // Share-link viewer: ?s=<token> bypasses login and attaches read-only.
+  const shareTok = new URL(window.location.href).searchParams.get('s');
+  if (shareTok) return enterShareMode(shareTok);
+
   const ok = await tryToken(state.token);
   if (ok) { init(); }
   else    { showLogin(); }
+}
+
+async function enterShareMode(shareTok) {
+  state.shareMode = true;
+  state.shareToken = shareTok;
+  document.body.classList.add('share-mode');
+  let info;
+  try {
+    const res = await fetch(`/auth/check?s=${encodeURIComponent(shareTok)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    info = await res.json();
+  } catch {
+    return showShareError('This share link is invalid or expired.');
+  }
+  if (!info || !info.ok || !info.sessionId) {
+    return showShareError('This share link is invalid or expired.');
+  }
+  openShareViewer(info.sessionId);
+}
+
+function showShareError(msg) {
+  document.body.innerHTML =
+    `<div style="color:#ccc;font:14px -apple-system,system-ui,sans-serif;` +
+    `display:flex;align-items:center;justify-content:center;height:100dvh;` +
+    `padding:20px;text-align:center;">${escHtml(msg)}</div>`;
+}
+
+function openShareViewer(id) {
+  state.activeId = id;
+  document.getElementById('no-session').hidden = true;
+  document.getElementById('terminal-wrap').hidden = false;
+
+  state.term = new Terminal({ scrollback: 5000, fontSize: 13, disableStdin: true });
+  state.fitAddon = new FitAddon.FitAddon();
+  state.term.loadAddon(state.fitAddon);
+  const el = document.getElementById('terminal');
+  el.innerHTML = '';
+  state.term.open(el);
+  state.fitAddon.fit();
+  try {
+    const webgl = new WebglAddon.WebglAddon();
+    webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} });
+    state.term.loadAddon(webgl);
+  } catch {
+    try { state.term.loadAddon(new CanvasAddon.CanvasAddon()); } catch {}
+  }
+  setupTouchScroll(state.term);
+
+  new ResizeObserver(() => state.fitAddon && state.fitAddon.fit()).observe(el);
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  let reconnectDelay = 1000;
+  function connectShare() {
+    const ws = new WebSocket(
+      `${proto}://${location.host}/attach/${encodeURIComponent(id)}?s=${encodeURIComponent(state.shareToken)}`
+    );
+    state.ws = ws;
+    ws.addEventListener('open', () => { reconnectDelay = 1000; });
+    ws.addEventListener('message', (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.t === 'output') {
+        state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
+      } else if (msg.t === 'exit') {
+        state.term.writeln('\r\n[session ended]');
+      }
+    });
+    ws.addEventListener('close', () => {
+      state.term?.writeln('\r\n[reconnecting...]');
+      setTimeout(() => { if (state.shareMode) connectShare(); }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 1.5, 15000);
+    });
+  }
+  connectShare();
 }
 
 async function doLogin() {
@@ -86,6 +165,9 @@ async function init() {
     if (e.key === 'Enter') { e.preventDefault(); doSpawn(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeSpawnModal(); }
   });
+  document.getElementById('status-bar').addEventListener('click', toggleLogPanel);
+  document.getElementById('log-panel-close').addEventListener('click', toggleLogPanel);
+  connectLogWs();
 }
 
 async function refreshWorkspace() {
@@ -132,39 +214,62 @@ function renderSessionList() {
   for (const s of state.sessions) {
     const li = document.createElement('li');
     li.className = 'session-item' + (s.id === state.activeId ? ' active' : '');
+    if (s.status) li.dataset.status = s.status;
     li.dataset.id = s.id;
     const dirName = (s.cwd || '').split('/').filter(Boolean).pop() || s.cwd || '~';
     const idShort = s.id.replace(/^myco-/, '').slice(0, 8);
-    const desc = s.description
-      ? `<span class="session-desc">${escHtml(s.description)}</span>`
-      : '';
+    const summary = s.summary
+      ? `<span class="session-summary">${escHtml(s.summary)}</span>`
+      : (s.description ? `<span class="session-desc">${escHtml(s.description)}</span>` : '');
+    const statusDot = s.status ? `<span class="session-status session-status-${s.status}" aria-label="Status: ${s.status}"></span>` : '';
     li.innerHTML = `
+      ${statusDot}
       <span class="session-title">${escHtml(dirName)}</span>
-      ${desc}
-      <span class="session-meta">${escHtml(idShort)} · ${timeAgo(s.created_at)}</span>
+      ${summary}
+      <span class="session-meta">${escHtml(idShort)} · ${timeAgo(s.last_activity || s.created_at)}</span>
+      <button class="session-share" aria-label="Share session">↗</button>
+      <button class="session-vscode" aria-label="Open in VS Code">{·}</button>
       <button class="session-delete" aria-label="Delete session">×</button>
     `;
-    li.addEventListener('click', () => openSession(s.id));
+    li.addEventListener('click', () => {
+      // If the long-press menu is showing on this card, the tap just dismisses
+      // it (handled by the document click listener). A second tap opens.
+      if (li.classList.contains('show-delete')) return;
+      openSession(s.id);
+    });
     const delBtn = li.querySelector('.session-delete');
     delBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       deleteSessionWithConfirm(s);
+    });
+    const shareBtn = li.querySelector('.session-share');
+    shareBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      shareSession(s);
+    });
+    const codeBtn = li.querySelector('.session-vscode');
+    codeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openInVscode(s);
     });
     attachLongPressDeleteToggle(li);
     ul.appendChild(li);
   }
 }
 
-// On touch devices, long-press a card to reveal the × on every card.
-// On hover-capable devices a CSS hover rule already shows it, so this is a
-// no-op there.
+// On touch devices, long-press a card to reveal share/vscode/delete on
+// just that card. On hover-capable devices a CSS hover rule shows them.
 function attachLongPressDeleteToggle(li) {
   let timer = null;
   const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
   li.addEventListener('touchstart', () => {
     cancel();
     timer = setTimeout(() => {
-      document.getElementById('session-list').classList.add('show-delete');
+      // Clear any other card's expanded menu so only this one is open.
+      document.querySelectorAll('.session-item.show-delete').forEach(el => {
+        if (el !== li) el.classList.remove('show-delete');
+      });
+      li.classList.add('show-delete');
       if (navigator.vibrate) navigator.vibrate(15);
     }, 500);
   }, { passive: true });
@@ -173,14 +278,93 @@ function attachLongPressDeleteToggle(li) {
   li.addEventListener('touchcancel', cancel);
 }
 
-// Tap outside any card or × button exits delete-mode on mobile.
+// Tap outside the expanded card hides its action buttons. Tapping a
+// different card just hides the previous one (the new long-press, if any,
+// will open it on the new card).
 document.addEventListener('click', (e) => {
-  const list = document.getElementById('session-list');
-  if (!list || !list.classList.contains('show-delete')) return;
-  if (e.target.closest('.session-delete')) return;
-  if (e.target.closest('.session-item')) return;
-  list.classList.remove('show-delete');
+  const exposed = document.querySelectorAll('.session-item.show-delete');
+  if (!exposed.length) return;
+  if (e.target.closest('.session-delete') ||
+      e.target.closest('.session-share') ||
+      e.target.closest('.session-vscode')) return;
+  exposed.forEach((el) => {
+    if (!el.contains(e.target)) el.classList.remove('show-delete');
+    else el.classList.remove('show-delete'); // tap on the card itself also dismisses
+  });
 });
+
+async function shareSession(s) {
+  let url;
+  try {
+    const res = await authedFetch(`/sessions/${encodeURIComponent(s.id)}/share`, { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    ({ url } = await res.json());
+  } catch (err) {
+    alert(`Could not create share link: ${err.message}`);
+    return;
+  }
+  const dirName = (s.cwd || '').split('/').filter(Boolean).pop() || 'session';
+  const title = `Claude session: ${dirName}`;
+  if (navigator.share) {
+    try { await navigator.share({ title, url }); return; }
+    catch (err) { if (err && err.name === 'AbortError') return; }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    flashToast('Link copied');
+  } catch {
+    window.prompt('Copy this share link:', url);
+  }
+}
+
+function openInVscode(s) {
+  // Files live on the mycod server, not on the device clicking this button —
+  // a plain vscode://file/... URL would point at a path that doesn't exist
+  // locally. Always use Remote-SSH so the laptop's VS Code connects to the
+  // server. The SSH host string is whatever this machine's ~/.ssh/config
+  // (or ssh user@host) knows the server as — that's per-device, not server-
+  // side, so we cache it in localStorage.
+  const absPath = s.abs_cwd || s.cwd;
+  if (!absPath) { flashToast('Session has no folder'); return; }
+
+  let host = state.workspace?.vscode_host || localStorage.getItem('myco_vscode_host') || '';
+  if (!host) {
+    host = window.prompt(
+      'SSH host for VS Code Remote-SSH\n\n' +
+      'Enter the host alias from this device\'s ~/.ssh/config (e.g. "myserver") ' +
+      'or user@host. VS Code\'s Remote-SSH extension must already be set up for it.',
+      ''
+    );
+    if (host == null) return;
+    host = host.trim();
+    if (!host) return;
+    localStorage.setItem('myco_vscode_host', host);
+  }
+
+  const encoded = absPath.split('/').map(encodeURIComponent).join('/');
+  const url = `vscode://vscode-remote/ssh-remote+${host}${encoded}`;
+
+  document.querySelectorAll('.session-item.show-delete').forEach(el => el.classList.remove('show-delete'));
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  flashToast(`Opening in VS Code → ${host}`);
+}
+
+function flashToast(msg) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('hide');
+    setTimeout(() => el.remove(), 300);
+  }, 1600);
+}
 
 async function deleteSessionWithConfirm(s) {
   const label = s.cwd || s.id;
@@ -196,7 +380,8 @@ async function deleteSessionWithConfirm(s) {
       document.getElementById('terminal-wrap').hidden = true;
       document.getElementById('no-session').hidden = false;
     }
-    document.getElementById('session-list').classList.remove('show-delete');
+    document.querySelectorAll('.session-item.show-delete')
+      .forEach(el => el.classList.remove('show-delete'));
     await refreshSessions();
   } catch (err) {
     alert(`Could not delete session: ${err.message || err}`);
@@ -206,8 +391,8 @@ async function deleteSessionWithConfirm(s) {
 // ── terminal attach ───────────────────────────────────────────────────────────
 
 function openSession(id) {
-  // Re-tap of the same already-attached session - just bring it into view.
-  if (state.activeId === id && state.ws) {
+  // Re-tap of the same session: reconnect if WS is dead, otherwise just bring into view.
+  if (state.activeId === id && state.ws && state.ws.readyState === WebSocket.OPEN) {
     if (window.innerWidth <= 900) setSidebar(true);
     return;
   }
@@ -234,6 +419,19 @@ function openSession(id) {
   state.term.open(el);
   state.fitAddon.fit();
 
+  // GPU/canvas renderer — the default DOM renderer is too slow for Claude's
+  // styled output. Try WebGL first, fall back to 2D canvas if it fails
+  // (e.g. WebGL blocked, low-end mobile GPU).
+  try {
+    const webgl = new WebglAddon.WebglAddon();
+    webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} });
+    state.term.loadAddon(webgl);
+  } catch {
+    try { state.term.loadAddon(new CanvasAddon.CanvasAddon()); } catch {}
+  }
+
+  setupTouchScroll(state.term);
+
   // Suppress iOS soft keyboard. xterm keeps a hidden <textarea> focused; on iOS,
   // tapping any button blurs+refocuses it, which raises the OS keyboard. Setting
   // inputmode="none" tells iOS not to show the keyboard. The Keyboard component
@@ -255,27 +453,42 @@ function openSession(id) {
     state.keyboard = new Keyboard(document.getElementById('keyboard-bar'), sendInput);
   }
 
-  // websocket
+  // websocket with auto-reconnect
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const tokParam = state.token ? `?token=${encodeURIComponent(state.token)}` : '';
-  state.ws = new WebSocket(`${proto}://${location.host}/attach/${encodeURIComponent(id)}${tokParam}`);
+  let reconnectDelay = 1000;
+  const maxDelay = 15000;
 
-  state.ws.addEventListener('open', () => {
-    state.ws.send(JSON.stringify({ t: 'resize', cols: state.term.cols, rows: state.term.rows }));
-  });
+  function connect() {
+    const ws = new WebSocket(`${proto}://${location.host}/attach/${encodeURIComponent(id)}${tokParam}`);
+    state.ws = ws;
 
-  state.ws.addEventListener('message', (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (msg.t === 'output') {
-      state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
-    } else if (msg.t === 'exit') {
-      state.term.writeln('\r\n[session ended]');
-    }
-  });
+    ws.addEventListener('open', () => {
+      reconnectDelay = 1000;
+      ws.send(JSON.stringify({ t: 'resize', cols: state.term.cols, rows: state.term.rows }));
+    });
 
-  state.ws.addEventListener('close', () => {
-    state.term?.writeln('\r\n[disconnected]');
-  });
+    ws.addEventListener('message', (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.t === 'output') {
+        state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
+      } else if (msg.t === 'exit') {
+        state.term.writeln('\r\n[session ended]');
+      }
+    });
+
+    ws.addEventListener('close', () => {
+      if (state.activeId !== id) return; // switched to another session
+      state.term?.writeln('\r\n[reconnecting...]');
+      setTimeout(() => {
+        if (state.activeId === id) connect();
+      }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 1.5, maxDelay);
+    });
+  }
+
+  state.term.writeln('\r\n[connecting...]');
+  connect();
 
   // forward xterm keyboard input; auto-collapse sidebar on first keystroke
   state.term.onData((data) => {
@@ -289,6 +502,105 @@ function setSidebar(collapsed) {
   document.getElementById('btn-expand').hidden = !collapsed;
   // give xterm a chance to refit
   if (state.fitAddon) requestAnimationFrame(() => state.fitAddon.fit());
+}
+
+// Replace native viewport scroll with a JS-driven scroll that calls
+// term.scrollLines() each frame. This keeps the WebGL canvas position and
+// the scroll position in lockstep — native iOS momentum scrolls on the
+// compositor while WebGL repaints on the main thread, which desyncs.
+function setupTouchScroll(term) {
+  const root = term.element;
+  if (!root) return;
+
+  const SENSITIVITY = 1.6;
+
+  let active = false;
+  let moved = false;
+  let dismissedKbd = false;
+  let startY = 0;
+  let lastY = 0;
+  let lastTime = 0;
+  let velocity = 0;     // pixels per ms (positive = scroll toward newer)
+  let pixelDebt = 0;    // sub-line-height pixels not yet applied
+  let raf = null;
+
+  // If the soft keyboard is up (native-input mode), dismiss it once a
+  // real scroll gesture starts so the terminal can use the full screen.
+  const dismissSoftKeyboard = () => {
+    const ae = document.activeElement;
+    if (ae && ae.classList && ae.classList.contains('kbd-native-input')) {
+      ae.blur();
+    }
+  };
+
+  const cellHeight = () => {
+    const rows = term.rows || 0;
+    return rows > 0 ? root.clientHeight / rows : 17;
+  };
+
+  const applyPx = (dy) => {
+    pixelDebt += dy * SENSITIVITY;
+    const ch = cellHeight();
+    const lines = (pixelDebt > 0 ? Math.floor : Math.ceil)(pixelDebt / ch);
+    if (lines !== 0) {
+      term.scrollLines(lines);
+      pixelDebt -= lines * ch;
+    }
+  };
+
+  const cancelMomentum = () => {
+    if (raf) { cancelAnimationFrame(raf); raf = null; }
+  };
+
+  root.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    cancelMomentum();
+    active = true;
+    moved = false;
+    dismissedKbd = false;
+    pixelDebt = 0;
+    velocity = 0;
+    startY = lastY = e.touches[0].clientY;
+    lastTime = performance.now();
+  }, { passive: true });
+
+  root.addEventListener('touchmove', (e) => {
+    if (!active || e.touches.length !== 1) return;
+    const y = e.touches[0].clientY;
+    const now = performance.now();
+    const dy = lastY - y;                       // swipe up => positive => scroll down
+    const dt = Math.max(1, now - lastTime);
+    if (Math.abs(dy) > 0) moved = true;
+    if (!dismissedKbd && Math.abs(y - startY) > 8) {
+      dismissedKbd = true;
+      dismissSoftKeyboard();
+    }
+    velocity = velocity * 0.4 + (dy / dt) * 0.6; // EWMA for stable kickoff
+    applyPx(dy);
+    lastY = y;
+    lastTime = now;
+  }, { passive: true });
+
+  root.addEventListener('touchend', () => {
+    if (!active) return;
+    active = false;
+    if (!moved || Math.abs(velocity) < 0.05) return;
+    let v = velocity;
+    let prev = performance.now();
+    const tick = () => {
+      if (!root.isConnected) { raf = null; return; }
+      const now = performance.now();
+      const dt = now - prev;
+      prev = now;
+      applyPx(v * dt);
+      v *= Math.pow(0.94, dt / 16);
+      if (Math.abs(v) > 0.02) raf = requestAnimationFrame(tick);
+      else raf = null;
+    };
+    raf = requestAnimationFrame(tick);
+  });
+
+  root.addEventListener('touchcancel', () => { active = false; cancelMomentum(); }, { passive: true });
 }
 
 function sendInput(data) {
@@ -348,6 +660,58 @@ function timeAgo(iso) {
   if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
   return `${Math.round(sec / 86400)}d ago`;
+}
+
+// ── log monitoring ──────────────────────────────────────────────────────────
+
+function connectLogWs() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const tokParam = state.token ? `?token=${encodeURIComponent(state.token)}` : '';
+  const ws = new WebSocket(`${proto}://${location.host}/logs${tokParam}`);
+  ws.addEventListener('message', (ev) => {
+    try {
+      const entry = JSON.parse(ev.data);
+      if (entry.t === 'log') {
+        state.logs.push(entry);
+        if (state.logs.length > 200) state.logs.shift();
+        renderStatusBar();
+      }
+    } catch {}
+  });
+  ws.addEventListener('close', () => { setTimeout(connectLogWs, 5000); });
+  state.logWs = ws;
+}
+
+function renderStatusBar() {
+  const indicator = document.getElementById('status-indicator');
+  const text = document.getElementById('status-text');
+  if (!state.logs.length) { text.textContent = 'mycod running'; return; }
+
+  const recent = state.logs.slice(-30);
+  const hasError = recent.some((e) => e.level === 'error');
+  const hasWarn = recent.some((e) => e.level === 'warn');
+
+  indicator.className = hasError ? 'error' : hasWarn ? 'warn' : '';
+  const last = state.logs[state.logs.length - 1];
+  const msg = last.msg.length > 60 ? last.msg.slice(0, 57) + '...' : last.msg;
+  text.textContent = msg;
+}
+
+function toggleLogPanel() {
+  const panel = document.getElementById('log-panel');
+  const show = panel.hidden;
+  panel.hidden = !show;
+  if (show) renderLogEntries();
+}
+
+function renderLogEntries() {
+  const el = document.getElementById('log-entries');
+  const entries = state.logs.slice(-100);
+  el.innerHTML = entries.map((e) => {
+    const ts = e.ts ? e.ts.slice(11, 19) : '';
+    return `<div class="log-entry ${e.level}"><span class="log-ts">${escHtml(ts)}</span>${escHtml(e.msg)}</div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
 }
 
 document.addEventListener('DOMContentLoaded', () => {

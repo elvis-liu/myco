@@ -29,8 +29,11 @@ class Keyboard {
     // toggle button
     const toggle = document.createElement('button');
     toggle.className = 'kbd-toggle';
-    toggle.textContent = this.nativeMode ? '⌨ Custom' : '⌨ ABC';
+    toggle.textContent = this.nativeMode ? '⌨' : '🔣';
     toggle.addEventListener('click', () => {
+      // Save current input before toggling modes.
+      const inp = this.container.querySelector('.kbd-native-input');
+      if (inp) this._pendingInput = inp.value;
       this.nativeMode = !this.nativeMode;
       this.render();
     });
@@ -48,6 +51,8 @@ class Keyboard {
       input.autocorrect = 'off';
       input.spellcheck = false;
       input.enterKeyHint = 'send';
+      input.value = this._pendingInput || '';
+      this._pendingInput = '';
 
       const sendBtn = document.createElement('button');
       sendBtn.className = 'kbd-send';
@@ -56,9 +61,14 @@ class Keyboard {
       const flush = (appendNewline) => {
         const text = input.value;
         if (text) this.send(text);
-        if (appendNewline) this.send('\r');
+        // Send Enter on a later tick so Claude's TUI sees it as a discrete
+        // keystroke rather than the tail of a paste — a single-shot burst of
+        // "hello\r" gets interpreted as pasted multiline and doesn't submit.
+        if (appendNewline) setTimeout(() => this.send('\r'), 60);
         input.value = '';
-        input.focus();
+        // Minimize keyboard after sending.
+        this.nativeMode = false;
+        this.render();
       };
 
       input.addEventListener('keydown', (e) => {
@@ -69,6 +79,14 @@ class Keyboard {
       });
 
       sendBtn.addEventListener('click', () => flush(true));
+
+      // Dismiss keyboard on scroll in the terminal area
+      const dismiss = () => { if (document.activeElement === input) input.blur(); };
+      const termEl = document.getElementById('terminal');
+      if (termEl) {
+        termEl.addEventListener('touchstart', dismiss, { passive: true });
+        termEl.addEventListener('touchmove', dismiss, { passive: true });
+      }
 
       this.container.appendChild(input);
       this.container.appendChild(sendBtn);

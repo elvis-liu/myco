@@ -125,18 +125,48 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 .session-name { display: block; font-size: .9rem; font-weight: 500; }
 .session-cwd  { display: block; font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Recent context summary (what's being worked on now). */
+.session-summary {
+  font-size: .75rem;
+  color: var(--muted);
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+  margin-top: 2px;
+}
+
 .empty { padding: 16px; color: var(--muted); font-size: .85rem; }
 
 /* Delete (×) button on a card. Hidden by default. Revealed on hover for
    pointer devices, and when the list has .show-delete for touch devices
    (toggled by a long-press in app.js). */
 .session-item { position: relative; }
-.session-delete {
+
+/* Status indicator dot: colored by how recent the activity is. */
+.session-status {
   position: absolute;
   top: 6px;
   right: 6px;
-  width: 26px;
-  height: 26px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #555;
+  box-shadow: 0 0 4px rgba(0,0,0,.4);
+  z-index: 1;
+}
+.session-status-active { background: #4cd964; box-shadow: 0 0 6px rgba(76, 217, 100, .6); }
+.session-status-recent { background: #5ac8fa; box-shadow: 0 0 6px rgba(90, 200, 250, .5); }
+.session-status-stale  { background: #ffcc00; box-shadow: 0 0 6px rgba(255, 204, 0, .5); }
+.session-status-idle   { background: #555; }
+
+.session-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
   border: none;
   border-radius: 50%;
   background: rgba(255, 107, 107, 0.20);
@@ -149,15 +179,179 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   padding: 0;
   opacity: 0;
   pointer-events: none;
-  transition: opacity .12s, transform .08s, background .12s;
+  transform: scale(.7);
+  transition: opacity .16s, transform .18s cubic-bezier(.2,.8,.2,1),
+              width .18s cubic-bezier(.2,.8,.2,1), height .18s cubic-bezier(.2,.8,.2,1),
+              background .15s, box-shadow .18s;
   z-index: 3;
 }
 .session-delete:hover { background: var(--danger); color: #fff; }
-.session-delete:active { transform: scale(.9); }
+.session-delete:active { transform: scale(.92); background: var(--danger); color: #fff; }
 @media (hover: hover) {
-  .session-item:hover .session-delete { opacity: 1; pointer-events: auto; }
+  .session-item:hover .session-delete { opacity: 1; pointer-events: auto; transform: scale(1); }
 }
-#session-list.show-delete .session-delete { opacity: 1; pointer-events: auto; }
+
+/* Long-press reveal: larger, bolder, with a soft red glow and a pop-in. */
+.session-item.show-delete .session-delete {
+  opacity: 1;
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(180deg, #ff6b6b 0%, #e24a4a 100%);
+  color: #fff;
+  font-size: 1.45rem;
+  font-weight: 300;
+  box-shadow: 0 6px 16px rgba(255, 75, 75, .38),
+              0 0 0 1px rgba(255, 255, 255, .10) inset,
+              0 1px 0 rgba(255, 255, 255, .18) inset;
+  animation: delete-pop .26s cubic-bezier(.34, 1.56, .64, 1) both;
+}
+.session-item.show-delete .session-delete:active {
+  transform: scale(.92);
+  box-shadow: 0 2px 8px rgba(255, 75, 75, .5),
+              0 0 0 1px rgba(255, 255, 255, .12) inset;
+}
+
+@keyframes delete-pop {
+  0%   { transform: scale(.4); opacity: 0; }
+  60%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Share (↗) button — same reveal pattern as delete, accent-colored, top-left. */
+.session-share {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(76, 175, 130, 0.22);
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(.7);
+  transition: opacity .16s, transform .18s cubic-bezier(.2,.8,.2,1),
+              width .18s cubic-bezier(.2,.8,.2,1), height .18s cubic-bezier(.2,.8,.2,1),
+              background .15s, box-shadow .18s;
+  z-index: 3;
+}
+.session-share:hover { background: var(--accent); color: #000; }
+.session-share:active { transform: scale(.92); background: var(--accent); color: #000; }
+@media (hover: hover) {
+  .session-item:hover .session-share { opacity: 1; pointer-events: auto; transform: scale(1); }
+}
+.session-item.show-delete .session-share {
+  opacity: 1;
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(180deg, #4caf82 0%, #2f8c63 100%);
+  color: #04210f;
+  font-size: 1.25rem;
+  font-weight: 600;
+  box-shadow: 0 6px 16px rgba(76, 175, 130, .38),
+              0 0 0 1px rgba(255, 255, 255, .10) inset,
+              0 1px 0 rgba(255, 255, 255, .18) inset;
+  animation: delete-pop .22s cubic-bezier(.34, 1.56, .64, 1) both;
+}
+.session-item.show-delete .session-share:active {
+  transform: scale(.92);
+  box-shadow: 0 2px 8px rgba(76, 175, 130, .5),
+              0 0 0 1px rgba(255, 255, 255, .12) inset;
+}
+
+/* Open-in-VS-Code button — same reveal pattern, blue accent, top-center. */
+.session-vscode {
+  position: absolute;
+  top: 8px;
+  left: calc(50% - 14px);
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(80, 140, 200, 0.22);
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: .85rem;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(.7);
+  transition: opacity .16s, transform .18s cubic-bezier(.2,.8,.2,1),
+              width .18s cubic-bezier(.2,.8,.2,1), height .18s cubic-bezier(.2,.8,.2,1),
+              left .18s cubic-bezier(.2,.8,.2,1),
+              background .15s, box-shadow .18s;
+  z-index: 3;
+}
+.session-vscode:hover { background: #4a8ec7; color: #fff; }
+.session-vscode:active { transform: scale(.92); background: #4a8ec7; color: #fff; }
+@media (hover: hover) {
+  .session-item:hover .session-vscode { opacity: 1; pointer-events: auto; transform: scale(1); }
+}
+.session-item.show-delete .session-vscode {
+  opacity: 1;
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  left: calc(50% - 20px);
+  background: linear-gradient(180deg, #5a99cf 0%, #3475ad 100%);
+  color: #fff;
+  font-size: .85rem;
+  font-weight: 700;
+  box-shadow: 0 6px 16px rgba(74, 142, 199, .38),
+              0 0 0 1px rgba(255, 255, 255, .10) inset,
+              0 1px 0 rgba(255, 255, 255, .18) inset;
+  animation: delete-pop .22s cubic-bezier(.34, 1.56, .64, 1) both;
+}
+.session-item.show-delete .session-vscode:active {
+  transform: scale(.94);
+  box-shadow: 0 2px 8px rgba(74, 142, 199, .5),
+              0 0 0 1px rgba(255, 255, 255, .12) inset;
+}
+
+/* Share-link viewer mode: hide chrome, terminal goes full-screen, view-only. */
+body.share-mode #sidebar,
+body.share-mode #btn-expand,
+body.share-mode #btn-spawn,
+body.share-mode #keyboard-bar { display: none !important; }
+body.share-mode #terminal-pane { padding-top: var(--safe-top); }
+
+/* Toast (used by "Link copied" feedback). */
+.toast {
+  position: fixed;
+  bottom: calc(var(--safe-bottom) + 28px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 20, .92);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 22px;
+  font-size: .88rem;
+  z-index: 300;
+  border: 1px solid rgba(255, 255, 255, .08);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .45);
+  animation: toast-in .2s cubic-bezier(.2, .8, .2, 1);
+}
+.toast.hide { opacity: 0; transition: opacity .25s; }
+@keyframes toast-in {
+  from { transform: translate(-50%, 14px); opacity: 0; }
+  to   { transform: translate(-50%, 0);    opacity: 1; }
+}
 
 /* ── terminal pane ────────────────────────────────────────────── */
 
@@ -198,11 +392,11 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
    Forcing width:100% here stretches the canvas and misaligns box-drawing
    glyphs (rounded corners, lines, etc.), so don't override it. */
 
-/* Enable touch-driven scrolling on the xterm viewport so users can swipe
-   through the scrollback on mobile. */
+/* Touch scroll is driven from JS (setupTouchScroll in app.js): we hijack
+   touchmove and call term.scrollLines() so the WebGL canvas and the scroll
+   position stay perfectly in sync. Disable native pan to avoid double-scrolling. */
 #terminal .xterm-viewport {
-  -webkit-overflow-scrolling: touch !important;
-  touch-action: pan-y !important;
+  touch-action: none !important;
   overflow-y: auto !important;
 }
 
@@ -217,6 +411,13 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   gap: 6px;
   align-items: center;
   overflow-x: hidden;
+}
+
+/* On a desktop (hover-capable mouse/trackpad with a fine pointer) the user
+   has a real keyboard — hide the on-screen keyboard bar entirely. Phones
+   and touch tablets keep it. */
+@media (hover: hover) and (pointer: fine) {
+  #keyboard-bar { display: none !important; }
 }
 
 .kbd-toggle {
@@ -508,6 +709,22 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
     display: block;
     line-height: 1.2;
   }
+  .session-status {
+    top: 8px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+  }
+  .session-summary {
+    font-size: .78rem;
+    color: #aaa;
+    line-height: 1.3;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+  }
   .session-desc {
     font-size: .78rem;
     color: var(--muted);
@@ -561,4 +778,98 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 @keyframes sheet-up {
   from { transform: translateY(100%); }
   to   { transform: translateY(0); }
+}
+
+/* ── status bar ───────────────────────────────────────────────── */
+
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: .7rem;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  min-height: 28px;
+}
+
+#status-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4cd964;
+  box-shadow: 0 0 4px rgba(76, 217, 100, .5);
+  flex-shrink: 0;
+}
+
+#status-indicator.warn { background: #ffcc00; box-shadow: 0 0 4px rgba(255, 204, 0, .5); }
+#status-indicator.error { background: var(--danger); box-shadow: 0 0 4px rgba(255, 107, 107, .5); }
+
+#status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── log panel ────────────────────────────────────────────────── */
+
+#log-panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  max-height: 50vh;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  animation: sheet-up .25s cubic-bezier(.2,.8,.2,1);
+}
+
+#log-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+#log-panel-header h2 { font-size: .9rem; font-weight: 600; }
+
+#log-panel-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.3rem;
+  padding: 4px;
+  line-height: 1;
+}
+
+#log-entries {
+  overflow-y: auto;
+  padding: 8px 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: .72rem;
+  line-height: 1.5;
+}
+
+.log-entry {
+  padding: 2px 18px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.log-entry.error { color: var(--danger); }
+.log-entry.warn { color: #ffcc00; }
+
+.log-ts {
+  color: #555;
+  margin-right: 8px;
 }

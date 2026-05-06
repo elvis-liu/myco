@@ -4,9 +4,15 @@ const http = require('http');
 const path = require('path');
 const { listSessions, spawnSession, sessionBelongsToUser, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts } = require('./sessions');
 const { attachWebSocket } = require('./pty');
-const { AUTH_REQUIRED, userFromRequest, userFromToken } = require('./auth');
+const {
+  AUTH_REQUIRED, userFromRequest, userFromToken,
+  createShareToken, shareTokenInfo, revokeShareTokensForSession,
+} = require('./auth');
+const logCapture = require('./logCapture');
+const { startSummaryWatcher } = require('./summarizer');
 
 const app = express();
+logCapture.init();
 app.use(express.json());
 app.use((req, res, next) => {
   const ua = (req.headers['user-agent'] || '').slice(0, 30);
@@ -29,10 +35,34 @@ app.use(express.static(path.join(__dirname, '../../web/public'), { etag: false, 
 app.use('/vendor/xterm', express.static(path.join(__dirname, '../node_modules/@xterm/xterm/lib')));
 app.use('/vendor/xterm-css', express.static(path.join(__dirname, '../node_modules/@xterm/xterm/css')));
 app.use('/vendor/xterm-fit', express.static(path.join(__dirname, '../node_modules/@xterm/addon-fit/lib')));
+app.use('/vendor/xterm-webgl', express.static(path.join(__dirname, '../node_modules/@xterm/addon-webgl/lib')));
+app.use('/vendor/xterm-canvas', express.static(path.join(__dirname, '../node_modules/@xterm/addon-canvas/lib')));
 
 app.get('/auth/check', (req, res) => {
+  // Share-token viewers don't have a user; they get scoped read-only access
+  // to one session. The frontend uses the returned sessionId to attach.
+  const shareTok = (req.query && req.query.s) || '';
+  if (shareTok) {
+    const info = shareTokenInfo(shareTok);
+    if (info) return res.json({ ok: true, share: true, sessionId: info.sessionId });
+    return res.status(401).json({ ok: false });
+  }
   const user = userFromRequest(req);
   res.json({ ok: !!user, required: AUTH_REQUIRED, user: user || null });
+});
+
+app.post('/sessions/:id/share', requireAuth, (req, res) => {
+  const id = req.params.id;
+  if (AUTH_REQUIRED && !sessionBelongsToUser(id, req.user)) {
+    return res.status(403).json({ error: 'forbidden' });
+  }
+  const { token, expiresAt } = createShareToken(id, req.user || 'default');
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
+  res.json({
+    url: `${proto}://${host}/?s=${encodeURIComponent(token)}`,
+    expires_at: new Date(expiresAt).toISOString(),
+  });
 });
 
 app.get('/sessions', requireAuth, async (req, res) => {
@@ -65,42 +95,95 @@ app.get('/workspace', requireAuth, (req, res) => {
     name: workspaceName(req.user),
     entries: listWorkspaceDirs(req.user),
     user: req.user,
+    // If set, frontend builds vscode-remote URLs to open folders over SSH;
+    // otherwise it falls back to plain vscode://file URLs (local-only).
+    vscode_host: process.env.MYCO_VSCODE_HOST || null,
   });
 });
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, clientTracking: false });
+
+const PING_INTERVAL_MS = 30000;
+const PING_TIMEOUT_MS = 10000;
+
+function startPing(ws) {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  const timer = setInterval(() => {
+    if (ws.readyState !== ws.OPEN) { clearInterval(timer); return; }
+    if (!ws.isAlive) { ws.terminate(); clearInterval(timer); return; }
+    ws.isAlive = false;
+    ws.ping();
+  }, PING_INTERVAL_MS);
+  ws.on('close', () => clearInterval(timer));
+}
 
 server.on('upgrade', (req, socket, head) => {
   const url = new URL(req.url, 'http://x');
+
+  // Log streaming WebSocket
+  if (url.pathname === '/logs') {
+    const tok = url.searchParams.get('token') || '';
+    const user = AUTH_REQUIRED ? userFromToken(tok) : 'default';
+    if (!user) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      startPing(ws);
+      const unsub = logCapture.onLog((entry) => {
+        if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'log', ...entry }));
+      });
+      ws.on('close', unsub);
+    });
+    return;
+  }
+
   const match = url.pathname.match(/^\/attach\/(.+)$/);
   if (!match) { socket.destroy(); return; }
-
-  const tok = url.searchParams.get('token') || '';
-  const user = AUTH_REQUIRED ? userFromToken(tok) : 'default';
-  if (!user) {
-    socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-    socket.destroy();
-    return;
-  }
-
   const sessionId = match[1];
-  if (AUTH_REQUIRED && !sessionBelongsToUser(sessionId, user)) {
-    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
-    socket.destroy();
-    return;
+
+  const shareTok = url.searchParams.get('s') || '';
+  let readOnly = false;
+
+  if (shareTok) {
+    const info = shareTokenInfo(shareTok);
+    if (!info || info.sessionId !== sessionId) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    readOnly = true;
+  } else {
+    const tok = url.searchParams.get('token') || '';
+    const user = AUTH_REQUIRED ? userFromToken(tok) : 'default';
+    if (!user) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    if (AUTH_REQUIRED && !sessionBelongsToUser(sessionId, user)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
   }
 
+  console.log(`[ws] upgrade request for session ${sessionId} readOnly=${readOnly}`);
   wss.handleUpgrade(req, socket, head, (ws) => {
+    startPing(ws);
     let session;
     try {
       session = ensureLiveSession(sessionId);
     } catch (err) {
+      console.error(`[ws] ensureLiveSession failed: ${err.message}`);
       try { ws.send(JSON.stringify({ t: 'error', message: err.message })); } catch {}
       ws.close();
       return;
     }
-    attachWebSocket(session, ws);
+    attachWebSocket(session, ws, { readOnly });
   });
 });
 
@@ -110,11 +193,17 @@ app.delete('/sessions/:id', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'forbidden' });
   }
   deleteSession(id);
+  revokeShareTokensForSession(id);
   res.json({ ok: true });
 });
 
+app.get('/logs', requireAuth, (req, res) => {
+  const n = Math.min(parseInt(req.query.count) || 100, 500);
+  res.json(logCapture.getRecent(n));
+});
+
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, async () => {
+server.listen(PORT, '127.0.0.1', async () => {
   console.log(`mycod running at http://localhost:${PORT}`);
   try {
     const n = await importExistingTranscripts();
@@ -122,4 +211,5 @@ server.listen(PORT, async () => {
   } catch (err) {
     console.error('[migrate] import failed:', err.message);
   }
+  startSummaryWatcher();
 });

@@ -58,7 +58,6 @@ const sessions = new Map(); // sessionId -> PtySession
 function buildClaudeArgs({ resumeId } = {}) {
   const args = [];
   if (resumeId) args.push('--resume', resumeId);
-  args.push('--dangerously-skip-permissions');
   return args;
 }
 
@@ -98,7 +97,8 @@ function killSession(sessionId) {
   if (s) { s.kill(); sessions.delete(sessionId); }
 }
 
-function attachWebSocket(session, ws) {
+function attachWebSocket(session, ws, opts = {}) {
+  const readOnly = !!opts.readOnly;
   // Replay ring buffer first so reconnects see prior context.
   const replay = Buffer.concat(session.buffer.map((d) => Buffer.from(d, 'utf8')));
   if (replay.length) {
@@ -117,6 +117,7 @@ function attachWebSocket(session, ws) {
   session.on('exit', onExit);
 
   ws.on('message', (raw) => {
+    if (readOnly) return; // share-link viewers can watch but not type / resize
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
     if (msg.t === 'input' && typeof msg.data === 'string') {
