@@ -225,6 +225,7 @@ server.on('upgrade', (req, socket, head) => {
 
   const shareTok = url.searchParams.get('s') || '';
   let readOnly = false;
+  let user = null;
 
   if (shareTok) {
     const info = shareTokenInfo(shareTok);
@@ -236,7 +237,7 @@ server.on('upgrade', (req, socket, head) => {
     readOnly = true;
   } else {
     const tok = url.searchParams.get('token') || '';
-    const user = AUTH_REQUIRED ? userFromToken(tok) : 'default';
+    user = AUTH_REQUIRED ? userFromToken(tok) : 'default';
     if (!user) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
@@ -249,7 +250,7 @@ server.on('upgrade', (req, socket, head) => {
     }
   }
 
-  console.log(`[ws] upgrade request for session ${sessionId} readOnly=${readOnly}`);
+  console.log(`[ws] upgrade request for session ${sessionId} readOnly=${readOnly} user=${user || '-'}`);
   wss.handleUpgrade(req, socket, head, async (ws) => {
     startPing(ws);
     let session;
@@ -261,7 +262,7 @@ server.on('upgrade', (req, socket, head) => {
       ws.close();
       return;
     }
-    attachWebSocket(session, ws, { readOnly });
+    attachWebSocket(session, ws, { readOnly, user });
   });
 });
 

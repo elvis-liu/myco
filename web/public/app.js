@@ -10,6 +10,11 @@ const state = {
   token: localStorage.getItem('myco_token') || '',
   logs: [],
   logWs: null,
+  // Discussion state, scoped per active session. Cleared on switch.
+  chatMessages: [],
+  chatUser: null,
+  chatPaneVisible: window.innerWidth > 900,
+  shareMode: false,
 };
 
 // ── auth ──────────────────────────────────────────────────────────────────────
@@ -115,6 +120,10 @@ function openShareViewer(id) {
         state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
       } else if (msg.t === 'pong') {
         state.lastPongAt = Date.now();
+      } else if (msg.t === 'chat-history') {
+        applyChatHistory(msg.messages);
+      } else if (msg.t === 'chat') {
+        appendChatMessage(msg.message);
       } else if (msg.t === 'exit') {
         state.term.writeln('\r\n[session ended]');
       }
@@ -178,6 +187,11 @@ async function init() {
   });
   document.getElementById('status-bar').addEventListener('click', toggleLogPanel);
   document.getElementById('log-panel-close').addEventListener('click', toggleLogPanel);
+  bindChatUi();
+  // Desktop default: chat pane visible alongside the terminal. Mobile: hidden,
+  // user opens it explicitly via the 💬 button (mutually exclusive with the
+  // session sidebar).
+  setChatPane(window.innerWidth > 900);
   connectLogWs();
 }
 
@@ -442,6 +456,10 @@ function openSession(id) {
   state.activeId = id;
   try { localStorage.setItem('myco_active_id', id); } catch {}
   renderSessionList();
+  // Wipe chat for the previous session — server will replay this one's
+  // history via {t:"chat-history"} once the WS opens.
+  clearChat();
+  updateChatButton();
 
   // On mobile, collapse the (full-width) sidebar so the terminal is visible
   if (window.innerWidth <= 900) setSidebar(true);
@@ -513,6 +531,10 @@ function openSession(id) {
         state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
       } else if (msg.t === 'pong') {
         state.lastPongAt = Date.now();
+      } else if (msg.t === 'chat-history') {
+        applyChatHistory(msg.messages);
+      } else if (msg.t === 'chat') {
+        appendChatMessage(msg.message);
       } else if (msg.t === 'exit') {
         state.term.writeln('\r\n[session ended]');
       }
@@ -541,8 +563,32 @@ function openSession(id) {
 function setSidebar(collapsed) {
   document.getElementById('sidebar').hidden = collapsed;
   document.getElementById('btn-expand').hidden = !collapsed;
+  // Mobile: sidebar and chatpane are mutually exclusive — only one full-screen
+  // overlay at a time. Showing sidebar dismisses chat.
+  if (!collapsed && window.innerWidth <= 900) setChatPane(false);
   // give xterm a chance to refit
   if (state.fitAddon) requestAnimationFrame(() => state.fitAddon.fit());
+}
+
+function setChatPane(visible) {
+  state.chatPaneVisible = visible;
+  document.getElementById('chatpane').hidden = !visible;
+  // Mobile: showing chat dismisses the sidebar overlay (mutual exclusion).
+  if (visible && window.innerWidth <= 900) {
+    document.getElementById('sidebar').hidden = true;
+    document.getElementById('btn-expand').hidden = false;
+  }
+  updateChatButton();
+  if (state.fitAddon) requestAnimationFrame(() => state.fitAddon.fit());
+}
+
+function updateChatButton() {
+  // Btn-chat is visible whenever there's an active session AND the chat
+  // pane isn't currently expanded (otherwise the in-pane close button is
+  // the way out). Suppressed entirely in share-mode by CSS.
+  const btn = document.getElementById('btn-chat');
+  if (!btn) return;
+  btn.hidden = !state.activeId || state.chatPaneVisible;
 }
 
 // Replace native viewport scroll with a JS-driven scroll that calls
@@ -730,6 +776,77 @@ function timeAgo(iso) {
   if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
   if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
   return `${Math.round(sec / 86400)}d ago`;
+}
+
+// ── chat (collaborator discussion + claude assistant) ────────────────────────
+
+function applyChatHistory(messages) {
+  state.chatMessages = Array.isArray(messages) ? messages.slice() : [];
+  renderChatPane();
+}
+
+function appendChatMessage(message) {
+  if (!message || typeof message !== 'object') return;
+  state.chatMessages.push(message);
+  renderChatPane(/*scrollToBottom*/ true);
+}
+
+function clearChat() {
+  state.chatMessages = [];
+  renderChatPane();
+}
+
+function renderChatPane(scrollToBottom = false) {
+  const list = document.getElementById('chat-messages');
+  const empty = document.getElementById('chat-empty');
+  if (!list) return;
+  if (!state.chatMessages.length) {
+    list.innerHTML = '';
+    if (empty) empty.hidden = false;
+    return;
+  }
+  if (empty) empty.hidden = true;
+  list.innerHTML = state.chatMessages.map(renderChatMessage).join('');
+  if (scrollToBottom) list.scrollTop = list.scrollHeight;
+}
+
+function renderChatMessage(m) {
+  const fromClaude = m.user === 'claude';
+  const ts = m.ts ? formatChatTs(m.ts) : '';
+  return `<div class="chat-msg${fromClaude ? ' from-claude' : ''}">
+    <div class="chat-meta"><span class="chat-user">${escHtml(m.user || '?')}</span><span class="chat-ts">${escHtml(ts)}</span></div>
+    <div class="chat-text">${escHtml(m.text || '')}</div>
+  </div>`;
+}
+
+function formatChatTs(iso) {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
+
+function sendChatMessage(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return false;
+  const ws = state.ws;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify({ t: 'chat', text: trimmed }));
+  return true;
+}
+
+function bindChatUi() {
+  const form = document.getElementById('chat-form');
+  const input = document.getElementById('chat-input');
+  if (!form || !input) return;
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (sendChatMessage(input.value)) input.value = '';
+  });
+
+  document.getElementById('btn-chat')?.addEventListener('click', () => setChatPane(true));
+  document.getElementById('chatpane-close')?.addEventListener('click', () => setChatPane(false));
 }
 
 // ── log monitoring ──────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.json" />
   <title>myco</title>
   <link rel="stylesheet" href="/vendor/xterm-css/xterm.css" />
-  <link rel="stylesheet" href="styles.css?v=25" />
+  <link rel="stylesheet" href="styles.css?v=27" />
 </head>
 <body>
   <div id="app">
@@ -32,12 +32,26 @@
     <button id="btn-expand" title="Show sessions" hidden>☰</button>
 
     <main id="terminal-pane">
+      <button id="btn-chat" title="Toggle discussion" hidden>💬</button>
       <div id="no-session">Select a session</div>
       <div id="terminal-wrap" hidden>
         <div id="terminal"></div>
         <div id="keyboard-bar"></div>
       </div>
     </main>
+
+    <aside id="chatpane" hidden>
+      <header>
+        <h2>Discussion</h2>
+        <button id="chatpane-close" title="Close">×</button>
+      </header>
+      <div id="chat-empty" class="chat-empty">No discussion yet. Claude will reply to questions automatically — end your message with <code>?</code> or mention <code>@claude</code>.</div>
+      <div id="chat-messages"></div>
+      <form id="chat-form" autocomplete="off">
+        <input id="chat-input" type="text" placeholder="Message…  (questions get a Claude reply)" autocomplete="off" />
+        <button type="submit" id="chat-send">Send</button>
+      </form>
+    </aside>
   </div>
 
   <!-- login modal -->
@@ -82,6 +96,6 @@
   <script src="/vendor/xterm-webgl/addon-webgl.js"></script>
   <script src="/vendor/xterm-canvas/addon-canvas.js"></script>
   <script src="keyboard.js?v=7"></script>
-  <script src="app.js?v=32"></script>
+  <script src="app.js?v=34"></script>
 </body>
 </html>

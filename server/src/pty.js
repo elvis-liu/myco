@@ -1,7 +1,14 @@
 const pty = require('@homebridge/node-pty-prebuilt-multiarch');
 const { EventEmitter } = require('events');
+// Late-bound: sessions.js requires this module, so destructuring at load
+// time would capture undefined values from the partial export.
+const sessionsMod = require('./sessions');
+const { askAssistant, shouldAskAssistant, stripAnsi, tailLines, ASSISTANT_USER } = require('./btw');
 
 const MAX_BUFFER = 1024 * 1024;
+const CHAT_TEXT_LIMIT = 4000;
+const ASSISTANT_SCROLLBACK_LINES = 40;
+const ASSISTANT_CHAT_CONTEXT = 20;
 
 class PtySession extends EventEmitter {
   constructor(sessionId, ptyProcess) {
@@ -99,10 +106,18 @@ function killSession(sessionId) {
 
 function attachWebSocket(session, ws, opts = {}) {
   const readOnly = !!opts.readOnly;
+  const user = opts.user || null;
+  const sessionId = session.sessionId;
   // Replay ring buffer first so reconnects see prior context.
   const replay = Buffer.concat(session.buffer.map((d) => Buffer.from(d, 'utf8')));
   if (replay.length) {
     ws.send(JSON.stringify({ t: 'output', data: replay.toString('base64') }));
+  }
+
+  // Replay chat history so a returning client sees the discussion.
+  const history = sessionsMod.getChatHistory(sessionId);
+  if (history.length) {
+    ws.send(JSON.stringify({ t: 'chat-history', messages: history }));
   }
 
   const onData = (data) => {
@@ -113,8 +128,13 @@ function attachWebSocket(session, ws, opts = {}) {
     if (ws.readyState !== ws.OPEN) return;
     ws.send(JSON.stringify({ t: 'exit', code }));
   };
+  const onChat = (message) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'chat', message }));
+  };
   session.on('data', onData);
   session.on('exit', onExit);
+  session.on('chat', onChat);
 
   ws.on('message', (raw) => {
     let msg;
@@ -124,6 +144,14 @@ function attachWebSocket(session, ws, opts = {}) {
     // for read-only viewers too; pong reveals nothing they couldn't infer.
     if (msg.t === 'ping') {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'pong' }));
+      return;
+    }
+    if (msg.t === 'chat' && typeof msg.text === 'string') {
+      // Read-only / unauthenticated viewers can read chat but not post.
+      if (readOnly || !user) return;
+      const text = msg.text.trim();
+      if (!text) return;
+      handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT));
       return;
     }
     if (readOnly) return; // share-link viewers can watch but not type / resize
@@ -137,7 +165,47 @@ function attachWebSocket(session, ws, opts = {}) {
   ws.on('close', () => {
     session.off('data', onData);
     session.off('exit', onExit);
+    session.off('chat', onChat);
   });
+}
+
+function handleChatMessage(sessionId, session, user, text) {
+  const message = {
+    user,
+    text,
+    ts: new Date().toISOString(),
+  };
+  sessionsMod.appendChatMessage(sessionId, message);
+  session.emit('chat', message);
+
+  // Don't reply to claude's own messages — would loop forever if claude's
+  // response happened to end in '?'.
+  if (user === ASSISTANT_USER) return;
+
+  if (shouldAskAssistant(text)) {
+    runAssistant(sessionId, session, message).catch((err) => {
+      console.error(`[chat-assistant] ${err.message}`);
+    });
+  }
+}
+
+async function runAssistant(sessionId, session, lastMessage) {
+  // Snapshot context BEFORE invoking — chatHistory excludes lastMessage so
+  // it's not duplicated (we pass it separately as the prompt target).
+  const all = sessionsMod.getChatHistory(sessionId);
+  const chatHistory = all.slice(-ASSISTANT_CHAT_CONTEXT - 1, -1); // exclude latest
+  const buffer = session.buffer.join('');
+  const scrollback = tailLines(stripAnsi(buffer), ASSISTANT_SCROLLBACK_LINES);
+  const cwd = sessionsMod.loadStore().sessions[sessionId]?.absCwd || null;
+
+  const answer = await askAssistant({ cwd, chatHistory, scrollback, lastMessage });
+  const reply = {
+    user: ASSISTANT_USER,
+    text: answer || '(no response)',
+    ts: new Date().toISOString(),
+  };
+  sessionsMod.appendChatMessage(sessionId, reply);
+  session.emit('chat', reply);
 }
 
 module.exports = {

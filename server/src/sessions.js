@@ -390,7 +390,34 @@ async function importExistingTranscripts() {
   return imported;
 }
 
-module.exports = {
+// ─── chat ─────────────────────────────────────────────────────────────────────
+
+const MAX_CHAT_MESSAGES = 200;
+
+function getChatHistory(sessionId) {
+  const rec = loadStore().sessions[sessionId];
+  if (!rec || !Array.isArray(rec.chat)) return [];
+  return rec.chat;
+}
+
+function appendChatMessage(sessionId, msg) {
+  const store = loadStore();
+  const rec = store.sessions[sessionId];
+  if (!rec) return null;
+  if (!Array.isArray(rec.chat)) rec.chat = [];
+  rec.chat.push(msg);
+  if (rec.chat.length > MAX_CHAT_MESSAGES) {
+    rec.chat = rec.chat.slice(-MAX_CHAT_MESSAGES);
+  }
+  saveStore();
+  return msg;
+}
+
+// Use Object.assign so the existing module.exports object is mutated rather
+// than replaced. pty.js captures this exports object during the circular
+// require, so a replacement would leave its reference pointing at the empty
+// initial object.
+Object.assign(module.exports, {
   WORKSPACE,
   getWorkspace,
   workspaceName,
@@ -402,9 +429,11 @@ module.exports = {
   deleteSession,
   ownerOf,
   importExistingTranscripts,
+  getChatHistory,
+  appendChatMessage,
   // exposed for summarizer
   loadStore,
   saveStore,
   projectsDir,
   encodeCwdForClaude,
-};
+});
