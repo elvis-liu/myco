@@ -1090,6 +1090,37 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   color: inherit;
 }
 
+.conv-text code {
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.95em;
+}
+
+.conv-text strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.conv-text em {
+  font-style: italic;
+}
+
+.conv-text a {
+  color: #6cb6ff;
+  text-decoration: none;
+}
+
+.conv-text a:hover {
+  text-decoration: underline;
+}
+
+.md-li-num {
+  color: #e0a050;
+  font-weight: 600;
+}
+
 .conv-tool-call {
   margin: 2px 0;
 }

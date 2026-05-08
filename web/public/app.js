@@ -189,6 +189,22 @@ function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Minimal markdown → HTML for conversation view (bold, italic, code, lists, links)
+function renderMd(text) {
+  let html = escHtml(text);
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // Links [text](url)
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Numbered list items
+  html = html.replace(/^(\d+)\.\s/gm, '<span class="md-li-num">$1.</span> ');
+  return html;
+}
+
 function scrollConvToBottom() {
   const wrap = document.getElementById('conversation-wrap');
   requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
@@ -256,7 +272,7 @@ function renderConvMessage(m) {
     if (m.text) {
       const textEl = document.createElement('div');
       textEl.className = 'conv-text';
-      textEl.textContent = m.text;
+      textEl.innerHTML = renderMd(m.text);
       div.appendChild(textEl);
     }
     return div;
