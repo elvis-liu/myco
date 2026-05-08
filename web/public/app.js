@@ -62,6 +62,7 @@ function hideLogin() {
 async function tryToken(token) {
   const res = await fetch('/auth/check', { headers: { Authorization: `Bearer ${token}` } });
   const body = await res.json().catch(() => ({}));
+  if (body.ok && body.user) state.chatUser = body.user;
   return !!body.ok;
 }
 
@@ -1050,8 +1051,12 @@ function renderChatPane(scrollToBottom = false) {
 
 function renderChatMessage(m) {
   const fromClaude = m.user === 'claude';
+  const fromSelf = state.chatUser && m.user === state.chatUser;
   const ts = m.ts ? formatChatTs(m.ts) : '';
-  return `<div class="chat-msg${fromClaude ? ' from-claude' : ''}">
+  let cls = 'chat-msg';
+  if (fromClaude) cls += ' from-claude';
+  if (fromSelf) cls += ' from-self';
+  return `<div class="${cls}">
     <div class="chat-meta"><span class="chat-user">${escHtml(m.user || '?')}</span><span class="chat-ts">${escHtml(ts)}</span></div>
     <div class="chat-text">${escHtml(m.text || '')}</div>
   </div>`;

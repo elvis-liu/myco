@@ -967,6 +967,21 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   padding: 6px 10px;
   border-radius: 4px;
 }
+.chat-msg.from-self {
+  text-align: right;
+}
+.chat-msg.from-self .chat-meta {
+  justify-content: flex-end;
+}
+.chat-msg.from-self .chat-text {
+  background: rgba(80, 140, 200, .08);
+  border-right: 2px solid #5a99cf;
+  padding: 6px 10px;
+  border-radius: 4px;
+  text-align: left;
+  display: inline-block;
+  max-width: 85%;
+}
 
 #chat-form {
   display: flex;
