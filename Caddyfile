@@ -1,0 +1,3 @@
+myco.labxnow.ai {
+	reverse_proxy localhost:3000
+}

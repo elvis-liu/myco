@@ -4,11 +4,12 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { listSessions, spawnSession, sessionBelongsToUser, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts, loadStore } = require('./sessions');
+const { listSessions, spawnSession, sessionBelongsToUser, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts, loadStore, getSessionRecord, readDescriptionForCwd: readDescriptionForCwdPublic } = require('./sessions');
 const { attachWebSocket } = require('./pty');
 const {
   AUTH_REQUIRED, userFromRequest, userFromToken,
   createShareToken, shareTokenInfo, revokeShareTokensForSession,
+  reloadFromEnv,
 } = require('./auth');
 const logCapture = require('./logCapture');
 const { startSummaryWatcher } = require('./summarizer');
@@ -41,16 +42,29 @@ app.use('/vendor/xterm-webgl', express.static(path.join(__dirname, '../node_modu
 app.use('/vendor/xterm-canvas', express.static(path.join(__dirname, '../node_modules/@xterm/addon-canvas/lib')));
 
 app.get('/auth/check', (req, res) => {
-  // Share-token viewers don't have a user; they get scoped read-only access
+  // Share-token viewers don't have a user; they get scoped access
   // to one session. The frontend uses the returned sessionId to attach.
   const shareTok = (req.query && req.query.s) || '';
   if (shareTok) {
     const info = shareTokenInfo(shareTok);
-    if (info) return res.json({ ok: true, share: true, sessionId: info.sessionId });
+    if (info) {
+      const rec = getSessionRecord(info.sessionId);
+      return res.json({
+        ok: true, share: true,
+        sessionId: info.sessionId,
+        cwd: rec?.cwd || null,
+        abs_cwd: rec?.absCwd || null,
+      });
+    }
     return res.status(401).json({ ok: false });
   }
   const user = userFromRequest(req);
   res.json({ ok: !!user, required: AUTH_REQUIRED, user: user || null });
+});
+
+app.post('/auth/reload', requireAuth, (req, res) => {
+  const result = reloadFromEnv();
+  res.json({ ok: true, ...result });
 });
 
 // Drop a .vscode/tasks.json into the session's cwd that auto-runs
@@ -136,7 +150,31 @@ app.post('/sessions/:id/share', requireAuth, (req, res) => {
 
 app.get('/sessions', requireAuth, async (req, res) => {
   try {
-    res.json(await listSessions(AUTH_REQUIRED ? req.user : null));
+    const own = await listSessions(AUTH_REQUIRED ? req.user : null);
+    // Also include sessions the user has accessed via share tokens.
+    const shareToks = req.query.share || [];
+    const shares = Array.isArray(shareToks) ? shareToks : [shareToks];
+    const sharedSessions = [];
+    for (const tok of shares) {
+      const info = shareTokenInfo(tok);
+      if (!info) continue;
+      const rec = getSessionRecord(info.sessionId);
+      if (!rec) continue;
+      const meta = await readDescriptionForCwdPublic(rec);
+      sharedSessions.push({
+        id: rec.id,
+        cwd: rec.cwd,
+        abs_cwd: rec.absCwd,
+        description: meta?.description || null,
+        summary: meta?.summary || null,
+        status: meta?.status || 'idle',
+        last_activity: meta?.lastActivity || null,
+        created_at: rec.createdAt,
+        shared: true,
+        shareToken: tok,
+      });
+    }
+    res.json([...own, ...sharedSessions]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -234,7 +272,16 @@ server.on('upgrade', (req, socket, head) => {
       socket.destroy();
       return;
     }
-    readOnly = true;
+    // Prefer the viewer's own auth identity if they provided a token.
+    const viewerTok = url.searchParams.get('token') || '';
+    const viewerUser = viewerTok ? userFromToken(viewerTok) : null;
+    if (viewerUser) {
+      user = viewerUser;
+    } else {
+      // Anonymous viewer: use ?name= if provided, else a generic label.
+      const name = (url.searchParams.get('name') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
+      user = name || 'share';
+    }
   } else {
     const tok = url.searchParams.get('token') || '';
     user = AUTH_REQUIRED ? userFromToken(tok) : 'default';

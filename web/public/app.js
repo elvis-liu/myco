@@ -19,6 +19,23 @@ const state = {
 
 // ── auth ──────────────────────────────────────────────────────────────────────
 
+// ── share token persistence ─────────────────────────────────────────────────
+
+function loadShareTokens() {
+  try { return JSON.parse(localStorage.getItem('myco_shares') || '[]'); } catch { return []; }
+}
+
+function saveShareToken(shareToken, sessionId, cwd) {
+  const shares = loadShareTokens().filter((s) => s.shareToken !== shareToken);
+  shares.unshift({ shareToken, sessionId, cwd, addedAt: new Date().toISOString() });
+  localStorage.setItem('myco_shares', JSON.stringify(shares.slice(0, 20)));
+}
+
+function removeShareToken(shareToken) {
+  const shares = loadShareTokens().filter((s) => s.shareToken !== shareToken);
+  localStorage.setItem('myco_shares', JSON.stringify(shares));
+}
+
 function authHeaders() {
   return state.token ? { Authorization: `Bearer ${state.token}` } : {};
 }
@@ -62,6 +79,14 @@ async function enterShareMode(shareTok) {
   state.shareMode = true;
   state.shareToken = shareTok;
   document.body.classList.add('share-mode');
+  // If the user isn't authenticated, prompt for a display name for chat.
+  if (!state.token) {
+    const ok = await tryToken('');
+    if (!ok) {
+      const name = window.prompt('Enter your name for this session:', '');
+      if (name) state.shareName = name.trim().slice(0, 24);
+    }
+  }
   let info;
   try {
     const res = await fetch(`/auth/check?s=${encodeURIComponent(shareTok)}`);
@@ -73,6 +98,8 @@ async function enterShareMode(shareTok) {
   if (!info || !info.ok || !info.sessionId) {
     return showShareError('This share link is invalid or expired.');
   }
+  // Persist the share token so this session appears on the home screen.
+  saveShareToken(shareTok, info.sessionId, info.cwd);
   openShareViewer(info.sessionId);
 }
 
@@ -88,7 +115,7 @@ function openShareViewer(id) {
   document.getElementById('no-session').hidden = true;
   document.getElementById('terminal-wrap').hidden = false;
 
-  state.term = new Terminal({ scrollback: 5000, fontSize: 13, disableStdin: true });
+  state.term = new Terminal({ scrollback: 5000, fontSize: 13 });
   state.fitAddon = new FitAddon.FitAddon();
   state.term.loadAddon(state.fitAddon);
   const el = document.getElementById('terminal');
@@ -104,16 +131,39 @@ function openShareViewer(id) {
   }
   setupTouchScroll(state.term);
 
-  new ResizeObserver(() => state.fitAddon && state.fitAddon.fit()).observe(el);
+  // Suppress iOS soft keyboard (same as openSession).
+  state.xtermTextarea = el.querySelector('.xterm-helper-textarea');
+  if (state.xtermTextarea) state.xtermTextarea.setAttribute('inputmode', 'none');
+
+  new ResizeObserver(() => {
+    state.fitAddon.fit();
+    if (state.ws?.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify({ t: 'resize', cols: state.term.cols, rows: state.term.rows }));
+    }
+  }).observe(el);
+
+  // Set up keyboard
+  if (!state.keyboard) {
+    state.keyboard = new Keyboard(document.getElementById('keyboard-bar'), sendInput);
+  }
+
+  // Set up chat UI for share mode
+  bindChatUi();
+  setChatPane(window.innerWidth > 900);
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   let reconnectDelay = 1000;
   function connectShare() {
+    const tokParam = state.token ? `&token=${encodeURIComponent(state.token)}` : '';
+    const nameParam = state.shareName ? `&name=${encodeURIComponent(state.shareName)}` : '';
     const ws = new WebSocket(
-      `${proto}://${location.host}/attach/${encodeURIComponent(id)}?s=${encodeURIComponent(state.shareToken)}`
+      `${proto}://${location.host}/attach/${encodeURIComponent(id)}?s=${encodeURIComponent(state.shareToken)}${tokParam}${nameParam}`
     );
     state.ws = ws;
-    ws.addEventListener('open', () => { reconnectDelay = 1000; });
+    ws.addEventListener('open', () => {
+      reconnectDelay = 1000;
+      ws.send(JSON.stringify({ t: 'resize', cols: state.term.cols, rows: state.term.rows }));
+    });
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.t === 'output') {
@@ -135,6 +185,11 @@ function openShareViewer(id) {
     });
   }
   connectShare();
+
+  // Forward xterm keyboard input
+  state.term.onData((data) => {
+    sendInput(data);
+  });
 }
 
 async function doLogin() {
@@ -223,7 +278,11 @@ function renderSpawnSuggestions() {
 
 async function refreshSessions() {
   try {
-    const res = await authedFetch('/sessions');
+    const shares = loadShareTokens();
+    const params = new URLSearchParams();
+    for (const s of shares) params.append('share', s.shareToken);
+    const qs = params.toString() ? `&${params.toString()}` : '';
+    const res = await authedFetch(`/sessions?${qs}`);
     state.sessions = await res.json();
     renderSessionList();
   } catch {}
@@ -252,6 +311,7 @@ function renderSessionList() {
   for (const s of state.sessions) {
     const li = document.createElement('li');
     li.className = 'session-item' + (s.id === state.activeId ? ' active' : '');
+    if (s.shared) li.classList.add('shared');
     if (s.status) li.dataset.status = s.status;
     li.dataset.id = s.id;
     const dirName = (s.cwd || '').split('/').filter(Boolean).pop() || s.cwd || '~';
@@ -260,36 +320,50 @@ function renderSessionList() {
       ? `<span class="session-summary">${escHtml(s.summary)}</span>`
       : (s.description ? `<span class="session-desc">${escHtml(s.description)}</span>` : '');
     const statusDot = s.status ? `<span class="session-status session-status-${s.status}" aria-label="Status: ${s.status}"></span>` : '';
+    const sharedBadge = s.shared ? '<span class="shared-badge">shared</span>' : '';
     li.innerHTML = `
       ${statusDot}
-      <span class="session-title">${escHtml(dirName)}</span>
+      <span class="session-title">${escHtml(dirName)}${sharedBadge}</span>
       ${summary}
       <span class="session-meta">${escHtml(idShort)} · ${timeAgo(s.last_activity || s.created_at)}</span>
-      <button class="session-share" aria-label="Share session">↗</button>
-      <button class="session-vscode" aria-label="Open in VS Code">{·}</button>
-      <button class="session-delete" aria-label="Delete session">×</button>
+      ${!s.shared ? '<button class="session-share" aria-label="Share session">↗</button>' : ''}
+      ${!s.shared ? '<button class="session-vscode" aria-label="Open in VS Code">{·}</button>' : ''}
+      <button class="session-delete" aria-label="${s.shared ? 'Remove shared session' : 'Delete session'}">×</button>
     `;
     li.addEventListener('click', () => {
-      // If the long-press menu is showing on this card, the tap just dismisses
-      // it (handled by the document click listener). A second tap opens.
       if (li.classList.contains('show-delete')) return;
-      openSession(s.id);
+      if (s.shared && s.shareToken) {
+        // Re-enter share mode for this session
+        state.shareMode = true;
+        state.shareToken = s.shareToken;
+        document.body.classList.add('share-mode');
+        openShareViewer(s.id);
+      } else {
+        openSession(s.id);
+      }
     });
     const delBtn = li.querySelector('.session-delete');
     delBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      deleteSessionWithConfirm(s);
+      if (s.shared) {
+        removeShareToken(s.shareToken);
+        refreshSessions();
+      } else {
+        deleteSessionWithConfirm(s);
+      }
     });
-    const shareBtn = li.querySelector('.session-share');
-    shareBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      shareSession(s);
-    });
-    const codeBtn = li.querySelector('.session-vscode');
-    codeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openInVscode(s);
-    });
+    if (!s.shared) {
+      const shareBtn = li.querySelector('.session-share');
+      shareBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        shareSession(s);
+      });
+      const codeBtn = li.querySelector('.session-vscode');
+      codeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openInVscode(s);
+      });
+    }
     attachLongPressDeleteToggle(li);
     ul.appendChild(li);
   }
@@ -583,12 +657,10 @@ function setChatPane(visible) {
 }
 
 function updateChatButton() {
-  // Btn-chat is visible whenever there's an active session AND the chat
-  // pane isn't currently expanded (otherwise the in-pane close button is
-  // the way out). Suppressed entirely in share-mode by CSS.
   const btn = document.getElementById('btn-chat');
   if (!btn) return;
-  btn.hidden = !state.activeId || state.chatPaneVisible;
+  const terminalVisible = !document.getElementById('terminal-wrap').hidden;
+  btn.hidden = !state.activeId || state.chatPaneVisible || !terminalVisible;
 }
 
 // Replace native viewport scroll with a JS-driven scroll that calls

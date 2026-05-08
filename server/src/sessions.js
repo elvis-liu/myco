@@ -10,8 +10,7 @@ const ptyMod = require('./pty');
 
 const WORKSPACE = (() => {
   const raw = (process.env.MYCO_WORKSPACE || os.homedir()).replace(/^~(?=$|\/)/, os.homedir());
-  const resolved = path.resolve(raw);
-  try { return fs.realpathSync(resolved); } catch { return resolved; }
+  return path.resolve(raw);
 })();
 
 const STATE_DIR = process.env.MYCO_STATE_DIR || path.join(os.homedir(), '.myco');
@@ -431,9 +430,11 @@ Object.assign(module.exports, {
   importExistingTranscripts,
   getChatHistory,
   appendChatMessage,
-  // exposed for summarizer
+  // exposed for summarizer + share-info
   loadStore,
   saveStore,
   projectsDir,
   encodeCwdForClaude,
+  getSessionRecord,
+  readDescriptionForCwd,
 });

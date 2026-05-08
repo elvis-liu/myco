@@ -95,6 +95,8 @@ function askAssistant({ cwd, chatHistory, scrollback, lastMessage }) {
       clearTimeout(timer);
       const text = stdout.trim();
       if (text) { resolve(text); return; }
+      // Code 143 = SIGTERM (timeout), 137 = SIGKILL. Don't surface noise.
+      if (code === 143 || code === 137) { resolve('(claude timed out)'); return; }
       const err = stderr.trim().slice(0, 300);
       resolve(`(claude exited ${code}${err ? `: ${err}` : ''})`);
     });

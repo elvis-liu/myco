@@ -137,6 +137,25 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   margin-top: 2px;
 }
 
+/* Shared session badge & card styling */
+.shared-badge {
+  display: inline-block;
+  background: rgba(80, 140, 200, .25);
+  color: #8cc5ff;
+  font-size: .6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.session-item.shared {
+  border-left: 3px solid rgba(80, 140, 200, .5);
+}
+
 .empty { padding: 16px; color: var(--muted); font-size: .85rem; }
 
 /* Delete (×) button on a card. Hidden by default. Revealed on hover for
@@ -322,11 +341,10 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
               0 0 0 1px rgba(255, 255, 255, .12) inset;
 }
 
-/* Share-link viewer mode: hide chrome, terminal goes full-screen, view-only. */
+/* Share-link viewer mode: hide sidebar chrome but keep terminal + chat. */
 body.share-mode #sidebar,
 body.share-mode #btn-expand,
-body.share-mode #btn-spawn,
-body.share-mode #keyboard-bar { display: none !important; }
+body.share-mode #btn-spawn { display: none !important; }
 body.share-mode #terminal-pane { padding-top: var(--safe-top); }
 
 /* Toast (used by "Link copied" feedback). */
@@ -665,6 +683,11 @@ body.share-mode #terminal-pane { padding-top: var(--safe-top); }
     border-color: var(--accent);
     background: rgba(76,175,130,.10);
     border-left: 1px solid var(--accent);
+  }
+  .session-item.shared {
+    border-color: rgba(80, 140, 200, .4);
+    border-left: 1px solid rgba(80, 140, 200, .5);
+    background: rgba(80, 140, 200, .05);
   }
   .session-item.active::after {
     content: '';
@@ -1009,7 +1032,5 @@ body.share-mode #terminal-pane { padding-top: var(--safe-top); }
   }
 }
 
-/* Share-mode (read-only viewer): chat pane is suppressed entirely along with
-   the rest of the chrome — no participation, no peeking at chat. */
-body.share-mode #chatpane,
-body.share-mode #btn-chat { display: none !important; }
+/* Share-mode: show chat pane and chat button so collaborators can discuss. */
+body.share-mode #btn-chat { display: inline-flex !important; }
