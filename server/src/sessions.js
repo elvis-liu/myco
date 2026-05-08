@@ -100,17 +100,23 @@ function projectsDir() { return path.join(os.homedir(), '.claude', 'projects'); 
 function encodeCwdForClaude(cwd) { return cwd.replace(/\//g, '-'); }
 
 async function findNewestJsonl(dir, sinceMs = 0) {
-  let entries;
-  try { entries = await fsp.readdir(dir); } catch { return null; }
   let best = null;
-  for (const f of entries) {
-    if (!f.endsWith('.jsonl')) continue;
-    const full = path.join(dir, f);
-    let st;
-    try { st = await fsp.stat(full); } catch { continue; }
-    if (st.mtimeMs < sinceMs) continue;
-    if (!best || st.mtimeMs > best.mtimeMs) best = { file: f, full, mtimeMs: st.mtimeMs };
+  async function walk(d) {
+    let entries;
+    try { entries = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) {
+        await walk(full);
+      } else if (e.name.endsWith('.jsonl')) {
+        let st;
+        try { st = await fsp.stat(full); } catch { continue; }
+        if (st.mtimeMs < sinceMs) continue;
+        if (!best || st.mtimeMs > best.mtimeMs) best = { file: e.name, full, mtimeMs: st.mtimeMs };
+      }
+    }
   }
+  await walk(dir);
   return best;
 }
 
@@ -229,19 +235,29 @@ async function summarizeRecentContext(jsonlPath) {
 function captureClaudeSessionId(sessionId, absCwd, spawnedAtMs) {
   const dir = path.join(projectsDir(), encodeCwdForClaude(absCwd));
   let attempts = 0;
+  let prevBest = null; // track the newest file BEFORE spawn
+  // Snapshot what exists before spawn
+  findNewestJsonl(dir).then((r) => { prevBest = r; });
+
   const tick = async () => {
     attempts += 1;
-    const newest = await findNewestJsonl(dir, spawnedAtMs - 500);
-    if (newest) {
-      const id = newest.file.replace(/\.jsonl$/, '');
+    const newest = await findNewestJsonl(dir);
+    if (newest && newest.mtimeMs >= spawnedAtMs - 2000) {
+      let id = newest.file.replace(/\.jsonl$/, '');
+      if (id === 'transcript') {
+        const m = newest.full.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i);
+        id = m ? m[1] : id;
+      }
+      if (id === 'transcript') { if (attempts < 120) setTimeout(tick, 500); return; }
       const rec = loadStore().sessions[sessionId];
       if (rec && !rec.claudeSessionId) {
         rec.claudeSessionId = id;
         saveStore();
+        console.log(`[capture] claudeSessionId=${id} for ${sessionId} (attempt ${attempts})`);
       }
       return;
     }
-    if (attempts < 60) setTimeout(tick, 500);
+    if (attempts < 120) setTimeout(tick, 500);
   };
   setTimeout(tick, 500);
 }
@@ -312,16 +328,29 @@ async function ensureLiveSession(sessionId) {
   const rec = getSessionRecord(sessionId);
   if (!rec) throw new Error(`unknown session: ${sessionId}`);
 
-  // Resolve to the *newest* transcript in this cwd's claude project dir.
-  // /clear and /resume inside claude switch the active transcript, but the
-  // cached rec.claudeSessionId is set once at spawn and never updated — so
-  // a server restart followed by `--resume <stale id>` would land the user
-  // on the first transcript instead of the one they were last on.
-  const dir = path.join(projectsDir(), encodeCwdForClaude(rec.absCwd));
-  const newest = await findNewestJsonl(dir);
-  const resumeId = newest
-    ? newest.file.replace(/\.jsonl$/, '')
-    : (rec.claudeSessionId || null);
+  // Only capture transcript session ID on first connect (no cached ID yet).
+  // After that, the spawn + captureClaudeSessionId handles updates.
+  if (!rec.claudeSessionId) {
+    try {
+      const dir = path.join(projectsDir(), encodeCwdForClaude(rec.absCwd));
+      const newest = await findNewestJsonl(dir);
+      if (newest) {
+        let id = newest.file.replace(/\.jsonl$/, '');
+        if (id === 'transcript') {
+          const m = newest.full.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i);
+          id = m ? m[1] : id;
+        }
+        if (id !== 'transcript') {
+          rec.claudeSessionId = id;
+          saveStore();
+          console.log(`[ensureLive] captured claudeSessionId=${id} for ${sessionId}`);
+        }
+      }
+    } catch {}
+  }
+
+  // Resume the last Claude session if we have an ID
+  const resumeId = rec.claudeSessionId || null;
 
   console.log(`[ensureLive] spawning claude for ${sessionId} cwd=${rec.absCwd} resume=${resumeId || 'none'}`);
   return ptyMod.spawnClaude(sessionId, {

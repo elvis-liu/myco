@@ -36,6 +36,6 @@ ENV MYCO_DATA=/data \
 
 EXPOSE 80 443
 
-VOLUME ["/data"]
+VOLUME ["/data", "/root", "/wks"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

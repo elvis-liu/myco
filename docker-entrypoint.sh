@@ -2,16 +2,28 @@
 set -e
 
 DATA="${MYCO_DATA:-/data}"
-WKS="$DATA/wks"
 ENV_FILE="$DATA/.env"
 CADDY_DATA="$DATA/caddy"
 
-mkdir -p "$WKS" "$CADDY_DATA"
+mkdir -p "$CADDY_DATA"
 
-# Symlink /wks → /data/wks so migrated transcript cwds (/wks/...) resolve
-if [ ! -e /wks ]; then
-    ln -s "$WKS" /wks
+# Seed /root with shell config from stock /etc/skel if empty (first run)
+if [ ! -f /root/.profile ]; then
+    cp /etc/skel/.profile /root/ 2>/dev/null || true
 fi
+
+# Migrate data from old layout (pre-mount) if /root is missing claude config
+if [ ! -f /root/.claude.json ] && [ -f "$DATA/.claude.json" ]; then
+    cp "$DATA/.claude.json" /root/.claude.json
+fi
+if [ ! -d /root/.claude ] && [ -d "$DATA/.claude" ]; then
+    cp -a "$DATA/.claude" /root/.claude
+fi
+if [ ! -d /root/.local ] && [ -d "$DATA/.local" ]; then
+    cp -a "$DATA/.local" /root/.local
+fi
+
+export PATH="/root/.local/bin:$PATH"
 
 # Load .env if it exists
 if [ -f "$ENV_FILE" ]; then
@@ -22,31 +34,7 @@ fi
 
 export MYCO_WORKSPACE="/wks"
 export MYCO_STATE_DIR="$DATA"
-export XDG_DATA_HOME="$CADDY_DATA/.."
-
-# Symlink ~/.claude to /data/.claude so transcripts are persisted in the data volume
-mkdir -p "$DATA/.claude"
-if [ ! -L "$HOME/.claude" ]; then
-    rm -rf "$HOME/.claude" 2>/dev/null
-    ln -s "$DATA/.claude" "$HOME/.claude"
-fi
-
-# Persist ~/.local for claude-code native install
-mkdir -p "$DATA/.local/bin" "$DATA/.local/share"
-if [ ! -L "$HOME/.local" ]; then
-    rm -rf "$HOME/.local" 2>/dev/null
-    ln -s "$DATA/.local" "$HOME/.local"
-fi
-export PATH="$HOME/.local/bin:$PATH"
-
-# Migrate legacy .jsonl transcripts to directory-based sessions (claude >= 2.1)
-for jsonl in $(find "$DATA/.claude/projects" -name "*.jsonl" 2>/dev/null); do
-    dir="${jsonl%.jsonl}"
-    if [ ! -d "$dir" ]; then
-        mkdir -p "$dir"
-        mv "$jsonl" "$dir/transcript.jsonl"
-    fi
-done
+export XDG_DATA_HOME="$DATA"
 
 # Start Caddy in background
 caddy run --config /etc/caddy/Caddyfile &

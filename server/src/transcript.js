@@ -13,19 +13,23 @@ function resolveTranscriptPath(sessionId) {
   let absCwd = rec.absCwd;
   try { absCwd = fs.realpathSync(absCwd) || absCwd; } catch {}
   const dir = path.join(sessionsMod.projectsDir(), sessionsMod.encodeCwdForClaude(absCwd));
-  // findNewestJsonl is async, but we need sync here for the initial check.
-  // Do a synchronous scan instead.
+  // Recursive scan — Claude stores transcripts in <sessionId>/transcript.jsonl
   try {
-    const entries = fs.readdirSync(dir);
     let best = null;
-    for (const f of entries) {
-      if (!f.endsWith('.jsonl')) continue;
-      const full = path.join(dir, f);
-      let st;
-      try { st = fs.statSync(full); } catch { continue; }
-      if (!best || st.mtimeMs > best.mtimeMs) best = { file: f, full, mtimeMs: st.mtimeMs };
+    function walk(d) {
+      let entries;
+      try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const full = path.join(d, e.name);
+        if (e.isDirectory()) { walk(full); continue; }
+        if (!e.name.endsWith('.jsonl')) continue;
+        let st;
+        try { st = fs.statSync(full); } catch { continue; }
+        if (!best || st.mtimeMs > best.mtimeMs) best = full;
+      }
     }
-    return best ? best.full : null;
+    walk(dir);
+    return best;
   } catch {
     return null;
   }
