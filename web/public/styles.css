@@ -1587,11 +1587,12 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 .inline-comment-editor.busy { opacity: .55; pointer-events: none; }
 
 @media (max-width: 900px) {
-  /* Prevent iOS focus-zoom by keeping input ≥16px on mobile. */
-  .inline-comment-editor .ce-input { font-size: 16px; }
-  .inline-comment-editor .ce-prefix,
-  .inline-comment-editor .ce-suffix { font-size: 16px; }
-  .inline-comment-editor .ce-actions button { padding: 6px 14px; font-size: 16px; }
+  /* Match the code-chunk size on mobile so the editor reads as a code line.
+     Tradeoff: iOS Safari may auto-zoom on focus (it triggers below 16px) —
+     we accept that in exchange for visual consistency with the surrounding
+     code, which is what makes the inline editor feel right. */
+  .inline-comment-editor { font-size: 12.5px; }
+  .inline-comment-editor .ce-actions button { padding: 6px 14px; font-size: 14px; }
   /* Mobile keyboards have no Cmd/Ctrl — hide the desktop hint. */
   .inline-comment-editor .ce-hint { display: none; }
 }

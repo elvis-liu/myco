@@ -367,22 +367,45 @@ app.delete('/sessions/:id', requireAuth, (req, res) => {
 
 // ─── per-session file explorer API ──────────────────────────────────────────
 //
-// Owner-only. Share-token clients are explicitly NOT permitted here — the
-// share flow is for read-only terminal viewing, not workspace browsing.
+// All file-API endpoints — reads, writes, and Claude-backed file-chat ops —
+// accept anyone with access to the session: the owner, any authenticated
+// non-owner (multi-user installs), or a valid ?s=<shareToken> client.
+// Collaborators can both read and annotate code together, including running
+// Explain / Find bugs / Add comment from the inline action bar. The session
+// owner controls the share scope by issuing/revoking the share link.
+//
 // Root is recomputed per request via resolveCwd(rec.cwd, rec.user) so a
 // stale rec.absCwd from a workspace move can't leak FS access.
-function fileApiPreamble(req, res) {
+function fileApiPreamble(req, res, requiredAccess /* 'owner' | 'viewer' */) {
   const id = req.params.id;
   const rec = getSessionRecord(id);
   if (!rec) { res.status(404).json({ error: 'unknown session' }); return null; }
-  if (isAuthRequired() && !sessionBelongsToUser(id, req.user)) {
+
+  // Compute access level. requireAuth middleware (used on owner-only
+  // routes) sets req.user; for viewer routes we resolve here.
+  if (!req.user) req.user = userFromRequest(req);
+  let access = null;
+  if (!isAuthRequired()) {
+    access = 'owner';                                    // single-user mode
+  } else if (req.user) {
+    access = (rec.user === req.user) ? 'owner' : 'viewer';
+  } else {
+    const shareTok = (req.query && req.query.s) || '';
+    if (shareTok) {
+      const info = shareTokenInfo(shareTok);
+      if (info && info.sessionId === id) access = 'viewer';
+    }
+  }
+  if (!access) { res.status(401).json({ error: 'unauthorized' }); return null; }
+  if (requiredAccess === 'owner' && access !== 'owner') {
     res.status(403).json({ error: 'forbidden' });
     return null;
   }
+
   let root;
   try { root = resolveCwd(rec.cwd, rec.user); }
   catch { res.status(500).json({ error: 'stale session record' }); return null; }
-  return { id, rec, root };
+  return { id, rec, root, access };
 }
 
 function fileApiError(res, e) {
@@ -399,8 +422,8 @@ function fileApiError(res, e) {
   return res.status(500).json({ error: 'internal error' });
 }
 
-app.get('/sessions/:id/files', requireAuth, async (req, res) => {
-  const ctx = fileApiPreamble(req, res);
+app.get('/sessions/:id/files', async (req, res) => {
+  const ctx = fileApiPreamble(req, res, 'viewer');
   if (!ctx) return;
   try {
     const out = await filesApi.listDir(ctx.root, req.query.path || '.');
@@ -408,8 +431,8 @@ app.get('/sessions/:id/files', requireAuth, async (req, res) => {
   } catch (e) { fileApiError(res, e); }
 });
 
-app.get('/sessions/:id/file', requireAuth, async (req, res) => {
-  const ctx = fileApiPreamble(req, res);
+app.get('/sessions/:id/file', async (req, res) => {
+  const ctx = fileApiPreamble(req, res, 'viewer');
   if (!ctx) return;
   if (!req.query.path) return res.status(400).json({ error: 'path required' });
   try {
@@ -418,8 +441,8 @@ app.get('/sessions/:id/file', requireAuth, async (req, res) => {
   } catch (e) { fileApiError(res, e); }
 });
 
-app.put('/sessions/:id/file', requireAuth, async (req, res) => {
-  const ctx = fileApiPreamble(req, res);
+app.put('/sessions/:id/file', async (req, res) => {
+  const ctx = fileApiPreamble(req, res, 'viewer');
   if (!ctx) return;
   const { path: relPath, content, expectedMtimeMs } = req.body || {};
   if (!relPath) return res.status(400).json({ error: 'path required' });
@@ -443,16 +466,16 @@ function validateFileChatPath(ctx, relPath, res) {
     .catch((e) => { fileApiError(res, e); return false; });
 }
 
-app.get('/sessions/:id/file-chat', requireAuth, async (req, res) => {
-  const ctx = fileApiPreamble(req, res);
+app.get('/sessions/:id/file-chat', async (req, res) => {
+  const ctx = fileApiPreamble(req, res, 'viewer');
   if (!ctx) return;
   const relPath = req.query.path;
   if (!(await validateFileChatPath(ctx, relPath, res))) return;
   res.json({ messages: getFileChat(ctx.id, relPath) });
 });
 
-app.post('/sessions/:id/file-chat', requireAuth, async (req, res) => {
-  const ctx = fileApiPreamble(req, res);
+app.post('/sessions/:id/file-chat', async (req, res) => {
+  const ctx = fileApiPreamble(req, res, 'viewer');
   if (!ctx) return;
   const { path: relPath, anchor, question } = req.body || {};
   if (!relPath) return res.status(400).json({ error: 'path required' });
@@ -529,8 +552,8 @@ app.post('/sessions/:id/file-chat', requireAuth, async (req, res) => {
   res.json({ message: claudeMsg, userMessage: userMsg });
 });
 
-app.delete('/sessions/:id/file-chat', requireAuth, async (req, res) => {
-  const ctx = fileApiPreamble(req, res);
+app.delete('/sessions/:id/file-chat', async (req, res) => {
+  const ctx = fileApiPreamble(req, res, 'viewer');
   if (!ctx) return;
   const relPath = req.query.path;
   const messageId = req.query.messageId;

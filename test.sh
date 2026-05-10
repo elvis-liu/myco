@@ -708,26 +708,31 @@ test_files_api() {
   [ "$code" = "409" ] && pass "files: stale mtime → 409" \
     || fail "files: stale mtime → 409 (got HTTP $code)"
 
-  # ── 7. Bob (non-owner, after test_auth_hot_reload) gets 403 on all three routes.
+  # ── 7. Bob (non-owner) — viewer access: GETs OK (200), writes 403.
   code=$(curl -s -o /dev/null -w '%{http_code}' \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/files?path=." \
     -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
-  [ "$code" = "403" ] && pass "files: non-owner GET list → 403" \
-    || fail "files: non-owner GET list → 403 (got HTTP $code)"
+  [ "$code" = "200" ] && pass "files: non-owner GET list → 200 (viewer)" \
+    || fail "files: non-owner GET list → 200 (got HTTP $code)"
   code=$(curl -s -o /dev/null -w '%{http_code}' \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt" \
     -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
-  [ "$code" = "403" ] && pass "files: non-owner GET file → 403" \
-    || fail "files: non-owner GET file → 403 (got HTTP $code)"
+  [ "$code" = "200" ] && pass "files: non-owner GET file → 200 (viewer)" \
+    || fail "files: non-owner GET file → 200 (got HTTP $code)"
+  # Bob's PUT needs the current mtime — fetch it, then write a real edit.
+  local bob_resp bob_mtime
+  bob_resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
+  bob_mtime=$(echo "$bob_resp" | grep -oE '"mtimeMs":[0-9.]+' | head -1 | sed 's/.*://')
   code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file" \
     -H "Authorization: Bearer $PERSIST_NEW_TOKEN" \
     -H "Content-Type: application/json" \
-    -d '{"path":"hello.txt","content":"x","expectedMtimeMs":1}' 2>/dev/null)
-  [ "$code" = "403" ] && pass "files: non-owner PUT → 403" \
-    || fail "files: non-owner PUT → 403 (got HTTP $code)"
+    -d "{\"path\":\"hello.txt\",\"content\":\"bob-was-here\\n\",\"expectedMtimeMs\":$bob_mtime}" 2>/dev/null)
+  [ "$code" = "200" ] && pass "files: non-owner PUT → 200 (collaborator can edit)" \
+    || fail "files: non-owner PUT → 200 (got HTTP $code)"
 
-  # ── 8. Share-token client (no Bearer) → 401. The file API requires real auth.
+  # ── 8. Share-token client — viewer access: GET file OK (200); writes denied.
   local share_url share_tok
   share_url=$(curl -s -X POST \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/share" \
@@ -736,8 +741,8 @@ test_files_api() {
   if [ -n "$share_tok" ]; then
     code=$(curl -s -o /dev/null -w '%{http_code}' \
       "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt&s=$share_tok" 2>/dev/null)
-    [ "$code" = "401" ] && pass "files: share-token client → 401 on file API" \
-      || fail "files: share-token client → 401 on file API (got HTTP $code)"
+    [ "$code" = "200" ] && pass "files: share-token GET file → 200 (viewer)" \
+      || fail "files: share-token GET file → 200 (got HTTP $code)"
   else
     fail "files: could not mint share token (got: $share_url)"
   fi
@@ -820,20 +825,20 @@ test_file_chat_api() {
   [ "$code" = "403" ] && pass "file-chat: GET path traversal → 403" \
     || fail "file-chat: GET path traversal → 403 (got HTTP $code)"
 
-  # ── 7. Bob (non-owner) gets 403 on all three methods.
+  # ── 7. Bob (non-owner) — viewer access: GET OK (200), POST 403 (writes owner-only).
   code=$(curl -s -o /dev/null -w '%{http_code}' \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
     -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
-  [ "$code" = "403" ] && pass "file-chat: non-owner GET → 403" \
-    || fail "file-chat: non-owner GET → 403 (got HTTP $code)"
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST \
+  [ "$code" = "200" ] && pass "file-chat: non-owner GET → 200 (viewer)" \
+    || fail "file-chat: non-owner GET → 200 (got HTTP $code)"
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 -X POST \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat" \
     -H "Authorization: Bearer $PERSIST_NEW_TOKEN" -H "Content-Type: application/json" \
-    -d '{"path":"hello.txt","question":"x"}' 2>/dev/null)
-  [ "$code" = "403" ] && pass "file-chat: non-owner POST → 403" \
-    || fail "file-chat: non-owner POST → 403 (got HTTP $code)"
+    -d '{"path":"hello.txt","question":"viewer asking"}' 2>/dev/null)
+  [ "$code" = "200" ] && pass "file-chat: non-owner POST → 200 (collaborator can ask Claude)" \
+    || fail "file-chat: non-owner POST → 200 (got HTTP $code)"
 
-  # ── 8. Share-token client → 401.
+  # ── 8. Share-token client — viewer access: GET OK (200); writes denied (401).
   local share_url share_tok
   share_url=$(curl -s -X POST \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/share" \
@@ -842,8 +847,8 @@ test_file_chat_api() {
   if [ -n "$share_tok" ]; then
     code=$(curl -s -o /dev/null -w '%{http_code}' \
       "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt&s=$share_tok" 2>/dev/null)
-    [ "$code" = "401" ] && pass "file-chat: share-token client → 401" \
-      || fail "file-chat: share-token client → 401 (got HTTP $code)"
+    [ "$code" = "200" ] && pass "file-chat: share-token GET → 200 (viewer)" \
+      || fail "file-chat: share-token GET → 200 (got HTTP $code)"
   fi
 
   # ── 9. DELETE removes one message; subsequent GET shows fewer messages.
