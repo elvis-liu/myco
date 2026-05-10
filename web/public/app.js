@@ -1514,7 +1514,14 @@ function bindFilesUi() {
 }
 
 let _selectionTimer = null;
+// When we programmatically removeAllRanges() to dismiss the iOS native
+// selection callout, the browser fires a follow-up selectionchange that we
+// must NOT interpret as the user clearing the selection — it'd hide the
+// action bar that we just opened. The counter is consumed by the next
+// selectionchange after we set it, before any debounce.
+let _ignoreNextSelChange = 0;
 function debouncedOnSelectionChange() {
+  if (_ignoreNextSelChange > 0) { _ignoreNextSelChange--; return; }
   if (_selectionTimer) clearTimeout(_selectionTimer);
   _selectionTimer = setTimeout(() => onSelectionChange(), 120);
 }
@@ -2311,6 +2318,15 @@ function onSelectionChange() {
     a === b ? `L${a}` : `L${a}–${b}`;
   bar.hidden = false;
   positionActionBarNearSelection(range);
+
+  // Dismiss the iOS / Android native selection callout (Copy / Look up /
+  // Translate / Paste). We've already captured the line range into
+  // v.selection — the action-bar label "L30–35" is now the visual cue, so
+  // the OS menu is just noise on top. Collapse the selection to make it
+  // disappear. The follow-up selectionchange (triggered by removeAllRanges)
+  // is suppressed via _ignoreNextSelChange so it doesn't tear down the bar.
+  _ignoreNextSelChange = 1;
+  try { sel.removeAllRanges(); } catch {}
 }
 
 function hideActionBar() {
