@@ -138,6 +138,73 @@ test_mermaid_html_init() {
   grep -q 'highlight.min.js' web/public/index.html && pass "highlight.js loaded" || fail "highlight.js loaded"
 }
 
+test_file_viewer_polish_static() {
+  # Header chrome + action bar additions in HTML
+  grep -q 'id="files-view-crumbs"' web/public/index.html && pass "html: #files-view-crumbs" || fail "html: #files-view-crumbs"
+  grep -q 'id="files-view-lang"'   web/public/index.html && pass "html: #files-view-lang"   || fail "html: #files-view-lang"
+  grep -q 'id="files-view-size"'   web/public/index.html && pass "html: #files-view-size"   || fail "html: #files-view-size"
+  grep -q 'id="files-view-body"'   web/public/index.html && pass "html: #files-view-body"   || fail "html: #files-view-body"
+  grep -q 'id="files-action-bar"'  web/public/index.html && pass "html: #files-action-bar"  || fail "html: #files-action-bar"
+  grep -q 'id="files-copy"'        web/public/index.html && pass "html: #files-copy"        || fail "html: #files-copy"
+  grep -q 'id="files-wrap-toggle"' web/public/index.html && pass "html: #files-wrap-toggle" || fail "html: #files-wrap-toggle"
+  grep -q 'data-action="explain"'  web/public/index.html && pass "html: action explain"     || fail "html: action explain"
+
+  # CSS
+  grep -q '#files-action-bar' web/public/styles.css && pass "css: #files-action-bar" || fail "css: #files-action-bar"
+  grep -q '\.claude-card'     web/public/styles.css && pass "css: .claude-card"     || fail "css: .claude-card"
+  grep -q '\.code-chunk'      web/public/styles.css && pass "css: .code-chunk"      || fail "css: .code-chunk"
+  grep -q '\.ln-gutter'       web/public/styles.css && pass "css: .ln-gutter"       || fail "css: .ln-gutter"
+  grep -q '\.lang-badge'      web/public/styles.css && pass "css: .lang-badge"      || fail "css: .lang-badge"
+
+  # JS
+  grep -q 'function renderFileViewerWithCards' web/public/app.js && pass "js: renderFileViewerWithCards" || fail "js: renderFileViewerWithCards"
+  grep -q 'function renderClaudeCard'          web/public/app.js && pass "js: renderClaudeCard"          || fail "js: renderClaudeCard"
+  grep -q 'function loadFileChat'              web/public/app.js && pass "js: loadFileChat"              || fail "js: loadFileChat"
+  grep -q 'function askClaudeAboutSelection'   web/public/app.js && pass "js: askClaudeAboutSelection"   || fail "js: askClaudeAboutSelection"
+  grep -q 'function deleteClaudeCard'          web/public/app.js && pass "js: deleteClaudeCard"          || fail "js: deleteClaudeCard"
+  grep -q 'function onSelectionChange'         web/public/app.js && pass "js: onSelectionChange"         || fail "js: onSelectionChange"
+  grep -q 'function renderCodeChunk'           web/public/app.js && pass "js: renderCodeChunk"           || fail "js: renderCodeChunk"
+
+  # Backend
+  grep -q 'function askAboutFile' server/src/btw.js && pass "btw.js: askAboutFile" || fail "btw.js: askAboutFile"
+  grep -q 'fileChats'             server/src/sessions.js && pass "sessions.js: fileChats" || fail "sessions.js: fileChats"
+  grep -q 'appendFileChatMessage' server/src/sessions.js && pass "sessions.js: appendFileChatMessage" || fail "sessions.js: appendFileChatMessage"
+  grep -q 'deleteFileChatMessage' server/src/sessions.js && pass "sessions.js: deleteFileChatMessage" || fail "sessions.js: deleteFileChatMessage"
+  grep -q "app.get.*'/sessions/:id/file-chat'" server/src/index.js    && pass "GET /file-chat route"    || fail "GET /file-chat route"
+  grep -q "app.post.*'/sessions/:id/file-chat'" server/src/index.js   && pass "POST /file-chat route"   || fail "POST /file-chat route"
+  grep -q "app.delete.*'/sessions/:id/file-chat'" server/src/index.js && pass "DELETE /file-chat route" || fail "DELETE /file-chat route"
+}
+
+test_file_explorer_static() {
+  # Backend module + routes
+  test -f server/src/files.js && pass "server/src/files.js exists" || fail "server/src/files.js missing"
+  grep -q 'function safeJoin' server/src/files.js && pass "files.js: safeJoin"            || fail "files.js: safeJoin"
+  grep -q 'ERR_MTIME_CONFLICT' server/src/files.js && pass "files.js: ERR_MTIME_CONFLICT" || fail "files.js: ERR_MTIME_CONFLICT"
+  grep -q 'ERR_OUTSIDE' server/src/files.js && pass "files.js: ERR_OUTSIDE"               || fail "files.js: ERR_OUTSIDE"
+  grep -q "require('./files')" server/src/index.js && pass "index.js: requires files"      || fail "index.js: requires files"
+  grep -q "app.get.*'/sessions/:id/files'" server/src/index.js  && pass "GET /sessions/:id/files route"  || fail "GET /sessions/:id/files route"
+  grep -q "app.get.*'/sessions/:id/file'"  server/src/index.js  && pass "GET /sessions/:id/file route"   || fail "GET /sessions/:id/file route"
+  grep -q "app.put.*'/sessions/:id/file'"  server/src/index.js  && pass "PUT /sessions/:id/file route"   || fail "PUT /sessions/:id/file route"
+  grep -q 'resolveCwd' server/src/sessions.js && pass "sessions.js: resolveCwd defined"    || fail "sessions.js: resolveCwd defined"
+  grep -q 'resolveCwd,' server/src/sessions.js && pass "sessions.js: exports resolveCwd"   || fail "sessions.js: exports resolveCwd"
+
+  # Frontend HTML
+  grep -q 'id="btn-files"'   web/public/index.html && pass "html: #btn-files"   || fail "html: #btn-files"
+  grep -q 'id="files-wrap"'  web/public/index.html && pass "html: #files-wrap"  || fail "html: #files-wrap"
+  grep -q 'id="files-tree"'  web/public/index.html && pass "html: #files-tree"  || fail "html: #files-tree"
+
+  # Frontend CSS
+  grep -q '#files-wrap'      web/public/styles.css && pass "css: #files-wrap"   || fail "css: #files-wrap"
+  grep -q '#btn-files'       web/public/styles.css && pass "css: #btn-files"    || fail "css: #btn-files"
+
+  # Frontend JS
+  grep -q 'function loadFileTree'    web/public/app.js && pass "js: loadFileTree"    || fail "js: loadFileTree"
+  grep -q 'function openFileInViewer' web/public/app.js && pass "js: openFileInViewer" || fail "js: openFileInViewer"
+  grep -q 'function saveFile'        web/public/app.js && pass "js: saveFile"        || fail "js: saveFile"
+  grep -q 'function enterEditMode'   web/public/app.js && pass "js: enterEditMode"   || fail "js: enterEditMode"
+  grep -q 'expectedMtimeMs'          web/public/app.js && pass "js: mtime guard sent"|| fail "js: mtime guard sent"
+}
+
 test_deploy_add_token() {
   grep -q '^add_token()' deploy.sh             && pass "deploy.sh: add_token() defined"        || fail "deploy.sh: add_token() defined"
   grep -q '^upsert_token_in_env()' deploy.sh   && pass "deploy.sh: upsert_token_in_env()"      || fail "deploy.sh: upsert_token_in_env()"
@@ -162,6 +229,8 @@ run_static_checks() {
   test_mermaid_html_init
   test_status_bar_user_and_build_stamps
   test_deploy_add_token
+  test_file_explorer_static
+  test_file_viewer_polish_static
 }
 
 # ─── feature checks ──────────────────────────────────────────────────────────
@@ -363,8 +432,11 @@ EOF
 }
 EOF
 
-  # Pre-create the workspace dir mycod expects
-  mkdir -p "$PERSIST_WKS/alice/persist-test"
+  # Pre-create the workspace dir mycod expects + seed a file for the
+  # file-explorer API tests (test_files_api).
+  mkdir -p "$PERSIST_WKS/alice/persist-test/sub"
+  printf 'hi\n' > "$PERSIST_WKS/alice/persist-test/hello.txt"
+  printf 'inside\n' > "$PERSIST_WKS/alice/persist-test/sub/inner.txt"
 }
 
 start_persist_container() {
@@ -572,6 +644,236 @@ EOF
   rmdir "$tmp_dir" "$tmp_home" "$tmp_wks" 2>/dev/null || true
 }
 
+test_files_api() {
+  # ── 1. List the seeded session's cwd. hello.txt + sub/ should both appear.
+  local resp
+  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/files?path=." \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  echo "$resp" | grep -q '"hello.txt"' && pass "files: list shows hello.txt" \
+    || fail "files: list shows hello.txt (got: $resp)"
+  echo "$resp" | grep -q '"sub"'       && pass "files: list shows sub/"      \
+    || fail "files: list shows sub/ (got: $resp)"
+  echo "$resp" | grep -q '"kind":"dir"'  && pass "files: list tags dir kind"   \
+    || fail "files: list tags dir kind"
+  echo "$resp" | grep -q '"kind":"file"' && pass "files: list tags file kind"  \
+    || fail "files: list tags file kind"
+
+  # ── 2. Read hello.txt → content + numeric mtime.
+  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  echo "$resp" | grep -q '"content":"hi\\n"' && pass "files: read returns content" \
+    || fail "files: read returns content (got: $resp)"
+  local mtime
+  mtime=$(echo "$resp" | grep -oE '"mtimeMs":[0-9.]+' | head -1 | sed 's/.*://')
+  [ -n "$mtime" ] && pass "files: read returns numeric mtimeMs ($mtime)" \
+    || fail "files: read returns numeric mtimeMs (got: $resp)"
+
+  # ── 3. Write happy path with the captured mtime → 200; re-read shows new content.
+  resp=$(curl -s -X PUT "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"path\":\"hello.txt\",\"content\":\"bye\\n\",\"expectedMtimeMs\":$mtime}" 2>/dev/null)
+  echo "$resp" | grep -q '"mtimeMs"' && pass "files: write 200 returns new mtime" \
+    || fail "files: write 200 returns new mtime (got: $resp)"
+  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  echo "$resp" | grep -q '"content":"bye\\n"' && pass "files: written content persists" \
+    || fail "files: written content persists (got: $resp)"
+
+  # ── 4. Path traversal on GET → 403.
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=../../../etc/passwd" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  [ "$code" = "403" ] && pass "files: GET path traversal → 403" \
+    || fail "files: GET path traversal → 403 (got HTTP $code)"
+
+  # ── 5. Path traversal on PUT → 403, and no escape.txt appears at the workspace root.
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"path":"../escape.txt","content":"x","expectedMtimeMs":1}' 2>/dev/null)
+  [ "$code" = "403" ] && pass "files: PUT path traversal → 403" \
+    || fail "files: PUT path traversal → 403 (got HTTP $code)"
+  [ ! -e "$PERSIST_WKS/alice/escape.txt" ] && pass "files: traversal did not write escape file" \
+    || fail "files: traversal did not write escape file"
+
+  # ── 6. mtime conflict on PUT → 409.
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"path":"hello.txt","content":"x","expectedMtimeMs":1}' 2>/dev/null)
+  [ "$code" = "409" ] && pass "files: stale mtime → 409" \
+    || fail "files: stale mtime → 409 (got HTTP $code)"
+
+  # ── 7. Bob (non-owner, after test_auth_hot_reload) gets 403 on all three routes.
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/files?path=." \
+    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
+  [ "$code" = "403" ] && pass "files: non-owner GET list → 403" \
+    || fail "files: non-owner GET list → 403 (got HTTP $code)"
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
+  [ "$code" = "403" ] && pass "files: non-owner GET file → 403" \
+    || fail "files: non-owner GET file → 403 (got HTTP $code)"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file" \
+    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"path":"hello.txt","content":"x","expectedMtimeMs":1}' 2>/dev/null)
+  [ "$code" = "403" ] && pass "files: non-owner PUT → 403" \
+    || fail "files: non-owner PUT → 403 (got HTTP $code)"
+
+  # ── 8. Share-token client (no Bearer) → 401. The file API requires real auth.
+  local share_url share_tok
+  share_url=$(curl -s -X POST \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/share" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  share_tok=$(echo "$share_url" | grep -oE '\?s=[^"]+' | head -1 | sed 's/^?s=//')
+  if [ -n "$share_tok" ]; then
+    code=$(curl -s -o /dev/null -w '%{http_code}' \
+      "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt&s=$share_tok" 2>/dev/null)
+    [ "$code" = "401" ] && pass "files: share-token client → 401 on file API" \
+      || fail "files: share-token client → 401 on file API (got HTTP $code)"
+  else
+    fail "files: could not mint share token (got: $share_url)"
+  fi
+
+  # ── 9. PUT to a non-existent path → 404 (no creates in v1).
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"path":"new.txt","content":"x","expectedMtimeMs":0}' 2>/dev/null)
+  [ "$code" = "404" ] && pass "files: PUT to missing file → 404" \
+    || fail "files: PUT to missing file → 404 (got HTTP $code)"
+
+  # ── 10. Binary file detection. Drop a NULL byte into a file via docker exec
+  # so it's seen by the same FS the server is reading.
+  docker exec "$PERSIST_NAME" sh -c 'printf "\x00\x01\x02hello" > /wks/alice/persist-test/binfile.bin' >/dev/null 2>&1
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=binfile.bin" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  [ "$code" = "415" ] && pass "files: binary file → 415" \
+    || fail "files: binary file → 415 (got HTTP $code)"
+}
+
+test_file_chat_api() {
+  # File-chat persists per (session, file). We don't assume a real Claude
+  # subscription is reachable — `claude -p` may fail and return an error
+  # stand-in. The API contract (200 + structured message) still holds, and
+  # the user message is appended even on Claude failure, so we can verify
+  # storage + ordering without being subscription-dependent.
+
+  # ── 1. GET on a file with no thread → empty messages array.
+  local resp
+  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  echo "$resp" | grep -q '"messages":\[\]' && pass "file-chat: empty thread on first GET" \
+    || fail "file-chat: empty thread on first GET (got: $resp)"
+
+  # ── 2. POST a question; expect 200 with a `message` object whose user is 'claude'
+  # and a `userMessage` echoing the question. Note: claude -p may take 30+s; allow
+  # generous timeout. We don't care if claude returned an error stand-in.
+  resp=$(curl -s --max-time 90 -X POST \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"path":"hello.txt","anchor":{"startLine":1,"endLine":1},"question":"what is in this file?"}' 2>/dev/null)
+  echo "$resp" | grep -q '"message"'      && pass "file-chat: POST returns message" \
+    || fail "file-chat: POST returns message (got: $resp)"
+  echo "$resp" | grep -q '"user":"claude"' && pass "file-chat: reply tagged user=claude" \
+    || fail "file-chat: reply tagged user=claude (got: $resp)"
+  echo "$resp" | grep -q '"userMessage"'   && pass "file-chat: POST echoes userMessage" \
+    || fail "file-chat: POST echoes userMessage"
+
+  # ── 3. GET again → at least the user msg + the claude reply both present.
+  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  local you_count claude_count
+  you_count=$(echo "$resp" | grep -o '"user":"you"' | wc -l)
+  claude_count=$(echo "$resp" | grep -o '"user":"claude"' | wc -l)
+  [ "$you_count" -ge 1 ]    && pass "file-chat: user message persisted ($you_count)"     || fail "file-chat: user message persisted (got $you_count)"
+  [ "$claude_count" -ge 1 ] && pass "file-chat: claude reply persisted ($claude_count)" || fail "file-chat: claude reply persisted (got $claude_count)"
+
+  # ── 4. Anchor shape preserved on the persisted user message.
+  echo "$resp" | grep -q '"startLine":1' && pass "file-chat: anchor.startLine persisted" || fail "file-chat: anchor.startLine persisted"
+  echo "$resp" | grep -q '"endLine":1'   && pass "file-chat: anchor.endLine persisted"   || fail "file-chat: anchor.endLine persisted"
+
+  # ── 5. Restart container; thread survives (in the session store).
+  docker restart "$PERSIST_NAME" >/dev/null 2>&1
+  wait_persist_ready "container ready after file-chat restart"
+  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  you_count=$(echo "$resp" | grep -o '"user":"you"' | wc -l)
+  [ "$you_count" -ge 1 ] && pass "file-chat: thread survives container restart" \
+    || fail "file-chat: thread survives container restart (got: $resp)"
+
+  # ── 6. Path traversal rejected.
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=../../../etc/passwd" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  [ "$code" = "403" ] && pass "file-chat: GET path traversal → 403" \
+    || fail "file-chat: GET path traversal → 403 (got HTTP $code)"
+
+  # ── 7. Bob (non-owner) gets 403 on all three methods.
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
+  [ "$code" = "403" ] && pass "file-chat: non-owner GET → 403" \
+    || fail "file-chat: non-owner GET → 403 (got HTTP $code)"
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -X POST \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat" \
+    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" -H "Content-Type: application/json" \
+    -d '{"path":"hello.txt","question":"x"}' 2>/dev/null)
+  [ "$code" = "403" ] && pass "file-chat: non-owner POST → 403" \
+    || fail "file-chat: non-owner POST → 403 (got HTTP $code)"
+
+  # ── 8. Share-token client → 401.
+  local share_url share_tok
+  share_url=$(curl -s -X POST \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/share" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  share_tok=$(echo "$share_url" | grep -oE '\?s=[^"]+' | head -1 | sed 's/^?s=//')
+  if [ -n "$share_tok" ]; then
+    code=$(curl -s -o /dev/null -w '%{http_code}' \
+      "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt&s=$share_tok" 2>/dev/null)
+    [ "$code" = "401" ] && pass "file-chat: share-token client → 401" \
+      || fail "file-chat: share-token client → 401 (got HTTP $code)"
+  fi
+
+  # ── 9. DELETE removes one message; subsequent GET shows fewer messages.
+  # Pull a Claude message id from the thread.
+  local mid before_n after_n
+  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  before_n=$(echo "$resp" | grep -o '"id":"[a-f0-9]\+"' | wc -l)
+  mid=$(echo "$resp" | grep -oE '"id":"[a-f0-9]+"' | head -1 | sed 's/.*"id":"\([a-f0-9]*\)".*/\1/')
+  if [ -n "$mid" ]; then
+    code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+      "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt&messageId=$mid" \
+      -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+    [ "$code" = "200" ] && pass "file-chat: DELETE existing message → 200" \
+      || fail "file-chat: DELETE existing message → 200 (got HTTP $code)"
+    resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
+      -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+    after_n=$(echo "$resp" | grep -o '"id":"[a-f0-9]\+"' | wc -l)
+    [ "$after_n" -lt "$before_n" ] && pass "file-chat: DELETE actually removed ($before_n→$after_n)" \
+      || fail "file-chat: DELETE removed (was $before_n, now $after_n)"
+  fi
+
+  # ── 10. DELETE non-existent messageId → 404.
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+    "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt&messageId=deadbeef" \
+    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
+  [ "$code" = "404" ] && pass "file-chat: DELETE missing → 404" \
+    || fail "file-chat: DELETE missing → 404 (got HTTP $code)"
+}
+
 cleanup_persist_env() {
   # Entrypoint writes as root inside the container — use a one-shot container
   # to remove the bind-mounted contents, then rmdir the empty dirs as us.
@@ -590,6 +892,8 @@ run_persistence_checks() {
   test_persist_after_redeploy
   test_auth_hot_reload
   test_non_owner_sees_session_with_owner_tag
+  test_files_api
+  test_file_chat_api
   test_auth_enables_via_hot_reload
   cleanup_persist_env
 }

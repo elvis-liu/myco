@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.json" />
   <title>myco</title>
   <link rel="stylesheet" href="/vendor/xterm-css/xterm.css" />
-  <link rel="stylesheet" href="styles.css?v=45" />
+  <link rel="stylesheet" href="styles.css?v=53" />
   <link rel="stylesheet" href="/vendor/github-dark.min.css" />
 </head>
 <body>
@@ -35,6 +35,7 @@
     <button id="btn-expand" title="Show sessions" hidden>☰</button>
 
     <main id="terminal-pane">
+      <button id="btn-files" title="Files" hidden>📁</button>
       <button id="btn-chat" title="Toggle discussion" hidden>💬</button>
       <div id="no-session">Select a session</div>
       <div id="terminal-wrap" hidden>
@@ -43,6 +44,42 @@
       </div>
       <div id="conversation-wrap" hidden>
         <div id="conv-messages"></div>
+      </div>
+      <div id="files-wrap" hidden>
+        <div id="files-tree-pane">
+          <header id="files-header">
+            <button id="files-tree-back" hidden title="Up">‹</button>
+            <span id="files-crumb"></span>
+          </header>
+          <ul id="files-tree"></ul>
+          <div id="files-tree-msg" hidden></div>
+        </div>
+        <div id="files-view-pane" hidden>
+          <header id="files-view-header">
+            <button id="files-view-back" title="Back to tree">‹</button>
+            <span id="files-view-crumbs"></span>
+            <span id="files-view-lang" class="lang-badge" hidden></span>
+            <span id="files-view-size" class="size-badge" hidden></span>
+            <span id="files-view-dirty" hidden>●</span>
+            <span class="header-spacer"></span>
+            <button id="files-wrap-toggle" title="Toggle wrap" hidden>⏎</button>
+            <button id="files-copy" title="Copy" hidden>📋</button>
+            <button id="files-edit" title="Edit" hidden>✎</button>
+            <button id="files-save" title="Save" hidden>Save</button>
+            <button id="files-cancel" title="Cancel" hidden>×</button>
+          </header>
+          <div id="files-action-bar" hidden>
+            <span id="files-action-label">L—</span>
+            <button class="files-action-btn" data-action="explain">Explain</button>
+            <button class="files-action-btn" data-action="bugs">Find bugs</button>
+            <button class="files-action-btn" data-action="comment">Add comment</button>
+            <button id="files-action-clear" title="Clear selection">×</button>
+          </div>
+          <div id="files-view-body"></div>
+          <textarea id="files-edit-area" hidden spellcheck="false"
+                    autocapitalize="off" autocorrect="off"></textarea>
+          <div id="files-view-msg" hidden></div>
+        </div>
       </div>
     </main>
 
@@ -106,6 +143,6 @@
   <script src="/vendor/mermaid.min.js"></script>
   <script>if (typeof mermaid !== 'undefined') mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
   <script src="keyboard.js?v=7"></script>
-  <script src="app.js?v=70"></script>
+  <script src="app.js?v=78"></script>
 </body>
 </html>

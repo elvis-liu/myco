@@ -1065,6 +1065,515 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 }
 #btn-chat:active { transform: scale(.92); }
 
+/* Files toggle sits left of #btn-chat in the same fixed cluster. */
+#btn-files {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: calc(env(safe-area-inset-right, 0px) + 60px);
+  z-index: 50;
+  width: 40px; height: 40px;
+  padding: 0;
+  border-radius: 10px;
+  background: rgba(40, 40, 40, .85);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, .08);
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+#btn-files:active { transform: scale(.92); }
+#btn-files.active { background: rgba(80, 120, 200, .35); }
+
+/* ── per-session file explorer (code-review polish) ──────────────────────── */
+
+#files-wrap {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+  background: #0d1117;        /* aligned with conversation pane */
+}
+
+/* ── tree pane ──────────────────────────────────────────────────────────── */
+#files-tree-pane {
+  width: 280px;
+  min-width: 220px;
+  border-right: 1px solid rgba(255, 255, 255, .06);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: #0a0e14;
+}
+#files-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  font: 12px 'JetBrains Mono', monospace;
+  color: var(--text);
+  background: rgba(255, 255, 255, .02);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+#files-tree-back {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+#files-tree-back:hover { background: rgba(255, 255, 255, .06); }
+#files-crumb { flex: 1; overflow-wrap: anywhere; opacity: .8; font-size: 11px; }
+
+#files-tree {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  flex: 1;
+}
+#files-tree li {
+  padding: 5px 12px 5px 8px;
+  font: 12.5px 'JetBrains Mono', monospace;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-left: 2px solid transparent;
+  transition: background-color .08s, border-color .08s;
+}
+#files-tree li:hover { background: rgba(80, 120, 200, .08); border-left-color: rgba(80, 120, 200, .35); }
+#files-tree li.heavy { opacity: .5; }
+
+/* Inline ext-icon span — content set per kind/extension via class. */
+#files-tree li .ft-ic {
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  border-radius: 3px;
+  padding: 1px 0;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+#files-tree li.kind-dir .ft-ic { color: #ffc56b; font-size: 12px; }
+#files-tree li.kind-dir .ft-ic::before { content: '▸'; }
+#files-tree li.kind-symlink .ft-ic { color: #8ad; font-size: 12px; }
+#files-tree li.kind-symlink .ft-ic::before { content: '↗'; }
+#files-tree li.kind-other .ft-ic { color: rgba(255,255,255,.3); }
+#files-tree li.kind-other .ft-ic::before { content: '·'; }
+/* File-extension-driven badges set in JS via .ft-ic.ext-XXX */
+#files-tree li .ft-ic.ext-js   { background: rgba(247,223,30,.20); color: #f7df1e; }
+#files-tree li .ft-ic.ext-ts   { background: rgba(49,120,198,.25); color: #6cb1ff; }
+#files-tree li .ft-ic.ext-json { background: rgba(140,140,140,.20); color: #ccc; }
+#files-tree li .ft-ic.ext-md   { background: rgba(120,170,250,.20); color: #aac8ff; }
+#files-tree li .ft-ic.ext-css  { background: rgba(120,200,255,.20); color: #79c0ff; }
+#files-tree li .ft-ic.ext-html { background: rgba(255,140,90,.20); color: #ffaa7a; }
+#files-tree li .ft-ic.ext-sh   { background: rgba(120,200,120,.20); color: #9cdc90; }
+#files-tree li .ft-ic.ext-py   { background: rgba(80,140,200,.25); color: #6cb1ff; }
+#files-tree li .ft-ic.ext-go   { background: rgba(0,180,210,.20); color: #5fdcef; }
+#files-tree li .ft-ic.ext-rs   { background: rgba(220,120,50,.20); color: #ffaa7a; }
+#files-tree li .ft-ic.ext-yml  { background: rgba(200,80,80,.20); color: #ff9090; }
+#files-tree li .ft-ic.ext-default { color: rgba(255,255,255,.4); }
+#files-tree li .ft-ic.ext-default::before { content: '·'; font-size: 14px; }
+
+#files-tree-msg {
+  padding: 12px;
+  font: 12px 'JetBrains Mono', monospace;
+  color: #f88;
+}
+
+/* ── view pane ──────────────────────────────────────────────────────────── */
+#files-view-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: #0d1117;
+  position: relative;       /* anchor for the floating action bar */
+}
+#files-view-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  font: 12px 'JetBrains Mono', monospace;
+  background: rgba(255, 255, 255, .02);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+#files-view-header button {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  font-size: .95rem;
+  padding: 3px 8px;
+  border-radius: 6px;
+  transition: background-color .08s;
+}
+#files-view-header button:hover { background: rgba(255, 255, 255, .08); }
+#files-view-header .header-spacer { flex: 1; }
+#files-save { background: rgba(80, 160, 110, .25) !important; font-weight: 600; }
+#files-save:hover { background: rgba(80, 160, 110, .40) !important; }
+#files-cancel { color: #f88 !important; }
+#files-view-back { font-size: 1.2rem !important; }
+
+#files-view-crumbs { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; flex: 1; min-width: 0; }
+#files-view-crumbs .crumb { color: rgba(255,255,255,.55); cursor: pointer; padding: 1px 4px; border-radius: 3px; }
+#files-view-crumbs .crumb:hover { background: rgba(255,255,255,.06); color: var(--text); }
+#files-view-crumbs .crumb-sep { color: rgba(255,255,255,.25); padding: 0 1px; }
+#files-view-crumbs .crumb.last { color: var(--text); cursor: default; }
+#files-view-crumbs .crumb.last:hover { background: transparent; }
+
+.lang-badge {
+  font: 10px 'JetBrains Mono', monospace;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(80, 120, 200, .20);
+  color: #8ab8ff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.size-badge {
+  font: 10.5px 'JetBrains Mono', monospace;
+  color: rgba(255,255,255,.45);
+  padding: 0 4px;
+}
+#files-view-dirty { color: #fb8; padding: 0 4px; }
+
+/* ── selection action bar (floating, anchored near selection) ───────────── */
+#files-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px 5px 10px;
+  background: rgba(20, 24, 34, .96);
+  border: 1px solid rgba(120, 160, 230, .45);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .55), 0 0 0 1px rgba(0, 0, 0, .3);
+  font: 12px 'JetBrains Mono', monospace;
+  flex-wrap: nowrap;
+  position: absolute;
+  z-index: 50;
+  /* JS sets top/left; default off-screen until positioned. */
+  top: -9999px;
+  left: -9999px;
+  max-width: calc(100% - 16px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+#files-action-label { color: #aac8ff; flex-shrink: 0; font-size: 10.5px; padding-right: 4px; border-right: 1px solid rgba(120, 160, 230, .20); margin-right: 2px; white-space: nowrap; }
+.files-action-btn {
+  background: rgba(80, 120, 200, .22);
+  border: 1px solid rgba(120, 160, 230, .25);
+  color: #d8e6ff;
+  cursor: pointer;
+  font: 11px 'JetBrains Mono', monospace;
+  padding: 4px 8px;
+  border-radius: 5px;
+  transition: background-color .08s, transform .04s;
+  white-space: nowrap;
+}
+.files-action-btn:hover { background: rgba(80, 120, 200, .45); }
+.files-action-btn:active { transform: scale(.95); }
+/* ── inline comment editor (Add comment) ───────────────────────────────────
+   Renders as a faux code line in the viewer at the comment's destination,
+   with the language's comment prefix as a non-editable label and an input
+   the user types into. Looks like a code line being drafted in place. */
+.inline-comment-editor {
+  display: flex;
+  align-items: stretch;
+  font: 13px 'JetBrains Mono', monospace;
+  background: rgba(180, 130, 255, .08);
+  border-top: 1px solid rgba(180, 130, 255, .35);
+  border-bottom: 1px solid rgba(180, 130, 255, .35);
+  border-left: 4px solid rgba(180, 130, 255, .55);
+  line-height: 1.5;
+  margin: 0;
+}
+.inline-comment-editor .ce-gutter {
+  flex-shrink: 0;
+  padding: 8px 10px 8px 8px;
+  color: rgba(180, 130, 255, .70);
+  user-select: none;
+  text-align: right;
+  min-width: 42px;
+  background: rgba(180, 130, 255, .05);
+  font-weight: 700;
+}
+.inline-comment-editor .ce-prefix-wrap {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  padding: 6px 8px;
+  background: transparent;
+  min-width: 0;
+  overflow: hidden;
+}
+.inline-comment-editor .ce-prefix,
+.inline-comment-editor .ce-suffix {
+  color: rgba(160, 220, 160, .85);
+  font: inherit;
+  white-space: pre;
+  user-select: none;
+  flex-shrink: 0;
+}
+.inline-comment-editor .ce-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  color: rgba(180, 230, 180, 1);
+  font: inherit;
+  padding: 0;
+  margin: 0;
+  caret-color: #fff;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.inline-comment-editor .ce-input::placeholder {
+  color: rgba(255, 255, 255, .25);
+  font-style: italic;
+}
+.inline-comment-editor .ce-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  border-left: 1px solid rgba(180, 130, 255, .15);
+}
+.inline-comment-editor .ce-actions button {
+  background: transparent;
+  border: 0;
+  color: rgba(255, 255, 255, .60);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 4px 12px;
+  font-weight: 700;
+}
+.inline-comment-editor .ce-actions .ce-save:hover {
+  color: #9cdc90;
+  background: rgba(150, 220, 140, .10);
+}
+.inline-comment-editor .ce-actions .ce-cancel:hover {
+  color: #f88;
+  background: rgba(255, 128, 128, .08);
+}
+.inline-comment-editor.busy { opacity: .55; pointer-events: none; }
+
+@media (max-width: 900px) {
+  /* Prevent iOS focus-zoom by keeping input ≥16px on mobile. */
+  .inline-comment-editor .ce-input { font-size: 16px; }
+  .inline-comment-editor .ce-prefix,
+  .inline-comment-editor .ce-suffix { font-size: 16px; }
+  .inline-comment-editor .ce-actions button { padding: 6px 14px; font-size: 16px; }
+}
+#files-action-clear {
+  background: transparent;
+  border: 0;
+  color: rgba(255,255,255,.5);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 6px;
+  margin-left: auto;
+}
+#files-action-clear:hover { color: #f88; }
+
+/* ── code viewer body (chunked rendering) ───────────────────────────────── */
+#files-view-body {
+  flex: 1;
+  overflow: auto;
+  background: #0d1117;
+  -webkit-overflow-scrolling: touch;
+}
+.code-chunk {
+  display: flex;
+  font: 13px 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  line-height: 1.5;
+  margin: 0;
+  background: #0d1117;
+  color: #c9d1d9;
+  white-space: pre;
+}
+.code-chunk.wrap { white-space: pre-wrap; word-break: break-all; }
+.code-chunk .ln-gutter {
+  flex-shrink: 0;
+  padding: 8px 10px 8px 8px;
+  color: rgba(255, 255, 255, .25);
+  user-select: none;
+  text-align: right;
+  border-right: 1px solid rgba(255, 255, 255, .04);
+  background: rgba(255, 255, 255, .015);
+  min-width: 42px;
+}
+.code-chunk .ln-gutter span { display: block; padding: 0 1px; }
+.code-chunk .code-content {
+  flex: 1;
+  padding: 8px 12px;
+  overflow-x: auto;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  /* Re-enable selection: body has user-select:none for app chrome, but the
+     viewer is for code review — long-press / drag to select must work. */
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  cursor: text;
+}
+.code-chunk .code-content code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.code-chunk .code-content code { font: inherit; background: transparent; padding: 0; color: inherit; }
+.code-chunk ::selection { background: rgba(80, 120, 200, .40); }
+#files-view-body .code-chunk:not(:first-child) { border-top: 1px solid rgba(255, 255, 255, .04); }
+
+/* ── Claude inline card ─────────────────────────────────────────────────── */
+.claude-card {
+  margin: 0;
+  background: linear-gradient(180deg, rgba(180, 130, 255, .06), rgba(80, 120, 200, .03));
+  border-top: 2px solid rgba(180, 130, 255, .35);
+  border-bottom: 2px solid rgba(180, 130, 255, .35);
+  border-left: 4px solid rgba(180, 130, 255, .55);
+  font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.claude-card .cc-anchor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(180, 130, 255, .10);
+  font: 11px 'JetBrains Mono', monospace;
+  color: #d8c0ff;
+  border-bottom: 1px solid rgba(180, 130, 255, .15);
+}
+.claude-card .cc-anchor .cc-spacer { flex: 1; }
+.claude-card .cc-anchor button {
+  background: transparent;
+  border: 0;
+  color: rgba(255,255,255,.55);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.claude-card .cc-anchor button:hover { background: rgba(255,255,255,.08); color: var(--text); }
+.claude-card .cc-q {
+  padding: 8px 12px 4px 12px;
+  color: rgba(255,255,255,.85);
+  font: 12.5px 'JetBrains Mono', monospace;
+  border-bottom: 1px solid rgba(180, 130, 255, .12);
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+.claude-card .cc-q::before { content: '› '; opacity: .5; }
+.claude-card .cc-a {
+  padding: 10px 14px;
+  color: #c9d1d9;
+  line-height: 1.55;
+  overflow-x: auto;
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+}
+.claude-card .cc-a p { margin: 0 0 .6em 0; }
+.claude-card .cc-a p:last-child { margin-bottom: 0; }
+.claude-card .cc-a pre {
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.05);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin: .5em 0;
+  font: 12.5px 'JetBrains Mono', monospace;
+  overflow-x: auto;
+}
+.claude-card .cc-a code { font: 12.5px 'JetBrains Mono', monospace; background: rgba(255,255,255,.06); padding: 1px 4px; border-radius: 3px; }
+.claude-card .cc-a pre code { background: transparent; padding: 0; }
+.claude-card .cc-a ul, .claude-card .cc-a ol { margin: .3em 0 .6em 0; padding-left: 1.4em; }
+.claude-card.pending .cc-a { color: rgba(255,255,255,.55); font-style: italic; }
+.claude-card.pending .cc-a::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: rgba(180, 130, 255, .60);
+  animation: cc-pulse 1.2s infinite;
+}
+@keyframes cc-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(.8); }
+  50%      { opacity: 1.0; transform: scale(1.2); }
+}
+.claude-card.collapsed .cc-q,
+.claude-card.collapsed .cc-a { display: none; }
+.claude-card.error { border-left-color: #f88; }
+.claude-card.error .cc-anchor { background: rgba(255, 100, 100, .10); color: #ffd0d0; }
+
+/* ── edit textarea (unchanged surface) ──────────────────────────────────── */
+#files-edit-area {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  font: 13px 'JetBrains Mono', monospace;
+  background: #0d1117;
+  color: #c9d1d9;
+  white-space: pre;
+  border: 0;
+  resize: none;
+  outline: none;
+  -webkit-text-fill-color: var(--text);
+  caret-color: var(--text);
+}
+#files-view-msg {
+  padding: 12px;
+  font: 12px 'JetBrains Mono', monospace;
+  color: #fc8;
+}
+
+@media (max-width: 900px) {
+  #files-wrap { flex-direction: column; }
+  #files-tree-pane {
+    width: 100%;
+    min-width: 0;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, .06);
+    max-height: 40vh;
+  }
+  /* Prevent iOS Safari focus auto-zoom by keeping textarea ≥16px. */
+  #files-edit-area { font-size: 16px; }
+  .code-chunk { font-size: 12.5px; }
+  #files-action-bar { padding: 5px 6px; gap: 3px; max-width: calc(100vw - 16px); }
+  .files-action-btn { padding: 6px 8px; font-size: 11.5px; }
+  #files-action-label { font-size: 10px; padding-right: 3px; }
+  /* (No popover input mode anymore — Add comment opens an inline editor in
+     the code body. The popover stays small and selection-anchored.) */
+  #files-view-header { padding: 6px 8px; gap: 4px; }
+  .lang-badge { font-size: 9.5px; padding: 1px 5px; }
+  .claude-card .cc-q { font-size: 12px; }
+  .claude-card .cc-a { font-size: 13px; }
+}
+
 /* Mobile: chatpane behaves like sidebar — full-screen overlay, mutually
    exclusive with the session sidebar. JS keeps them from being visible at
    the same time. */

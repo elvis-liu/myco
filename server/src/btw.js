@@ -112,8 +112,178 @@ function askAssistant({ cwd, chatHistory, scrollback, lastMessage }) {
   });
 }
 
+// ─── file-viewer Claude integration ─────────────────────────────────────────
+//
+// askAboutFile is the code-review sibling of askAssistant: it spawns the same
+// `claude -p` subprocess but builds a different prompt — file content, the
+// selected line range, and prior Q&A about this file (so follow-ups have
+// context). Used by the per-file thread the file viewer persists.
+
+const FILE_PROMPT_BUDGET = 128 * 1024;        // hard cap on file content in prompt
+const SELECTION_WINDOW_LINES = 60;             // context lines around an anchor when truncating
+
+const FILE_REVIEW_INSTRUCTIONS = [
+  'You are helping a developer review the file below in a web-based code-review tool.',
+  'Be concise (2–6 sentences for short questions; longer only when necessary).',
+  'Use markdown — code fences for snippets — and reference line numbers when useful.',
+  'Ground every claim in the file content shown. If you can\'t see something the user is asking about, say so.',
+].join('\n');
+
+function langForExt(ext) {
+  const map = {
+    js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    ts: 'typescript', tsx: 'typescript', jsx: 'javascript',
+    py: 'python', rb: 'ruby', go: 'go', rs: 'rust',
+    java: 'java', sh: 'bash', bash: 'bash',
+    md: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml',
+    css: 'css', html: 'html', sql: 'sql',
+  };
+  return map[(ext || '').toLowerCase()] || '';
+}
+
+function numberLines(lines, startAt) {
+  // Right-align line numbers in a 5-char field for readability.
+  return lines.map((ln, i) => `${String(startAt + i).padStart(5, ' ')}  ${ln}`).join('\n');
+}
+
+// Build the file portion of the prompt. If under budget, send the whole file
+// with line numbers. Over budget, send a head + tail window plus a window
+// around the anchor if any. Always returns: { body, totalLines, truncated }.
+function buildFileBody(filePath, fileContent, anchor) {
+  const lines = String(fileContent || '').split('\n');
+  const totalLines = lines.length;
+  const ext = (filePath.split('.').pop() || '').toLowerCase();
+  const lang = langForExt(ext) || 'text';
+  const header = `== File: ${filePath} (${totalLines} lines, ${lang}) ==`;
+  const fullSize = Buffer.byteLength(fileContent, 'utf8');
+  if (fullSize <= FILE_PROMPT_BUDGET) {
+    return {
+      body: `${header}\n${numberLines(lines, 1)}`,
+      totalLines,
+      truncated: false,
+    };
+  }
+  // Truncate. Take head (first ~200 lines), tail (last ~200), and a window
+  // around the anchor if present.
+  const HEAD = 200;
+  const TAIL = 200;
+  const segments = [];
+  segments.push({ start: 1, end: Math.min(HEAD, totalLines) });
+  if (anchor && anchor.startLine && anchor.endLine) {
+    const w = SELECTION_WINDOW_LINES;
+    const ws = Math.max(1, anchor.startLine - w);
+    const we = Math.min(totalLines, anchor.endLine + w);
+    segments.push({ start: ws, end: we });
+  }
+  segments.push({ start: Math.max(1, totalLines - TAIL + 1), end: totalLines });
+  // Merge overlapping/adjacent segments.
+  segments.sort((a, b) => a.start - b.start);
+  const merged = [];
+  for (const s of segments) {
+    if (merged.length && s.start <= merged[merged.length - 1].end + 1) {
+      merged[merged.length - 1].end = Math.max(merged[merged.length - 1].end, s.end);
+    } else {
+      merged.push({ ...s });
+    }
+  }
+  const parts = [`${header}  [TRUNCATED — file is ${Math.round(fullSize / 1024)} KiB; only key segments shown]`];
+  let prevEnd = 0;
+  for (const s of merged) {
+    if (s.start > prevEnd + 1) parts.push(`   …  (${s.start - prevEnd - 1} lines elided)`);
+    parts.push(numberLines(lines.slice(s.start - 1, s.end), s.start));
+    prevEnd = s.end;
+  }
+  if (prevEnd < totalLines) parts.push(`   …  (${totalLines - prevEnd} lines elided)`);
+  return { body: parts.join('\n'), totalLines, truncated: true };
+}
+
+function buildAnchorBody(anchor, fileContent) {
+  if (!anchor || !anchor.startLine || !anchor.endLine) return '';
+  const lines = String(fileContent || '').split('\n');
+  const slice = lines.slice(anchor.startLine - 1, anchor.endLine);
+  return [
+    '',
+    `== Selected lines ${anchor.startLine}–${anchor.endLine} ==`,
+    numberLines(slice, anchor.startLine),
+  ].join('\n');
+}
+
+function buildHistoryBody(history) {
+  if (!history || !history.length) return '';
+  const lines = ['', '== Prior conversation about this file =='];
+  for (const m of history) {
+    const who = m.user === ASSISTANT_USER ? 'Claude' : 'You';
+    const anchor = m.anchor ? ` (re lines ${m.anchor.startLine}–${m.anchor.endLine})` : '';
+    lines.push(`${who}${anchor}: ${m.text}`);
+  }
+  return lines.join('\n');
+}
+
+function buildFilePrompt({ filePath, fileContent, anchor, history, question }) {
+  const file = buildFileBody(filePath, fileContent, anchor);
+  return [
+    FILE_REVIEW_INSTRUCTIONS,
+    '',
+    file.body,
+    buildAnchorBody(anchor, fileContent),
+    buildHistoryBody(history),
+    '',
+    '== Question ==',
+    question,
+  ].filter(Boolean).join('\n');
+}
+
+// Spawn `claude -p` with the file-review prompt. Same timeout/error contract
+// as askAssistant: always resolves to a string (Claude's reply or an error
+// stand-in), never rejects.
+function askAboutFile({ cwd, filePath, fileContent, anchor, history, question }) {
+  const promptBody = buildFilePrompt({ filePath, fileContent, anchor, history, question });
+
+  return new Promise((resolve) => {
+    let proc;
+    try {
+      proc = spawn('claude', ['-p'], {
+        cwd: cwd || process.cwd(),
+        env: process.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (err) {
+      resolve(`(claude failed to start: ${err.message})`);
+      return;
+    }
+
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('error', (err) => resolve(`(claude error: ${err.message})`));
+
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGTERM'); } catch {}
+      setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 2000);
+    }, TIMEOUT_MS);
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      const text = stdout.trim();
+      if (text) { resolve(text); return; }
+      if (code === 143 || code === 137) { resolve('(claude timed out)'); return; }
+      const err = stderr.trim().slice(0, 300);
+      resolve(`(claude exited ${code}${err ? `: ${err}` : ''})`);
+    });
+
+    try {
+      proc.stdin.write(promptBody);
+      proc.stdin.end();
+    } catch (err) {
+      resolve(`(claude stdin write failed: ${err.message})`);
+    }
+  });
+}
+
 module.exports = {
   askAssistant,
+  askAboutFile,
   shouldAskAssistant,
   stripAnsi,
   tailLines,

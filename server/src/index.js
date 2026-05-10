@@ -4,7 +4,10 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { listSessions, spawnSession, sessionBelongsToUser, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts, loadStore, getSessionRecord, readDescriptionForCwd: readDescriptionForCwdPublic } = require('./sessions');
+const { listSessions, spawnSession, sessionBelongsToUser, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts, loadStore, getSessionRecord, readDescriptionForCwd: readDescriptionForCwdPublic, resolveCwd, getFileChat, getRecentFileChatMessages, appendFileChatMessage, deleteFileChatMessage } = require('./sessions');
+const filesApi = require('./files');
+const { askAboutFile, ASSISTANT_USER } = require('./btw');
+const crypto = require('crypto');
 const { attachWebSocket, attachViewerWebSocket } = require('./pty');
 const {
   isAuthRequired, userFromRequest, userFromToken,
@@ -16,7 +19,9 @@ const { startSummaryWatcher } = require('./summarizer');
 
 const app = express();
 logCapture.init();
-app.use(express.json());
+// 4 MiB ceiling so the file-explorer PUT can carry typical source files.
+// (Default is 100 KiB which would reject anything moderately sized.)
+app.use(express.json({ limit: '4mb' }));
 app.use((req, res, next) => {
   const ua = (req.headers['user-agent'] || '').slice(0, 30);
   console.log(`${new Date().toISOString().slice(11, 19)} ${req.ip} ${req.method} ${req.url} [${ua}]`);
@@ -357,6 +362,182 @@ app.delete('/sessions/:id', requireAuth, (req, res) => {
   }
   deleteSession(id);
   revokeShareTokensForSession(id);
+  res.json({ ok: true });
+});
+
+// ─── per-session file explorer API ──────────────────────────────────────────
+//
+// Owner-only. Share-token clients are explicitly NOT permitted here — the
+// share flow is for read-only terminal viewing, not workspace browsing.
+// Root is recomputed per request via resolveCwd(rec.cwd, rec.user) so a
+// stale rec.absCwd from a workspace move can't leak FS access.
+function fileApiPreamble(req, res) {
+  const id = req.params.id;
+  const rec = getSessionRecord(id);
+  if (!rec) { res.status(404).json({ error: 'unknown session' }); return null; }
+  if (isAuthRequired() && !sessionBelongsToUser(id, req.user)) {
+    res.status(403).json({ error: 'forbidden' });
+    return null;
+  }
+  let root;
+  try { root = resolveCwd(rec.cwd, rec.user); }
+  catch { res.status(500).json({ error: 'stale session record' }); return null; }
+  return { id, rec, root };
+}
+
+function fileApiError(res, e) {
+  const code = e && e.code;
+  if (code === 'ERR_OUTSIDE' || code === 'ERR_PERM') return res.status(403).json({ error: e.message, code });
+  if (code === 'ERR_NOT_FOUND') return res.status(404).json({ error: e.message, code });
+  if (code === 'ERR_NOT_DIR') return res.status(400).json({ error: e.message, code });
+  if (code === 'ERR_BINARY') return res.status(415).json({ error: e.message, code, binary: true, size: e.size, mtimeMs: e.mtime });
+  if (code === 'ERR_TOO_LARGE') return res.status(413).json({ error: e.message, code, size: e.size, mtimeMs: e.mtime });
+  if (code === 'ERR_MTIME_CONFLICT') return res.status(409).json({ error: e.message, code });
+  if (code === 'ERR_SYMLINK_WRITE') return res.status(400).json({ error: e.message, code });
+  if (code === 'ERR_BAD_INPUT') return res.status(400).json({ error: e.message, code });
+  console.error('[files] unexpected error:', e);
+  return res.status(500).json({ error: 'internal error' });
+}
+
+app.get('/sessions/:id/files', requireAuth, async (req, res) => {
+  const ctx = fileApiPreamble(req, res);
+  if (!ctx) return;
+  try {
+    const out = await filesApi.listDir(ctx.root, req.query.path || '.');
+    res.json(out);
+  } catch (e) { fileApiError(res, e); }
+});
+
+app.get('/sessions/:id/file', requireAuth, async (req, res) => {
+  const ctx = fileApiPreamble(req, res);
+  if (!ctx) return;
+  if (!req.query.path) return res.status(400).json({ error: 'path required' });
+  try {
+    const out = await filesApi.readFile(ctx.root, req.query.path);
+    res.json(out);
+  } catch (e) { fileApiError(res, e); }
+});
+
+app.put('/sessions/:id/file', requireAuth, async (req, res) => {
+  const ctx = fileApiPreamble(req, res);
+  if (!ctx) return;
+  const { path: relPath, content, expectedMtimeMs } = req.body || {};
+  if (!relPath) return res.status(400).json({ error: 'path required' });
+  try {
+    const out = await filesApi.writeFile(ctx.root, relPath, { content, expectedMtimeMs });
+    res.json(out);
+  } catch (e) { fileApiError(res, e); }
+});
+
+// ─── per-file Claude thread (file-viewer) ───────────────────────────────────
+//
+// Owner-only, same containment + auth model as the file API. Threads are
+// per (sessionId, relPath) and persisted in the session store.
+
+function validateFileChatPath(ctx, relPath, res) {
+  if (!relPath) { res.status(400).json({ error: 'path required' }); return false; }
+  // Reject anything that would escape the session root. We don't need the
+  // resolved path for GET/DELETE; safeJoin throws ERR_OUTSIDE on traversal.
+  return filesApi.safeJoin(ctx.root, relPath)
+    .then(() => true)
+    .catch((e) => { fileApiError(res, e); return false; });
+}
+
+app.get('/sessions/:id/file-chat', requireAuth, async (req, res) => {
+  const ctx = fileApiPreamble(req, res);
+  if (!ctx) return;
+  const relPath = req.query.path;
+  if (!(await validateFileChatPath(ctx, relPath, res))) return;
+  res.json({ messages: getFileChat(ctx.id, relPath) });
+});
+
+app.post('/sessions/:id/file-chat', requireAuth, async (req, res) => {
+  const ctx = fileApiPreamble(req, res);
+  if (!ctx) return;
+  const { path: relPath, anchor, question } = req.body || {};
+  if (!relPath) return res.status(400).json({ error: 'path required' });
+  if (typeof question !== 'string' || !question.trim()) {
+    return res.status(400).json({ error: 'question required' });
+  }
+  // Validate anchor shape if present.
+  let normAnchor = null;
+  if (anchor && typeof anchor === 'object') {
+    const s = parseInt(anchor.startLine, 10);
+    const e = parseInt(anchor.endLine, 10);
+    if (Number.isFinite(s) && Number.isFinite(e) && s >= 1 && e >= s) {
+      normAnchor = { startLine: s, endLine: e };
+    }
+  }
+  // Read the file. If the file is too large or binary, we send the question
+  // anyway with a stand-in (askAboutFile handles truncation).
+  let fileContent = '';
+  try {
+    const out = await filesApi.readFile(ctx.root, relPath);
+    fileContent = out.content;
+  } catch (e) {
+    if (e.code === 'ERR_BINARY') {
+      fileContent = '(binary file — content not available)';
+    } else if (e.code === 'ERR_TOO_LARGE') {
+      // Read raw via fs and let askAboutFile truncate it inside the prompt.
+      try {
+        const fs = require('fs/promises');
+        const path = require('path');
+        const abs = path.resolve(ctx.root, relPath);
+        // safeJoin already validated containment via validateFileChatPath above.
+        fileContent = await fs.readFile(abs, 'utf8');
+      } catch (e2) {
+        return fileApiError(res, e2);
+      }
+    } else {
+      return fileApiError(res, e);
+    }
+  }
+  // Append the user message immediately (optimistic; client also shows it).
+  const userMsg = {
+    id: crypto.randomBytes(6).toString('hex'),
+    user: 'you',
+    text: question.trim(),
+    ts: new Date().toISOString(),
+    anchor: normAnchor,
+  };
+  appendFileChatMessage(ctx.id, relPath, userMsg);
+
+  // Build prior history (most recent ~10, excluding the message we just added).
+  const history = getRecentFileChatMessages(ctx.id, relPath, 11).slice(0, -1);
+
+  let reply;
+  try {
+    reply = await askAboutFile({
+      cwd: ctx.root,
+      filePath: relPath,
+      fileContent,
+      anchor: normAnchor,
+      history,
+      question: question.trim(),
+    });
+  } catch (err) {
+    reply = `(claude error: ${err && err.message ? err.message : 'unknown'})`;
+  }
+  const claudeMsg = {
+    id: crypto.randomBytes(6).toString('hex'),
+    user: ASSISTANT_USER,
+    text: reply,
+    ts: new Date().toISOString(),
+    anchor: normAnchor,
+  };
+  appendFileChatMessage(ctx.id, relPath, claudeMsg);
+  res.json({ message: claudeMsg, userMessage: userMsg });
+});
+
+app.delete('/sessions/:id/file-chat', requireAuth, async (req, res) => {
+  const ctx = fileApiPreamble(req, res);
+  if (!ctx) return;
+  const relPath = req.query.path;
+  const messageId = req.query.messageId;
+  if (!(await validateFileChatPath(ctx, relPath, res))) return;
+  if (!messageId) return res.status(400).json({ error: 'messageId required' });
+  const removed = deleteFileChatMessage(ctx.id, relPath, messageId);
+  if (!removed) return res.status(404).json({ error: 'message not found' });
   res.json({ ok: true });
 });
 

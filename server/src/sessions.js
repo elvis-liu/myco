@@ -441,6 +441,70 @@ function appendChatMessage(sessionId, msg) {
   return msg;
 }
 
+// ─── per-file Claude threads (file viewer) ──────────────────────────────────
+//
+// Schema: rec.fileChats = { "<relPath>": { messages: [...], lastTouched } }
+// Caps: 50 messages per file (FIFO), 50 files per session (drop oldest by
+// lastTouched). Each message: { id, user, text, ts, anchor }.
+
+const MAX_FILE_CHAT_MESSAGES = 50;
+const MAX_FILES_PER_SESSION = 50;
+
+function ensureFileChatBag(rec) {
+  if (!rec.fileChats || typeof rec.fileChats !== 'object') rec.fileChats = {};
+  return rec.fileChats;
+}
+
+function getFileChat(sessionId, relPath) {
+  const rec = loadStore().sessions[sessionId];
+  if (!rec || !rec.fileChats) return [];
+  const t = rec.fileChats[relPath];
+  return (t && Array.isArray(t.messages)) ? t.messages : [];
+}
+
+function getRecentFileChatMessages(sessionId, relPath, n) {
+  const all = getFileChat(sessionId, relPath);
+  return all.slice(-Math.max(0, n | 0));
+}
+
+function appendFileChatMessage(sessionId, relPath, msg) {
+  const store = loadStore();
+  const rec = store.sessions[sessionId];
+  if (!rec) return null;
+  const bag = ensureFileChatBag(rec);
+  if (!bag[relPath]) bag[relPath] = { messages: [], lastTouched: Date.now() };
+  bag[relPath].messages.push(msg);
+  if (bag[relPath].messages.length > MAX_FILE_CHAT_MESSAGES) {
+    bag[relPath].messages = bag[relPath].messages.slice(-MAX_FILE_CHAT_MESSAGES);
+  }
+  bag[relPath].lastTouched = Date.now();
+  // Per-session file-count cap: drop the least recently touched file thread.
+  const paths = Object.keys(bag);
+  if (paths.length > MAX_FILES_PER_SESSION) {
+    paths.sort((a, b) => (bag[a].lastTouched || 0) - (bag[b].lastTouched || 0));
+    const toDrop = paths.slice(0, paths.length - MAX_FILES_PER_SESSION);
+    for (const p of toDrop) delete bag[p];
+  }
+  saveStore();
+  return msg;
+}
+
+function deleteFileChatMessage(sessionId, relPath, messageId) {
+  const store = loadStore();
+  const rec = store.sessions[sessionId];
+  if (!rec || !rec.fileChats || !rec.fileChats[relPath]) return false;
+  const t = rec.fileChats[relPath];
+  const before = t.messages.length;
+  t.messages = t.messages.filter((m) => m.id !== messageId);
+  const removed = t.messages.length < before;
+  if (removed) {
+    if (t.messages.length === 0) delete rec.fileChats[relPath];
+    else t.lastTouched = Date.now();
+    saveStore();
+  }
+  return removed;
+}
+
 // Use Object.assign so the existing module.exports object is mutated rather
 // than replaced. pty.js captures this exports object during the circular
 // require, so a replacement would leave its reference pointing at the empty
@@ -466,4 +530,10 @@ Object.assign(module.exports, {
   encodeCwdForClaude,
   getSessionRecord,
   readDescriptionForCwd,
+  resolveCwd,
+  // file-viewer Claude threads
+  getFileChat,
+  getRecentFileChatMessages,
+  appendFileChatMessage,
+  deleteFileChatMessage,
 });

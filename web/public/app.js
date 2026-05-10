@@ -41,6 +41,14 @@ const state = {
   chatUser: null,
   chatPaneVisible: window.innerWidth > 900,
   shareMode: false, // kept for compat — no longer gates UI
+  // Per-session file explorer state. Cleared when session changes.
+  files: {
+    visible: false,
+    currentPath: '.',
+    history: [],         // back-stack of dir paths for the up-button
+    viewing: null,       // { path, mtimeMs, content, dirty, editing, binary }
+    prevView: null,      // 'terminal' | 'conversation' — what to restore on toggle off
+  },
 };
 
 // ── auth ──────────────────────────────────────────────────────────────────────
@@ -466,6 +474,7 @@ async function init() {
   document.getElementById('status-bar').addEventListener('click', toggleLogPanel);
   document.getElementById('log-panel-close').addEventListener('click', toggleLogPanel);
   bindChatUi();
+  bindFilesUi();
   // Desktop default: chat pane visible alongside the terminal. Mobile: hidden,
   // user opens it explicitly via the 💬 button (mutually exclusive with the
   // session sidebar).
@@ -795,6 +804,11 @@ function openSession(id) {
   document.getElementById('terminal-wrap').hidden = true;
   document.getElementById('conversation-wrap').hidden = true;
   document.getElementById('conv-messages').innerHTML = '';
+  // Reset file pane on session switch — paths and mtimes are session-scoped.
+  hideFilesView();
+  state.files.currentPath = '.';
+  state.files.history = [];
+  state.files.viewing = null;
 
   state.activeId = id;
   state.viewerMode = false;
@@ -979,8 +993,16 @@ function setChatPane(visible) {
 function updateChatButton() {
   const btn = document.getElementById('btn-chat');
   if (!btn) return;
-  const hasContent = !document.getElementById('terminal-wrap').hidden || !document.getElementById('conversation-wrap').hidden;
+  const hasContent =
+    !document.getElementById('terminal-wrap').hidden ||
+    !document.getElementById('conversation-wrap').hidden ||
+    !document.getElementById('files-wrap').hidden;
   btn.hidden = !state.activeId || state.chatPaneVisible || !hasContent;
+  // The files toggle is bound to the same active-session condition, but not
+  // the chatpane visibility (it toggles within the main pane, independent
+  // of the discussion overlay).
+  const fbtn = document.getElementById('btn-files');
+  if (fbtn) fbtn.hidden = !state.activeId || !hasContent;
 }
 
 // Replace native viewport scroll with a JS-driven scroll that calls
@@ -1242,6 +1264,1057 @@ function bindChatUi() {
 
   document.getElementById('btn-chat')?.addEventListener('click', () => setChatPane(!state.chatPaneVisible));
   document.getElementById('chatpane-close')?.addEventListener('click', () => setChatPane(false));
+}
+
+// ── per-session file explorer ───────────────────────────────────────────────
+
+function bindFilesUi() {
+  const btn = document.getElementById('btn-files');
+  if (!btn || btn.dataset.bound) return;
+  btn.dataset.bound = '1';
+  btn.addEventListener('click', toggleFilesPane);
+  document.getElementById('files-tree-back')?.addEventListener('click', () => {
+    if (state.files.history.length === 0) return;
+    const prev = state.files.history.pop();
+    loadFileTree(prev);
+  });
+  document.getElementById('files-view-back')?.addEventListener('click', closeFileViewer);
+  document.getElementById('files-edit')?.addEventListener('click', enterEditMode);
+  document.getElementById('files-cancel')?.addEventListener('click', cancelEdit);
+  document.getElementById('files-save')?.addEventListener('click', () => { saveFile().catch(() => {}); });
+  document.getElementById('files-copy')?.addEventListener('click', copyFileContents);
+  document.getElementById('files-wrap-toggle')?.addEventListener('click', toggleWrap);
+
+  // Selection-driven action bar wiring
+  document.querySelectorAll('#files-action-bar .files-action-btn').forEach((b) => {
+    b.addEventListener('click', () => {
+      const action = b.dataset.action;
+      if (action === 'comment') {
+        // Inline editor in the code body — capture anchor first, then hide
+        // the popover (selection might collapse anyway).
+        const v = state.files.viewing;
+        if (!v || !v.selection) return;
+        startInlineCommentEditor(v.selection);
+        hideActionBar();
+      } else {
+        askClaudeAboutSelection(action).catch(() => {});
+      }
+    });
+  });
+  document.getElementById('files-action-clear')?.addEventListener('click', () => {
+    try { window.getSelection()?.removeAllRanges(); } catch {}
+    state.files.viewing && (state.files.viewing.selection = null);
+    hideActionBar();
+  });
+
+  // Selection listener — detect line-range selections inside the code body.
+  document.addEventListener('selectionchange', debouncedOnSelectionChange);
+  // Reposition the floating popover when the code scrolls under it, on
+  // viewport resize, or when the device rotates.
+  document.getElementById('files-view-body')?.addEventListener('scroll', repositionActionBarIfVisible, { passive: true });
+  window.addEventListener('resize', repositionActionBarIfVisible);
+  window.addEventListener('orientationchange', repositionActionBarIfVisible);
+}
+
+let _selectionTimer = null;
+function debouncedOnSelectionChange() {
+  if (_selectionTimer) clearTimeout(_selectionTimer);
+  _selectionTimer = setTimeout(() => onSelectionChange(), 120);
+}
+
+function toggleFilesPane() {
+  if (!state.activeId) return;
+  if (state.files.visible) hideFilesView();
+  else showFilesView();
+}
+
+function showFilesView() {
+  if (!state.activeId) return;
+  const termWrap = document.getElementById('terminal-wrap');
+  const convWrap = document.getElementById('conversation-wrap');
+  state.files.prevView = !termWrap.hidden ? 'terminal' : (!convWrap.hidden ? 'conversation' : null);
+  termWrap.hidden = true;
+  convWrap.hidden = true;
+  document.getElementById('files-wrap').hidden = false;
+  document.getElementById('btn-files')?.classList.add('active');
+  state.files.visible = true;
+  loadFileTree(state.files.currentPath || '.');
+  updateChatButton();
+}
+
+function hideFilesView() {
+  document.getElementById('files-wrap').hidden = true;
+  document.getElementById('files-view-pane').hidden = true;
+  document.getElementById('btn-files')?.classList.remove('active');
+  state.files.visible = false;
+  // Restore the previous main view (terminal or conversation).
+  if (state.activeId) {
+    const which = state.files.prevView;
+    if (which === 'terminal') document.getElementById('terminal-wrap').hidden = false;
+    else if (which === 'conversation') document.getElementById('conversation-wrap').hidden = false;
+  }
+  state.files.prevView = null;
+  if (state.fitAddon) requestAnimationFrame(() => { try { state.fitAddon.fit(); } catch {} });
+  updateChatButton();
+}
+
+async function loadFileTree(relPath) {
+  if (!state.activeId) return;
+  const id = state.activeId;
+  const url = `/sessions/${encodeURIComponent(id)}/files?path=${encodeURIComponent(relPath || '.')}`;
+  let res;
+  try { res = await authedFetch(url); }
+  catch (e) { showFilesTreeError(`Failed to list: ${e.message || e}`); return; }
+  if (!res.ok) {
+    let body = {};
+    try { body = await res.json(); } catch {}
+    showFilesTreeError(body.error || `HTTP ${res.status}`);
+    return;
+  }
+  const data = await res.json();
+  state.files.currentPath = data.path;
+  renderFilesList(data.entries, data.truncated, data.path);
+}
+
+function showFilesTreeError(msg) {
+  const ul = document.getElementById('files-tree');
+  const errEl = document.getElementById('files-tree-msg');
+  ul.innerHTML = '';
+  errEl.textContent = msg;
+  errEl.hidden = false;
+}
+
+function renderFilesList(entries, truncated, relPath) {
+  const ul = document.getElementById('files-tree');
+  const errEl = document.getElementById('files-tree-msg');
+  errEl.hidden = true;
+  errEl.textContent = '';
+  document.getElementById('files-crumb').textContent = relPath === '.' ? '/' : '/' + relPath;
+  document.getElementById('files-tree-back').hidden = (relPath === '.' || relPath === '');
+
+  const parts = [];
+  for (const e of entries) {
+    const cls = `kind-${e.kind}` + (e.heavy ? ' heavy' : '');
+    const ic = renderFileTreeIcon(e);
+    parts.push(
+      `<li class="${cls}" data-name="${escHtml(e.name)}" data-kind="${e.kind}">` +
+      `${ic}` +
+      `<span class="ft-name">${escHtml(e.name)}${e.kind === 'dir' ? '/' : ''}</span>` +
+      `</li>`
+    );
+  }
+  if (truncated) parts.push(`<li class="kind-other" style="opacity:.6"><span class="ft-ic"></span>…(truncated, more entries hidden)</li>`);
+  ul.innerHTML = parts.join('');
+
+  ul.querySelectorAll('li[data-name]').forEach((li) => {
+    li.addEventListener('click', () => {
+      const name = li.dataset.name;
+      const kind = li.dataset.kind;
+      const child = relPath === '.' ? name : `${relPath}/${name}`;
+      if (kind === 'dir') {
+        state.files.history.push(relPath);
+        loadFileTree(child);
+      } else if (kind === 'file') {
+        openFileInViewer(child);
+      }
+      // symlinks/other: no-op in v1
+    });
+  });
+}
+
+// Compact uppercase badge per file kind/extension. CSS colors it by class.
+function renderFileTreeIcon(entry) {
+  if (entry.kind === 'dir' || entry.kind === 'symlink' || entry.kind === 'other') {
+    return `<span class="ft-ic"></span>`;
+  }
+  const ext = (entry.name.split('.').pop() || '').toLowerCase();
+  const map = {
+    js: 'JS', mjs: 'JS', cjs: 'JS', jsx: 'JS',
+    ts: 'TS', tsx: 'TS',
+    json: 'JSON', md: 'MD', markdown: 'MD',
+    css: 'CSS', scss: 'CSS',
+    html: 'HTML', htm: 'HTML', svg: 'HTML', xml: 'HTML',
+    sh: 'SH', bash: 'SH', zsh: 'SH',
+    py: 'PY', rb: 'RB', go: 'GO', rs: 'RS',
+    yml: 'YML', yaml: 'YML', toml: 'YML',
+    c: 'C', h: 'C', cpp: 'C++', hpp: 'C++',
+    java: 'JV', kt: 'KT', swift: 'SW', sql: 'SQL',
+  };
+  const cls = map[ext] ? `ext-${ext.replace('+', '')}` : 'ext-default';
+  const label = map[ext] || '';
+  return `<span class="ft-ic ${cls}">${escHtml(label)}</span>`;
+}
+
+async function openFileInViewer(relPath) {
+  if (!state.activeId) return;
+  const id = state.activeId;
+  const url = `/sessions/${encodeURIComponent(id)}/file?path=${encodeURIComponent(relPath)}`;
+  let res;
+  try { res = await authedFetch(url); }
+  catch (e) { alert(`Failed to open: ${e.message || e}`); return; }
+  let body = {};
+  try { body = await res.json(); } catch {}
+
+  // Initialize viewing state up-front so showFileViewerPane has metadata.
+  state.files.viewing = {
+    path: relPath, mtimeMs: body.mtimeMs, content: '',
+    dirty: false, editing: false, binary: false,
+    cards: [], selection: null, pending: null,
+    commentDraft: null,
+    wrap: /\.(md|markdown|txt|log)$/i.test(relPath),
+    size: body.size,
+  };
+
+  showFileViewerPane(relPath);
+
+  if (res.status === 415) {
+    state.files.viewing.binary = true;
+    showFileViewerMessage(`Binary file (${humanBytes(body.size)}) — not viewable.`);
+    document.getElementById('files-edit').hidden = true;
+    return;
+  }
+  if (res.status === 413) {
+    showFileViewerMessage(`File too large to view (${humanBytes(body.size)}).`);
+    document.getElementById('files-edit').hidden = true;
+    return;
+  }
+  if (!res.ok) {
+    showFileViewerMessage(`Error: ${body.error || res.status}`);
+    return;
+  }
+  state.files.viewing.path = body.path;
+  state.files.viewing.content = body.content;
+  state.files.viewing.size = body.size;
+
+  renderFileViewerWithCards(body.content, body.path, []);
+  // Async: load any persisted Claude thread for this file, then re-render.
+  loadFileChat(body.path).then((cards) => {
+    if (state.files.viewing && state.files.viewing.path === body.path) {
+      state.files.viewing.cards = cards;
+      renderFileViewerWithCards(state.files.viewing.content, body.path, cards);
+    }
+  }).catch(() => {});
+}
+
+function showFileViewerPane(relPath) {
+  document.getElementById('files-view-pane').hidden = false;
+  renderViewerHeader(relPath);
+  document.getElementById('files-view-msg').hidden = true;
+  document.getElementById('files-view-msg').textContent = '';
+  document.getElementById('files-view-dirty').hidden = true;
+  document.getElementById('files-edit').hidden = false;
+  document.getElementById('files-save').hidden = true;
+  document.getElementById('files-cancel').hidden = true;
+  document.getElementById('files-edit-area').hidden = true;
+  document.getElementById('files-action-bar').hidden = true;
+  // On mobile, hide the tree to give the viewer the full width.
+  if (window.innerWidth <= 900) {
+    document.getElementById('files-tree-pane').hidden = true;
+  }
+}
+
+function renderViewerHeader(relPath) {
+  // Clickable breadcrumbs.
+  const crumbs = document.getElementById('files-view-crumbs');
+  const segments = relPath.split('/').filter(Boolean);
+  const root = (state.files.currentPath && state.files.currentPath !== '.') ? state.files.currentPath : '';
+  // Build clickable crumbs: each is the directory prefix to nav back to.
+  const html = ['<span class="crumb crumb-root" data-path=".">/</span>'];
+  let acc = '';
+  segments.forEach((seg, i) => {
+    if (i > 0) html.push('<span class="crumb-sep">/</span>');
+    acc = acc ? acc + '/' + seg : seg;
+    const last = i === segments.length - 1;
+    const cls = last ? 'crumb last' : 'crumb';
+    const navTo = last ? '' : acc;
+    html.push(`<span class="${cls}" data-path="${escHtml(navTo)}">${escHtml(seg)}</span>`);
+  });
+  crumbs.innerHTML = html.join('');
+  crumbs.querySelectorAll('.crumb').forEach((el) => {
+    el.addEventListener('click', () => {
+      const p = el.dataset.path;
+      if (p === '' || el.classList.contains('last')) return;
+      // Navigate back to directory and close viewer.
+      closeFileViewer(true);
+      loadFileTree(p || '.');
+    });
+  });
+
+  // Language badge.
+  const langEl = document.getElementById('files-view-lang');
+  const ext = (relPath.split('.').pop() || '').toLowerCase();
+  const langLabel = LANG_BADGE_FOR_EXT[ext] || ext.toUpperCase().slice(0, 4);
+  if (langLabel) {
+    langEl.textContent = langLabel;
+    langEl.hidden = false;
+  } else {
+    langEl.hidden = true;
+  }
+
+  // Size badge.
+  const sizeEl = document.getElementById('files-view-size');
+  const v = state.files.viewing;
+  if (v && typeof v.size === 'number') {
+    sizeEl.textContent = humanBytes(v.size);
+    sizeEl.hidden = false;
+  } else {
+    sizeEl.hidden = true;
+  }
+
+  // Action buttons visible only when we have content.
+  document.getElementById('files-copy').hidden = !(v && v.content);
+  document.getElementById('files-wrap-toggle').hidden = !(v && v.content);
+}
+
+const LANG_BADGE_FOR_EXT = {
+  js: 'JS', mjs: 'JS', cjs: 'JS', jsx: 'JSX',
+  ts: 'TS', tsx: 'TSX',
+  json: 'JSON', md: 'MD', html: 'HTML', xml: 'XML', svg: 'SVG',
+  css: 'CSS', scss: 'SCSS', sh: 'SH', bash: 'SH', zsh: 'SH',
+  py: 'PY', rb: 'RB', go: 'GO', rs: 'RS',
+  yml: 'YML', yaml: 'YML', toml: 'TOML', sql: 'SQL',
+  c: 'C', h: 'H', cpp: 'C++', hpp: 'H++', java: 'JAVA', kt: 'KT', swift: 'SW',
+  ini: 'INI', txt: 'TXT', log: 'LOG',
+};
+
+function showFileViewerMessage(msg) {
+  document.getElementById('files-view-body').innerHTML = '';
+  const m = document.getElementById('files-view-msg');
+  m.textContent = msg;
+  m.hidden = false;
+}
+
+function closeFileViewer(skipDirtyPrompt) {
+  if (!skipDirtyPrompt && state.files.viewing && state.files.viewing.dirty) {
+    if (!confirm('Discard unsaved edits?')) return;
+  }
+  document.getElementById('files-view-pane').hidden = true;
+  document.getElementById('files-tree-pane').hidden = false;
+  document.getElementById('files-action-bar').hidden = true;
+  state.files.viewing = null;
+}
+
+function copyFileContents() {
+  const v = state.files.viewing;
+  if (!v || !v.content) return;
+  try {
+    navigator.clipboard.writeText(v.content);
+    flashHeaderButton('files-copy');
+  } catch {}
+}
+
+function flashHeaderButton(id) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  const prev = b.style.backgroundColor;
+  b.style.backgroundColor = 'rgba(80, 160, 110, .35)';
+  setTimeout(() => { b.style.backgroundColor = prev; }, 350);
+}
+
+function toggleWrap() {
+  const v = state.files.viewing;
+  if (!v) return;
+  v.wrap = !v.wrap;
+  renderFileViewerWithCards(v.content, v.path, v.cards);
+}
+
+// ── chunk-render: code with inline Claude cards ────────────────────────────
+
+function renderFileViewerWithCards(content, relPath, cards) {
+  const body = document.getElementById('files-view-body');
+  const lines = String(content || '').split('\n');
+  const totalLines = lines.length;
+  const ext = (relPath.split('.').pop() || '').toLowerCase();
+  const lang = hljsLangForExt(ext);
+  const wrap = !!(state.files.viewing && state.files.viewing.wrap);
+
+  // Build segments interleaving code chunks and cards. Anchored cards split
+  // the code at each card's endLine. Anchorless cards collect at the end.
+  const anchored = [];
+  const trailing = [];
+  for (const c of cards) {
+    if (c.user !== ASSISTANT_USER_NAME) continue; // only render Claude cards (questions inlined inside)
+    if (c.anchor && c.anchor.endLine && c.anchor.startLine) {
+      anchored.push({
+        ...c,
+        // Find the corresponding question (preceding 'you' message with same anchor) so we render Q+A together.
+      });
+    } else {
+      trailing.push(c);
+    }
+  }
+  // Pair Claude messages with their preceding user question (best-effort by anchor + order).
+  const userQs = cards.filter((c) => c.user === 'you');
+  function pickQuestionFor(claudeMsg) {
+    // The most recent user message with the same anchor that comes before claudeMsg.
+    const claudeTs = new Date(claudeMsg.ts).getTime();
+    let best = null;
+    for (const q of userQs) {
+      const qTs = new Date(q.ts).getTime();
+      if (qTs > claudeTs) continue;
+      if (anchorsEqual(q.anchor, claudeMsg.anchor)) {
+        if (!best || new Date(q.ts).getTime() > new Date(best.ts).getTime()) best = q;
+      }
+    }
+    return best;
+  }
+
+  anchored.sort((a, b) => a.anchor.endLine - b.anchor.endLine);
+
+  body.innerHTML = '';
+  body.dataset.lang = lang || '';
+
+  // Inline comment editor: synthesize an anchored "stop" at draft.targetLine - 1
+  // so the editor renders BEFORE that line. Treat targetLine === 1 as
+  // "render at the very top".
+  const draft = state.files.viewing && state.files.viewing.commentDraft;
+  // Build a unified list of inline stops (anchored cards + draft) sorted by
+  // splitLine (the line AFTER which we insert). For cards: splitLine = endLine.
+  // For drafts: splitLine = targetLine - 1 (so the editor appears above target).
+  const stops = [];
+  for (const c of anchored) {
+    stops.push({ kind: 'card', card: c, splitLine: Math.min(totalLines, c.anchor.endLine) });
+  }
+  if (draft) {
+    stops.push({ kind: 'editor', draft, splitLine: Math.max(0, Math.min(totalLines, draft.targetLine - 1)) });
+  }
+  stops.sort((a, b) => a.splitLine - b.splitLine);
+
+  let cursor = 1;
+  for (const s of stops) {
+    const splitLine = s.splitLine;
+    if (splitLine >= cursor) {
+      body.appendChild(renderCodeChunk(lines, cursor, splitLine, lang, wrap));
+      cursor = splitLine + 1;
+    }
+    if (s.kind === 'card') {
+      const q = pickQuestionFor(s.card);
+      body.appendChild(renderClaudeCard(s.card, q));
+    } else if (s.kind === 'editor') {
+      body.appendChild(renderInlineCommentEditor(s.draft));
+    }
+  }
+  if (cursor <= totalLines) {
+    body.appendChild(renderCodeChunk(lines, cursor, totalLines, lang, wrap));
+  }
+  // Pending Claude card: insert at the anchor of the pending question (or at end).
+  const pending = state.files.viewing && state.files.viewing.pending;
+  if (pending) {
+    body.appendChild(renderPendingCard(pending));
+  }
+  // Trailing (anchorless) cards at the very end.
+  for (const c of trailing) {
+    body.appendChild(renderClaudeCard(c, pickQuestionFor(c)));
+  }
+}
+
+function renderInlineCommentEditor(draft) {
+  const ed = document.createElement('div');
+  ed.className = 'inline-comment-editor';
+  ed.innerHTML =
+    `<div class="ce-gutter">+</div>` +
+    `<div class="ce-prefix-wrap">` +
+      `<span class="ce-prefix">${escHtml(draft.indent + draft.prefix)}</span>` +
+      `<input type="text" class="ce-input" placeholder="comment text — Enter to save, Esc to cancel" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" />` +
+      (draft.suffix ? `<span class="ce-suffix">${escHtml(draft.suffix)}</span>` : '') +
+    `</div>` +
+    `<div class="ce-actions">` +
+      `<button class="ce-save" title="Save (Enter)">✓</button>` +
+      `<button class="ce-cancel" title="Cancel (Esc)">×</button>` +
+    `</div>`;
+
+  const input = ed.querySelector('.ce-input');
+  const saveBtn = ed.querySelector('.ce-save');
+  const cancelBtn = ed.querySelector('.ce-cancel');
+
+  // Mirror typing into draft so a re-render mid-edit could preserve text
+  // (currently we don't re-render mid-edit, but it's cheap insurance).
+  input.addEventListener('input', () => { draft.text = input.value; });
+  input.value = draft.text || '';
+
+  const submit = () => commitInlineCommentEditor(input.value);
+  saveBtn.addEventListener('click', submit);
+  cancelBtn.addEventListener('click', cancelInlineCommentEditor);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); cancelInlineCommentEditor(); }
+  });
+  return ed;
+}
+
+const ASSISTANT_USER_NAME = 'claude';
+
+function anchorsEqual(a, b) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return a.startLine === b.startLine && a.endLine === b.endLine;
+}
+
+function renderCodeChunk(lines, startLine, endLine, lang, wrap) {
+  const wrapDiv = document.createElement('div');
+  wrapDiv.className = 'code-chunk' + (wrap ? ' wrap' : '');
+  wrapDiv.dataset.startLine = String(startLine);
+  wrapDiv.dataset.endLine = String(endLine);
+
+  const gutter = document.createElement('div');
+  gutter.className = 'ln-gutter';
+  const gParts = [];
+  for (let i = startLine; i <= endLine; i++) gParts.push(`<span>${i}</span>`);
+  gutter.innerHTML = gParts.join('');
+
+  const pre = document.createElement('pre');
+  pre.className = 'code-content';
+  const code = document.createElement('code');
+  const text = lines.slice(startLine - 1, endLine).join('\n');
+  try {
+    if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+      code.innerHTML = hljs.highlight(text, { language: lang }).value;
+      code.className = 'hljs language-' + lang;
+    } else if (typeof hljs !== 'undefined') {
+      code.innerHTML = hljs.highlightAuto(text).value;
+      code.className = 'hljs';
+    } else {
+      code.textContent = text;
+    }
+  } catch {
+    code.textContent = text;
+  }
+  pre.appendChild(code);
+
+  wrapDiv.appendChild(gutter);
+  wrapDiv.appendChild(pre);
+  return wrapDiv;
+}
+
+function renderClaudeCard(message, questionMessage) {
+  const card = document.createElement('div');
+  card.className = 'claude-card';
+  card.dataset.id = message.id;
+
+  const anchorTxt = message.anchor
+    ? `lines ${message.anchor.startLine}–${message.anchor.endLine}`
+    : 'whole file';
+
+  const header = document.createElement('div');
+  header.className = 'cc-anchor';
+  header.innerHTML =
+    `<span>💬 Claude · ${escHtml(anchorTxt)}</span><span class="cc-spacer"></span>` +
+    `<button class="cc-collapse" title="Collapse">⌃</button>` +
+    `<button class="cc-delete" title="Delete">✕</button>`;
+  card.appendChild(header);
+
+  if (questionMessage && questionMessage.text) {
+    const q = document.createElement('div');
+    q.className = 'cc-q';
+    q.textContent = questionMessage.text;
+    card.appendChild(q);
+  }
+
+  const a = document.createElement('div');
+  a.className = 'cc-a';
+  // renderMd handles markdown + code fences via marked + hljs.
+  try {
+    a.innerHTML = renderMd(message.text);
+    if (typeof renderMermaidInContainer === 'function') renderMermaidInContainer(a);
+  } catch {
+    a.textContent = message.text;
+  }
+  card.appendChild(a);
+
+  // Mark error styling if Claude returned an error stand-in.
+  if (/^\(claude .+\)$/.test(message.text.trim())) card.classList.add('error');
+
+  header.querySelector('.cc-collapse').addEventListener('click', () => {
+    card.classList.toggle('collapsed');
+  });
+  header.querySelector('.cc-delete').addEventListener('click', () => {
+    if (!confirm('Delete this Claude reply?')) return;
+    deleteClaudeCard(message.id).catch(() => {});
+  });
+  return card;
+}
+
+function renderPendingCard(pending) {
+  const card = document.createElement('div');
+  card.className = 'claude-card pending';
+  const anchorTxt = pending.anchor
+    ? `lines ${pending.anchor.startLine}–${pending.anchor.endLine}`
+    : 'whole file';
+  card.innerHTML =
+    `<div class="cc-anchor"><span>💬 Claude · ${escHtml(anchorTxt)}</span></div>` +
+    `<div class="cc-q">${escHtml(pending.question)}</div>` +
+    `<div class="cc-a">Thinking…</div>`;
+  return card;
+}
+
+// ── Claude file-chat API ───────────────────────────────────────────────────
+
+async function loadFileChat(relPath) {
+  if (!state.activeId) return [];
+  const id = state.activeId;
+  const url = `/sessions/${encodeURIComponent(id)}/file-chat?path=${encodeURIComponent(relPath)}`;
+  try {
+    const r = await authedFetch(url);
+    if (!r.ok) return [];
+    const j = await r.json();
+    return Array.isArray(j.messages) ? j.messages : [];
+  } catch { return []; }
+}
+
+const ACTION_PROMPTS = {
+  explain:  'Briefly explain what the selected code does and how it fits into the surrounding file.',
+  suggest:  'Suggest concrete improvements to the selected code (clarity, correctness, performance). Be specific.',
+  bugs:     'Look for bugs, edge cases, or correctness issues in the selected code. Be specific about what could go wrong.',
+  tests:    'What tests would meaningfully exercise the selected code? List 3–5 cases.',
+};
+
+async function askClaudeAboutSelection(action, customText) {
+  const v = state.files.viewing;
+  if (!v) return;
+  const anchor = v.selection;
+  if (!anchor) return;
+  const question = action === 'ask' ? (customText || '').trim() : ACTION_PROMPTS[action];
+  if (!question) return;
+
+  // Optimistic: show pending card immediately.
+  v.pending = { question, anchor };
+  renderFileViewerWithCards(v.content, v.path, v.cards);
+
+  const id = state.activeId;
+  let res;
+  try {
+    res = await authedFetch(`/sessions/${encodeURIComponent(id)}/file-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: v.path, anchor, question }),
+    });
+  } catch (e) {
+    v.pending = null;
+    renderFileViewerWithCards(v.content, v.path, v.cards);
+    alert(`Claude request failed: ${e.message || e}`);
+    return;
+  }
+  v.pending = null;
+  if (!res.ok) {
+    let body = {};
+    try { body = await res.json(); } catch {}
+    renderFileViewerWithCards(v.content, v.path, v.cards);
+    alert(`Claude error: ${body.error || res.status}`);
+    return;
+  }
+  const j = await res.json();
+  // Append both the user message and the Claude reply so the next render
+  // pairs them correctly.
+  if (j.userMessage) v.cards.push(j.userMessage);
+  if (j.message) v.cards.push(j.message);
+  renderFileViewerWithCards(v.content, v.path, v.cards);
+}
+
+// ── inline comment editor ───────────────────────────────────────────────────
+// Add comment opens a draft "comment line" embedded in the code body at the
+// destination — like editing the comment in place. State lives on viewing.
+// Render is interleaved by renderFileViewerWithCards; commit/cancel re-render.
+
+function startInlineCommentEditor(anchor) {
+  const v = state.files.viewing;
+  if (!v) return;
+  const lines = String(v.content || '').split('\n');
+  const targetIdx = Math.max(0, Math.min(lines.length - 1, anchor.startLine - 1));
+  const targetLine = lines[targetIdx] || '';
+  const indent = (targetLine.match(/^[ \t]*/) || [''])[0];
+  const ext = (v.path.split('.').pop() || '').toLowerCase();
+  const { prefix, suffix } = commentSyntaxForExt(ext);
+  v.commentDraft = {
+    targetLine: anchor.startLine,
+    indent, prefix, suffix,
+    text: '',
+  };
+  renderFileViewerWithCards(v.content, v.path, v.cards || []);
+  // After render, the editor element exists in the DOM. Focus its input
+  // synchronously-ish (rAF for layout) and scroll it into view.
+  requestAnimationFrame(() => {
+    const editor = document.querySelector('.inline-comment-editor');
+    if (!editor) return;
+    editor.scrollIntoView({ block: 'center', behavior: 'auto' });
+    const input = editor.querySelector('.ce-input');
+    if (input) input.focus();
+  });
+}
+
+function cancelInlineCommentEditor() {
+  const v = state.files.viewing;
+  if (!v || !v.commentDraft) return;
+  v.commentDraft = null;
+  renderFileViewerWithCards(v.content, v.path, v.cards || []);
+}
+
+async function commitInlineCommentEditor(text) {
+  const v = state.files.viewing;
+  if (!v || !v.commentDraft) return;
+  const trimmed = String(text || '').trim();
+  if (!trimmed) { cancelInlineCommentEditor(); return; }
+  const draft = v.commentDraft;
+  // Mark editor busy while we PUT.
+  const editor = document.querySelector('.inline-comment-editor');
+  if (editor) editor.classList.add('busy');
+
+  const flat = trimmed.replace(/\r?\n+/g, ' ');
+  const commentLine = `${draft.indent}${draft.prefix}${flat}${draft.suffix}`;
+  const lines = String(v.content || '').split('\n');
+  const targetIdx = Math.max(0, Math.min(lines.length - 1, draft.targetLine - 1));
+  const newLines = lines.slice();
+  newLines.splice(targetIdx, 0, commentLine);
+  const newContent = newLines.join('\n');
+
+  const id = state.activeId;
+  let res;
+  try {
+    res = await authedFetch(`/sessions/${encodeURIComponent(id)}/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: v.path, content: newContent, expectedMtimeMs: v.mtimeMs }),
+    });
+  } catch (e) {
+    if (editor) editor.classList.remove('busy');
+    alert(`Insert failed: ${e.message || e}`);
+    return;
+  }
+  if (res.status === 409) {
+    if (editor) editor.classList.remove('busy');
+    alert('File changed on disk. Reload the file and try again.');
+    return;
+  }
+  if (!res.ok) {
+    if (editor) editor.classList.remove('busy');
+    let body = {};
+    try { body = await res.json(); } catch {}
+    alert(`Insert failed: ${body.error || res.status}`);
+    return;
+  }
+  const out = await res.json();
+  v.content = newContent;
+  v.mtimeMs = out.mtimeMs;
+  v.size = out.size;
+  v.commentDraft = null;
+  renderFileViewerWithCards(newContent, v.path, v.cards || []);
+}
+
+// Per-extension single-line comment syntax. Wrapped types use both prefix
+// and suffix on a single line. Default fallback is // (sane for most code).
+function commentSyntaxForExt(ext) {
+  const e = (ext || '').toLowerCase();
+  if (['js','mjs','cjs','jsx','ts','tsx','c','h','cpp','hpp','java','kt','swift','go','rs','scss','sass','php','dart','groovy'].includes(e)) {
+    return { prefix: '// ', suffix: '' };
+  }
+  if (['py','rb','sh','bash','zsh','yml','yaml','toml','dockerfile','r','pl','conf','ini'].includes(e)) {
+    return { prefix: '# ', suffix: '' };
+  }
+  if (['html','htm','xml','svg','vue','svelte','md','markdown'].includes(e)) {
+    return { prefix: '<!-- ', suffix: ' -->' };
+  }
+  if (['css'].includes(e)) {
+    return { prefix: '/* ', suffix: ' */' };
+  }
+  if (['sql'].includes(e)) {
+    return { prefix: '-- ', suffix: '' };
+  }
+  if (['lua'].includes(e)) {
+    return { prefix: '-- ', suffix: '' };
+  }
+  return { prefix: '// ', suffix: '' };
+}
+
+async function deleteClaudeCard(messageId) {
+  const v = state.files.viewing;
+  if (!v) return;
+  const id = state.activeId;
+  // Find the Claude message + its paired user question; delete both.
+  const claudeMsg = v.cards.find((m) => m.id === messageId && m.user === ASSISTANT_USER_NAME);
+  if (!claudeMsg) return;
+  let pairedUser = null;
+  for (const m of v.cards) {
+    if (m.user !== 'you') continue;
+    if (anchorsEqual(m.anchor, claudeMsg.anchor)
+        && new Date(m.ts).getTime() <= new Date(claudeMsg.ts).getTime()) {
+      if (!pairedUser || new Date(m.ts).getTime() > new Date(pairedUser.ts).getTime()) pairedUser = m;
+    }
+  }
+  const delIds = [messageId];
+  if (pairedUser) delIds.push(pairedUser.id);
+  for (const did of delIds) {
+    try {
+      await authedFetch(`/sessions/${encodeURIComponent(id)}/file-chat?path=${encodeURIComponent(v.path)}&messageId=${encodeURIComponent(did)}`, { method: 'DELETE' });
+    } catch {}
+  }
+  v.cards = v.cards.filter((m) => !delIds.includes(m.id));
+  renderFileViewerWithCards(v.content, v.path, v.cards);
+}
+
+// ── selection → anchor (line range inside a code chunk) ────────────────────
+
+function onSelectionChange() {
+  const bar = document.getElementById('files-action-bar');
+  const v = state.files.viewing;
+  // If an inline comment editor is open, the user is typing in the body —
+  // selection changes there shouldn't kick the popover around (and the
+  // popover is hidden anyway).
+  if (v && v.commentDraft) return;
+
+  if (!v || v.editing || v.binary || !v.content) {
+    hideActionBar();
+    return;
+  }
+  const sel = window.getSelection && window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+    hideActionBar();
+    if (v) v.selection = null;
+    return;
+  }
+  const range = sel.getRangeAt(0);
+  // Only react to selections rooted in a .code-chunk under our viewer body.
+  const startChunk = closestAncestor(range.startContainer, '.code-chunk');
+  const endChunk = closestAncestor(range.endContainer, '.code-chunk');
+  if (!startChunk || !endChunk) { hideActionBar(); v.selection = null; return; }
+  const body = document.getElementById('files-view-body');
+  if (!body.contains(startChunk) || !body.contains(endChunk)) {
+    hideActionBar(); v.selection = null; return;
+  }
+  const startLine = lineForPoint(startChunk, range.startContainer, range.startOffset);
+  const endLine = lineForPoint(endChunk, range.endContainer, range.endOffset);
+  if (!startLine || !endLine) { hideActionBar(); v.selection = null; return; }
+  const a = Math.min(startLine, endLine);
+  const b = Math.max(startLine, endLine);
+  v.selection = { startLine: a, endLine: b };
+  document.getElementById('files-action-label').textContent =
+    a === b ? `L${a}` : `L${a}–${b}`;
+  bar.hidden = false;
+  positionActionBarNearSelection(range);
+}
+
+function hideActionBar() {
+  const bar = document.getElementById('files-action-bar');
+  if (bar) bar.hidden = true;
+}
+
+// Place the floating action bar near the selection rect. Anchored to the
+// #files-view-pane (which is position:relative), so coordinates are relative
+// to the pane. Prefers below-the-selection; flips above if it would overflow.
+function positionActionBarNearSelection(range) {
+  const bar = document.getElementById('files-action-bar');
+  const pane = document.getElementById('files-view-pane');
+  if (!bar || !pane) return;
+  // Reset position so we can measure natural width.
+  bar.style.top = '0px';
+  bar.style.left = '0px';
+  // Force layout to read accurate size.
+  const barRect = bar.getBoundingClientRect();
+  const paneRect = pane.getBoundingClientRect();
+
+  // Selection rect — for multi-line ranges, prefer the LAST client rect
+  // (end of selection) so the popover sits at the cursor's release point.
+  const rects = range.getClientRects();
+  let selRect = rects && rects.length ? rects[rects.length - 1] : range.getBoundingClientRect();
+  if (!selRect || (selRect.width === 0 && selRect.height === 0)) {
+    selRect = range.getBoundingClientRect();
+  }
+
+  const margin = 8;
+  // Default: just below the selection.
+  let top = (selRect.bottom - paneRect.top) + 6;
+  let left = (selRect.right - paneRect.left) - barRect.width / 2;
+  // Clamp left within pane.
+  left = Math.max(margin, Math.min(left, paneRect.width - barRect.width - margin));
+  // If below would overflow the pane, place above.
+  if (top + barRect.height + margin > paneRect.height) {
+    top = (selRect.top - paneRect.top) - barRect.height - 6;
+  }
+  // Clamp top within pane (in case selection itself is off-screen).
+  top = Math.max(margin, Math.min(top, paneRect.height - barRect.height - margin));
+
+  bar.style.top = `${Math.round(top)}px`;
+  bar.style.left = `${Math.round(left)}px`;
+}
+
+// On scroll within the code body, re-anchor the popover to the moved selection
+// (or hide it if the selection scrolled out of view).
+function repositionActionBarIfVisible() {
+  const bar = document.getElementById('files-action-bar');
+  if (!bar || bar.hidden) return;
+  const sel = window.getSelection && window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) { bar.hidden = true; return; }
+  positionActionBarNearSelection(sel.getRangeAt(0));
+}
+
+function closestAncestor(node, selector) {
+  let n = node;
+  while (n) {
+    if (n.nodeType === 1 && n.matches && n.matches(selector)) return n;
+    n = n.parentNode;
+  }
+  return null;
+}
+
+// Compute the absolute line number at a (node, offset) point inside a code-chunk.
+function lineForPoint(chunk, node, offset) {
+  const startLine = parseInt(chunk.dataset.startLine, 10) || 1;
+  const codeContent = chunk.querySelector('.code-content');
+  if (!codeContent) return null;
+  // Build a range from start of code to (node, offset) and count newlines in its text.
+  let r;
+  try {
+    r = document.createRange();
+    r.setStart(codeContent, 0);
+    r.setEnd(node, offset);
+  } catch { return null; }
+  const text = r.toString();
+  const newlines = (text.match(/\n/g) || []).length;
+  return startLine + newlines;
+}
+
+function hljsLangForExt(ext) {
+  const map = {
+    js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+    ts: 'typescript', tsx: 'typescript', jsx: 'javascript',
+    py: 'python', rb: 'ruby', go: 'go', rs: 'rust',
+    java: 'java', kt: 'kotlin', swift: 'swift',
+    sh: 'bash', bash: 'bash', zsh: 'bash',
+    html: 'xml', xml: 'xml', svg: 'xml',
+    css: 'css', scss: 'scss',
+    md: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'ini',
+    sql: 'sql', dockerfile: 'dockerfile', c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp',
+  };
+  return map[ext] || null;
+}
+
+function enterEditMode() {
+  const v = state.files.viewing;
+  if (!v || v.binary) return;
+  // Cancel any inline comment draft before switching to whole-file edit.
+  v.commentDraft = null;
+  const ta = document.getElementById('files-edit-area');
+  ta.value = v.content;
+  ta.hidden = false;
+  document.getElementById('files-view-body').innerHTML = '';
+  document.getElementById('files-view-body').hidden = true;
+  document.getElementById('files-action-bar').hidden = true;
+  document.getElementById('files-edit').hidden = true;
+  document.getElementById('files-save').hidden = false;
+  document.getElementById('files-cancel').hidden = false;
+  v.editing = true;
+  v.dirty = false;
+  if (!ta.dataset.bound) {
+    ta.dataset.bound = '1';
+    ta.addEventListener('input', () => {
+      const cv = state.files.viewing;
+      if (!cv) return;
+      cv.dirty = (ta.value !== cv.content);
+      document.getElementById('files-view-dirty').hidden = !cv.dirty;
+    });
+  }
+  ta.focus();
+}
+
+function cancelEdit() {
+  const v = state.files.viewing;
+  if (!v) return;
+  if (v.dirty && !confirm('Discard unsaved edits?')) return;
+  v.editing = false;
+  v.dirty = false;
+  document.getElementById('files-edit-area').hidden = true;
+  document.getElementById('files-edit-area').value = '';
+  document.getElementById('files-view-body').hidden = false;
+  document.getElementById('files-edit').hidden = false;
+  document.getElementById('files-save').hidden = true;
+  document.getElementById('files-cancel').hidden = true;
+  document.getElementById('files-view-dirty').hidden = true;
+  renderFileViewerWithCards(v.content, v.path, v.cards || []);
+}
+
+async function saveFile() {
+  const v = state.files.viewing;
+  if (!v || !v.editing) return;
+  const ta = document.getElementById('files-edit-area');
+  const newContent = ta.value;
+  const id = state.activeId;
+  const res = await authedFetch(`/sessions/${encodeURIComponent(id)}/file`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: v.path, content: newContent, expectedMtimeMs: v.mtimeMs }),
+  });
+  if (res.status === 409) {
+    await handleSaveConflict(newContent);
+    return;
+  }
+  if (!res.ok) {
+    let body = {};
+    try { body = await res.json(); } catch {}
+    alert(`Save failed: ${body.error || res.status}`);
+    return;
+  }
+  const out = await res.json();
+  v.content = newContent;
+  v.mtimeMs = out.mtimeMs;
+  v.dirty = false;
+  v.editing = false;
+  document.getElementById('files-edit-area').hidden = true;
+  document.getElementById('files-view-body').hidden = false;
+  document.getElementById('files-edit').hidden = false;
+  document.getElementById('files-save').hidden = true;
+  document.getElementById('files-cancel').hidden = true;
+  document.getElementById('files-view-dirty').hidden = true;
+  renderFileViewerWithCards(newContent, v.path, v.cards || []);
+}
+
+async function handleSaveConflict(newContent) {
+  const choice = window.prompt(
+    'File changed on disk since you opened it.\n' +
+    'Type "reload" to discard your edits and load the new content.\n' +
+    'Type "overwrite" to overwrite the disk version with your edits.\n' +
+    'Anything else cancels.',
+    'reload'
+  );
+  if (choice === 'reload') {
+    const v = state.files.viewing;
+    await openFileInViewer(v.path);
+    return;
+  }
+  if (choice === 'overwrite') {
+    // Re-fetch to capture the new mtime, then re-PUT with that mtime.
+    const v = state.files.viewing;
+    const id = state.activeId;
+    const r = await authedFetch(`/sessions/${encodeURIComponent(id)}/file?path=${encodeURIComponent(v.path)}`);
+    if (!r.ok) { alert('Re-fetch failed'); return; }
+    const fresh = await r.json();
+    const r2 = await authedFetch(`/sessions/${encodeURIComponent(id)}/file`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: v.path, content: newContent, expectedMtimeMs: fresh.mtimeMs }),
+    });
+    if (!r2.ok) {
+      let b = {}; try { b = await r2.json(); } catch {}
+      alert(`Overwrite failed: ${b.error || r2.status}`);
+      return;
+    }
+    const out = await r2.json();
+    v.content = newContent;
+    v.mtimeMs = out.mtimeMs;
+    v.dirty = false;
+    v.editing = false;
+    document.getElementById('files-edit-area').hidden = true;
+    document.getElementById('files-view-body').hidden = false;
+    document.getElementById('files-edit').hidden = false;
+    document.getElementById('files-save').hidden = true;
+    document.getElementById('files-cancel').hidden = true;
+    document.getElementById('files-view-dirty').hidden = true;
+    renderFileViewerWithCards(newContent, v.path, v.cards || []);
+  }
+}
+
+function humanBytes(n) {
+  if (n == null) return '?';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KiB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MiB`;
 }
 
 // ── log monitoring ──────────────────────────────────────────────────────────
