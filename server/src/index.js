@@ -20,8 +20,22 @@ app.use(express.json());
 app.use((req, res, next) => {
   const ua = (req.headers['user-agent'] || '').slice(0, 30);
   console.log(`${new Date().toISOString().slice(11, 19)} ${req.ip} ${req.method} ${req.url} [${ua}]`);
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-  res.set('Pragma', 'no-cache');
+  // Cache static assets aggressively. /vendor and /fonts are content-stable;
+  // own files (app.js / styles.css / keyboard.js) ride a ?v=<n> cache buster
+  // so a long max-age is safe — bumping the buster forces a refetch.
+  // Everything else (HTML index, /sessions, /auth, /workspace, …) stays
+  // no-store so polled state and the bootstrap doc are always fresh.
+  const url = req.url;
+  const longCache =
+    url.startsWith('/vendor/') ||
+    url.startsWith('/fonts/') ||
+    /\?v=\d+/.test(url);
+  if (longCache) {
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  } else {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.set('Pragma', 'no-cache');
+  }
   next();
 });
 
@@ -160,11 +174,13 @@ app.get('/sessions', async (req, res) => {
     let own = [];
     if (user) {
       own = await listSessions(all ? null : (isAuthRequired() ? user : null));
-      // Tag owned sessions
+      // Tag owned/owner so the client can label non-owned sessions and
+      // open them in viewer (read-only) mode without a share token.
       for (const s of own) {
         if (!isAuthRequired()) { s.owned = true; continue; }
         const rec = getSessionRecord(s.id);
-        s.owned = rec && rec.user === user;
+        s.owned = !!(rec && rec.user === user);
+        if (!s.owned && rec) s.owner = rec.user || null;
       }
     }
     // Also include sessions the user has accessed via share tokens.

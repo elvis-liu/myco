@@ -23,12 +23,14 @@ const ASSISTANT_INSTRUCTIONS = [
   '- Plain text only, no markdown formatting.',
 ].join('\n');
 
+// Only fire the assistant when the user *explicitly* asks for it. Plain chat
+// stays as plain chat — no PTY write (that's the @claude path in pty.js) and
+// no auto-reply. Previous behaviour treated any message ending in '?' as an
+// assistant trigger, which made every casual question look like claude was
+// answering even though the user never typed @claude.
 function shouldAskAssistant(text) {
   if (typeof text !== 'string') return false;
-  if (/^\/btw\b/i.test(text)) return true;
-  if (/@claude\b/i.test(text)) return true;
-  if (/\?\s*$/.test(text)) return true;
-  return false;
+  return /^\/btw\b/i.test(text);
 }
 
 function stripAnsi(text) {

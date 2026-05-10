@@ -90,6 +90,23 @@ test_conv_view_js() {
 test_at_claude_chat_handler() {
   grep -q '@claude' server/src/pty.js && pass "@claude handler" || fail "@claude handler"
   grep -q 'session.write' server/src/pty.js && pass "PTY write for @claude" || fail "PTY write"
+  # Plain chat (no @claude prefix, no /btw) must NOT trigger the assistant.
+  # Regression guard: the old shouldAskAssistant treated any '?'-ending
+  # message as an assistant trigger, making every question look like claude
+  # was replying even without an @claude prefix.
+  node -e "
+    const { shouldAskAssistant } = require('./server/src/btw');
+    const cases = [
+      ['hello', false],
+      ['is this on?', false],
+      ['@claude what time is it', false],
+      ['/btw whats up', true],
+    ];
+    for (const [text, want] of cases) {
+      const got = shouldAskAssistant(text);
+      if (got !== want) throw new Error('shouldAskAssistant(' + JSON.stringify(text) + ') = ' + got + ', want ' + want);
+    }
+  " && pass "shouldAskAssistant only fires on /btw" || fail "shouldAskAssistant fires too eagerly"
 }
 
 test_viewer_ws_handler_wired() {
@@ -106,9 +123,27 @@ test_session_switching_clears_panes() {
   grep -q "conversation-wrap.*hidden.*true" web/public/app.js && pass "pane clear on switch" || fail "pane clear on switch"
 }
 
+test_status_bar_user_and_build_stamps() {
+  # Status-bar chips that surface "logged in as X" + build timestamp.
+  grep -q 'id="build-stamp"' web/public/index.html && pass "#build-stamp in HTML" || fail "#build-stamp in HTML"
+  grep -q 'id="user-stamp"' web/public/index.html && pass "#user-stamp in HTML" || fail "#user-stamp in HTML"
+  grep -q 'function showBuildStamp' web/public/app.js && pass "showBuildStamp() defined" || fail "showBuildStamp() defined"
+  grep -q 'function showUserStamp' web/public/app.js && pass "showUserStamp() defined" || fail "showUserStamp() defined"
+  grep -q "fetch('/build.txt'" web/public/app.js && pass "build.txt fetched on load" || fail "build.txt fetched on load"
+  grep -q '/build\.txt' Dockerfile && pass "Dockerfile writes build.txt" || fail "Dockerfile writes build.txt"
+}
+
 test_mermaid_html_init() {
   grep -q 'mermaid.initialize' web/public/index.html && pass "mermaid init" || fail "mermaid init"
   grep -q 'highlight.min.js' web/public/index.html && pass "highlight.js loaded" || fail "highlight.js loaded"
+}
+
+test_deploy_add_token() {
+  grep -q '^add_token()' deploy.sh             && pass "deploy.sh: add_token() defined"        || fail "deploy.sh: add_token() defined"
+  grep -q '^upsert_token_in_env()' deploy.sh   && pass "deploy.sh: upsert_token_in_env()"      || fail "deploy.sh: upsert_token_in_env()"
+  grep -q '^hot_reload_auth()' deploy.sh       && pass "deploy.sh: hot_reload_auth()"          || fail "deploy.sh: hot_reload_auth()"
+  grep -q -- '--add-token)' deploy.sh          && pass "deploy.sh: --add-token flag parsed"    || fail "deploy.sh: --add-token flag parsed"
+  grep -q 'add_token "$ADD_TOKEN"' deploy.sh   && pass "deploy.sh: main() dispatches add_token" || fail "deploy.sh: main() dispatches add_token"
 }
 
 run_static_checks() {
@@ -125,6 +160,8 @@ run_static_checks() {
   test_chat_user_capture
   test_session_switching_clears_panes
   test_mermaid_html_init
+  test_status_bar_user_and_build_stamps
+  test_deploy_add_token
 }
 
 # ─── feature checks ──────────────────────────────────────────────────────────
@@ -247,6 +284,31 @@ test_invalid_share_token_rejected() {
   echo "$resp" | grep -q '"share":true' && fail "invalid share token rejected" || pass "invalid share token rejected"
 }
 
+test_cache_headers() {
+  # Static vendor assets and ?v=… cache-busted files should be long-cached.
+  # Dynamic responses (HTML index, /sessions, /auth/*) must stay no-store.
+  local h
+  h=$(curl -sI "http://127.0.0.1:$SMOKE_PORT/vendor/highlight.min.js" 2>/dev/null | tr -d '\r')
+  echo "$h" | grep -qi '^cache-control:.*max-age=31536000' \
+    && pass "vendor: long Cache-Control" \
+    || fail "vendor: long Cache-Control"
+
+  h=$(curl -sI "http://127.0.0.1:$SMOKE_PORT/styles.css?v=1" 2>/dev/null | tr -d '\r')
+  echo "$h" | grep -qi '^cache-control:.*max-age=31536000' \
+    && pass "?v= cache-busted: long Cache-Control" \
+    || fail "?v= cache-busted: long Cache-Control"
+
+  h=$(curl -sI "http://127.0.0.1:$SMOKE_PORT/" 2>/dev/null | tr -d '\r')
+  echo "$h" | grep -qi '^cache-control:.*no-store' \
+    && pass "HTML index: no-store" \
+    || fail "HTML index: no-store"
+
+  h=$(curl -sI "http://127.0.0.1:$SMOKE_PORT/sessions?all=1" 2>/dev/null | tr -d '\r')
+  echo "$h" | grep -qi '^cache-control:.*no-store' \
+    && pass "API endpoint: no-store" \
+    || fail "API endpoint: no-store"
+}
+
 run_server_smoke() {
   section "Server smoke test"
   start_smoke_server
@@ -256,6 +318,7 @@ run_server_smoke() {
   test_vendor_serving
   test_index_html_contents
   test_invalid_share_token_rejected
+  test_cache_headers
   stop_smoke_server
 }
 
@@ -410,6 +473,25 @@ EOF
     || fail "existing token still works (got: $resp)"
 }
 
+test_non_owner_sees_session_with_owner_tag() {
+  # After test_auth_hot_reload, both alice's token and bob's token are loaded.
+  # bob (a non-owner) should see alice's seeded session in /sessions?all=1
+  # tagged with owned=false and owner="alice", so the client can render the
+  # read-only badge and route through the viewer WS path.
+  local sessions
+  sessions=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions?all=1" \
+    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
+  echo "$sessions" | grep -q "$PERSIST_SID" \
+    && pass "non-owner sees other-user session" \
+    || fail "non-owner sees other-user session (got: $sessions)"
+  echo "$sessions" | grep -qE '"owned":false' \
+    && pass "session tagged owned=false for non-owner" \
+    || fail "session tagged owned=false (got: $sessions)"
+  echo "$sessions" | grep -q '"owner":"alice"' \
+    && pass "session carries owner name for non-owner" \
+    || fail "session carries owner name (got: $sessions)"
+}
+
 test_auth_enables_via_hot_reload() {
   # Verify the flip-on path: a server started with NO tokens should become
   # auth-required after MYCO_TOKENS is added to .env and /auth/reload is hit.
@@ -507,6 +589,7 @@ run_persistence_checks() {
   test_persist_after_restart
   test_persist_after_redeploy
   test_auth_hot_reload
+  test_non_owner_sees_session_with_owner_tag
   test_auth_enables_via_hot_reload
   cleanup_persist_env
 }

@@ -855,13 +855,17 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   min-width: 0;
 }
 
-/* Build timestamp pulled from /build.txt — empty in dev (no docker build). */
+/* Status-bar chips — username + build timestamp. Empty in dev / when auth
+   is disabled, so :empty hides them entirely. */
+#user-stamp,
 #build-stamp {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: .65rem;
   color: #555;
   flex-shrink: 0;
 }
+#user-stamp { color: var(--accent); }
+#user-stamp:empty,
 #build-stamp:empty { display: none; }
 
 /* ── log panel ────────────────────────────────────────────────── */
@@ -1091,8 +1095,8 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   line-height: 1.45;
   color: #c9d1d9;
   padding: 8px 8px 40px;
-  max-width: 860px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   user-select: text;
   -webkit-user-select: text;
 }

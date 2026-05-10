@@ -472,6 +472,7 @@ async function init() {
   setChatPane(window.innerWidth > 900);
   connectLogWs();
   showBuildStamp();
+  showUserStamp();
 }
 
 // /build.txt is written by the Dockerfile (`date -u +%Y-%m-%dT%H:%M:%SZ`).
@@ -489,6 +490,15 @@ async function showBuildStamp() {
     el.textContent = `build ${short}`;
     el.title = `Build timestamp: ${stamp}`;
   } catch {}
+}
+
+// Populates the status-bar user chip from state.chatUser (set by tryToken on
+// auth success). Empty when auth is disabled — :empty CSS hides the chip.
+function showUserStamp() {
+  const el = document.getElementById('user-stamp');
+  if (!el) return;
+  el.textContent = state.chatUser ? `@${state.chatUser}` : '';
+  el.title = state.chatUser ? `Logged in as ${state.chatUser}` : '';
 }
 
 async function refreshWorkspace() {
@@ -561,7 +571,9 @@ function renderSessionList() {
   for (const s of state.sessions) {
     const li = document.createElement('li');
     li.className = 'session-item' + (s.id === state.activeId ? ' active' : '');
-    if (s.shared) li.classList.add('shared');
+    // Read-only marker: explicit share OR same-host session you don't own.
+    const readOnly = !!s.shared || s.owned === false;
+    if (readOnly) li.classList.add('shared');
     if (s.status) li.dataset.status = s.status;
     li.dataset.id = s.id;
     const dirName = (s.cwd || '').split('/').filter(Boolean).pop() || s.cwd || '~';
@@ -570,8 +582,9 @@ function renderSessionList() {
       ? `<span class="session-summary">${escHtml(s.summary)}</span>`
       : (s.description ? `<span class="session-desc">${escHtml(s.description)}</span>` : '');
     const statusDot = s.status ? `<span class="session-status session-status-${s.status}" aria-label="Status: ${s.status}"></span>` : '';
-    const sharedBadge = s.shared
-      ? `<span class="shared-badge" title="Shared by ${escHtml(s.owner || 'unknown')} — read-only">${escHtml(s.owner || 'shared')}</span>`
+    const ownerLabel = s.owner || (s.shared ? 'shared' : null);
+    const sharedBadge = readOnly && ownerLabel
+      ? `<span class="shared-badge" title="${s.shared ? 'Shared by' : 'Owned by'} ${escHtml(ownerLabel)} — read-only">${escHtml(ownerLabel)}</span>`
       : '';
     li.innerHTML = `
       ${statusDot}
@@ -799,6 +812,16 @@ function openSession(id) {
 
   document.getElementById('no-session').hidden = true;
 
+  // For viewer sessions (non-owned same-host or share-link), show the
+  // conversation pane right away with a loading placeholder so the user
+  // never sees an empty <main> while the WS handshake + first transcript
+  // frame arrive. Owner sessions skip this and create xterm instead.
+  if (isShared) {
+    showConversationView();
+    document.getElementById('conv-messages').innerHTML =
+      '<div class="conv-waiting">Loading session…</div>';
+  }
+
   // Only create xterm for owned sessions. Shared sessions wait for
   // the server to send viewer-mode, then show conversation view.
   if (!isShared) {
@@ -840,6 +863,10 @@ function openSession(id) {
     }
 
     state.term.writeln('\r\n[connecting...]');
+    // updateChatButton was called earlier when both panes were still hidden,
+    // so the toggle was hidden too. Now that terminal-wrap is visible, the
+    // toggle should reappear (mobile only — desktop keeps the chat pane open).
+    updateChatButton();
   }
 
   // websocket with auto-reconnect
@@ -867,7 +894,11 @@ function openSession(id) {
       if (msg.t === 'viewer-mode') {
         state.viewerMode = true;
         if (state.term) { state.term.dispose(); state.term = null; }
-        document.getElementById('terminal-wrap').hidden = true;
+        // Force the conversation pane visible — defensive in case the
+        // server never follows up with transcript-init/transcript-waiting
+        // (e.g. transcript file unreadable). Without this, ryan attaching
+        // to a non-owned session sees an empty <main>.
+        showConversationView();
       } else if (msg.t === 'transcript-init') {
         state.transcriptMessages = msg.messages || [];
         renderTranscriptMessages(state.transcriptMessages);
