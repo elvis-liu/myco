@@ -223,7 +223,10 @@ function attachViewerWebSocket(session, ws, opts = {}) {
     }
     if (msg.t === 'chat' && typeof msg.text === 'string' && user) {
       const text = msg.text.trim();
-      if (text) handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT));
+      // readOnly: viewers can chat with each other and run /btw (which spawns
+      // a fresh `claude -p` and doesn't touch session state), but they MUST
+      // NOT be able to drive the owner's running PTY via @claude.
+      if (text) handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT), { readOnly: true });
     }
   }
 
@@ -234,7 +237,8 @@ function attachViewerWebSocket(session, ws, opts = {}) {
   });
 }
 
-function handleChatMessage(sessionId, session, user, text) {
+function handleChatMessage(sessionId, session, user, text, opts = {}) {
+  const { readOnly = false } = opts;
   const message = {
     user,
     text,
@@ -250,8 +254,28 @@ function handleChatMessage(sessionId, session, user, text) {
   // @claude → send the message to the running Claude PTY session
   const claudeMatch = text.match(/^@claude\s+(.+)/i);
   if (claudeMatch && session.alive) {
+    // Read-only viewers must not drive the owner's running PTY.
+    if (readOnly) {
+      session.emit('chat', {
+        user: ASSISTANT_USER,
+        text: '(read-only viewers can\'t send to the running Claude session)',
+        ts: new Date().toISOString(),
+      });
+      return;
+    }
     const input = claudeMatch[1].trim();
     if (input) {
+      // Reject Claude's interactive slash-commands. They aren't meaningful
+      // when delivered via chat — Claude responds "Unknown command: /<x>"
+      // which then sticks in the transcript and confuses every viewer.
+      if (input.startsWith('/')) {
+        session.emit('chat', {
+          user: ASSISTANT_USER,
+          text: '(slash commands like `/' + input.split(/\s+/)[0].slice(1) + '` only work in the interactive Claude CLI, not via @claude in chat)',
+          ts: new Date().toISOString(),
+        });
+        return;
+      }
       console.log(`[chat→pty] ${user}: ${input.substring(0, 80)}`);
       session.write(input + '\r');
     }
