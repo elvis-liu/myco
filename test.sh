@@ -336,13 +336,23 @@ test_readonly_viewer() {
   grep -Pzoq '(?s)readOnly\s*\)\s*return.*?session\.write|session\.write.*?readOnly' server/src/pty.js \
     && pass "viewer drops PTY writes" \
     || fail "viewer drops PTY writes"
+  # Terminal-tail surfaces Claude's interactive prompts to viewers (otherwise
+  # @myco confirm prompts stall the session — read-only viewers can't see the
+  # PTY where the prompt appears).
+  grep -q "t: 'terminal-tail'" server/src/pty.js && pass "terminal-tail emitted to viewers" || fail "terminal-tail emitted to viewers"
+  grep -q "terminal-tail" web/public/index.html  && pass "terminal-tail panel in HTML"   || fail "terminal-tail panel in HTML"
+  grep -q "function applyTerminalTail" web/public/app.js && pass "applyTerminalTail() defined" || fail "applyTerminalTail() defined"
+  grep -q "function bindTerminalTail" web/public/app.js  && pass "bindTerminalTail() defined"  || fail "bindTerminalTail() defined"
+  # Special-key shortcuts let viewers answer y/n/Enter/Esc prompts without a real terminal.
+  grep -qE "SPECIAL_KEYS|'enter':|enter:" server/src/pty.js && pass "special key tokens recognized" || fail "special key tokens recognized"
 }
 
 test_chat_window() {
   grep -q 'id="chatpane"' web/public/index.html && pass "#chatpane element" || fail "#chatpane element"
   # Regression: chat history must allow text selection so users can copy
-  # messages. body { user-select:none } would otherwise inherit down.
-  grep -qE '#chat-messages.*user-select|user-select.*chat-messages' web/public/styles.css \
+  # messages. body { user-select:none } would otherwise inherit down. The
+  # rule spans multiple lines, so use -Pz for multi-line matching.
+  grep -Pzoq '#chat-messages[^{]*\{[^}]*user-select:\s*text' web/public/styles.css \
     && pass "#chat-messages re-enables user-select" \
     || fail "#chat-messages re-enables user-select"
   grep -q 'id="chat-input"' web/public/index.html && pass "#chat-input element" || fail "#chat-input element"

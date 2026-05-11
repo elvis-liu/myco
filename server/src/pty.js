@@ -188,6 +188,30 @@ function attachViewerWebSocket(session, ws, opts = {}) {
 
   ws.send(JSON.stringify({ t: 'viewer-mode' }));
 
+  // Terminal-tail relay: viewers don't see the raw PTY (they see the
+  // structured transcript), but Claude's interactive prompts ("Do you want
+  // me to apply this edit? (y/n)") only appear in the PTY — they never go
+  // into the JSONL. Without a tail viewers send @myco, Claude pauses for
+  // confirmation, and the session stalls because the viewer can't see it
+  // and doesn't know to type @myco y. The tail is the last few non-empty
+  // lines of stripped output, sent on connect and debounced on each PTY
+  // data event so the network doesn't get sprayed.
+  const TAIL_LINES = 8;
+  const TAIL_DEBOUNCE_MS = 250;
+  let tailTimer = null;
+  function emitTail() {
+    if (ws.readyState !== ws.OPEN) return;
+    const stripped = stripAnsi(session.buffer.join(''));
+    const text = tailLines(stripped, TAIL_LINES).trimEnd();
+    ws.send(JSON.stringify({ t: 'terminal-tail', text }));
+  }
+  emitTail(); // initial state on connect
+  const onPtyData = () => {
+    if (tailTimer) return;
+    tailTimer = setTimeout(() => { tailTimer = null; emitTail(); }, TAIL_DEBOUNCE_MS);
+  };
+  session.on('data', onPtyData);
+
   // Stream structured transcript (clean content from Claude's JSONL)
   const transcriptPath = transcriptMod.resolveTranscriptPath(sessionId);
   if (!transcriptPath) {
@@ -234,6 +258,8 @@ function attachViewerWebSocket(session, ws, opts = {}) {
   ws.on('message', handleViewerInbound);
   ws.on('close', () => {
     session.off('chat', onChat);
+    session.off('data', onPtyData);
+    if (tailTimer) { clearTimeout(tailTimer); tailTimer = null; }
     if (unwatch) unwatch();
   });
 }
@@ -305,6 +331,25 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
           text: '(slash commands like `/' + input.split(/\s+/)[0].slice(1) + '` only work in the interactive Claude CLI, not via @myco in chat)',
           ts: new Date().toISOString(),
         });
+        return;
+      }
+      // Special key tokens — let viewers respond to Claude's interactive
+      // prompts (y/n confirmations, "press Enter to continue", etc.) without
+      // a real terminal. The token is written verbatim, no trailing CR.
+      const SPECIAL_KEYS = {
+        enter: '\r',
+        return: '\r',
+        esc: '\x1b',
+        escape: '\x1b',
+        'ctrl-c': '\x03',
+        '^c': '\x03',
+        space: ' ',
+        tab: '\t',
+      };
+      const specialBytes = SPECIAL_KEYS[input.toLowerCase()];
+      if (specialBytes !== undefined) {
+        console.log(`[chat→pty] ${user}: <key:${input}>`);
+        session.write(specialBytes);
         return;
       }
       console.log(`[chat→pty] ${user}: ${input.substring(0, 80)}`);

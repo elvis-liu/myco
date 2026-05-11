@@ -185,6 +185,8 @@ function openShareViewer(id) {
         if (newMsgs.some((m) => m && m.role === 'assistant')) hideMycoWaiting();
       } else if (msg.t === 'transcript-waiting') {
         showTranscriptWaiting();
+      } else if (msg.t === 'terminal-tail') {
+        applyTerminalTail(msg.text);
       } else if (msg.t === 'output') {
         if (!state.viewerMode) ensureXtermForFallback();
         if (state.term) state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
@@ -324,12 +326,16 @@ async function renderMermaidInContainer(container) {
 }
 
 function scrollConvToBottom() {
-  const wrap = document.getElementById('conversation-wrap');
+  // The transcript scroller used to be #conversation-wrap; once #terminal-tail
+  // was docked at the bottom, #conv-messages became the actual scroller.
+  const wrap = document.getElementById('conv-messages');
+  if (!wrap) return;
   requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
 }
 
 function isConvAtBottom() {
-  const wrap = document.getElementById('conversation-wrap');
+  const wrap = document.getElementById('conv-messages');
+  if (!wrap) return true;
   return wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 60;
 }
 
@@ -568,6 +574,7 @@ async function init() {
   document.getElementById('log-panel-close').addEventListener('click', toggleLogPanel);
   bindChatUi();
   bindFilesUi();
+  bindTerminalTail();
   // Desktop default: chat pane visible alongside the terminal. Mobile: hidden,
   // user opens it explicitly via the 💬 button (mutually exclusive with the
   // session sidebar).
@@ -907,6 +914,7 @@ function openSession(id) {
   document.getElementById('terminal-wrap').hidden = true;
   document.getElementById('conversation-wrap').hidden = true;
   document.getElementById('conv-messages').innerHTML = '';
+  applyTerminalTail('');                         // clear any leftover viewer tail
   // Reset file pane on session switch — paths and mtimes are session-scoped.
   hideFilesView();
   state.files.currentPath = '.';
@@ -1042,6 +1050,8 @@ function openSession(id) {
         if (newMsgs.some((m) => m && m.role === 'assistant')) hideMycoWaiting();
       } else if (msg.t === 'transcript-waiting') {
         showTranscriptWaiting();
+      } else if (msg.t === 'terminal-tail') {
+        applyTerminalTail(msg.text);
       } else if (msg.t === 'output') {
         state.term?.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
       } else if (msg.t === 'pong') {
@@ -1442,6 +1452,47 @@ function sendChatMessage(text) {
     showMycoWaiting();
   }
   return true;
+}
+
+// Terminal-tail panel: viewers don't see the raw PTY (they see the
+// structured transcript), but Claude's interactive prompts ("Apply this
+// edit? (y/n)") only appear in the PTY. The server sends a debounced
+// "terminal-tail" message with the last few lines of stripped output;
+// we render it in a sticky footer with quick-reply buttons so the viewer
+// can answer without typing @myco y by hand.
+function applyTerminalTail(text) {
+  const panel = document.getElementById('terminal-tail');
+  const pre = document.getElementById('terminal-tail-text');
+  if (!panel || !pre) return;
+  const t = String(text || '').trimEnd();
+  if (!t) {
+    panel.hidden = true;
+    pre.textContent = '';
+    return;
+  }
+  panel.hidden = false;
+  pre.textContent = t;
+  pre.scrollTop = pre.scrollHeight;
+}
+
+function bindTerminalTail() {
+  const panel = document.getElementById('terminal-tail');
+  if (!panel || panel.dataset.bound) return;
+  panel.dataset.bound = '1';
+  panel.addEventListener('click', (e) => {
+    const btn = e.target.closest('.tt-key');
+    if (!btn) return;
+    e.preventDefault();
+    const key = btn.dataset.key;
+    if (!key) return;
+    // Route through the existing chat path — the server's @myco handler
+    // recognizes 'enter', 'esc', 'ctrl-c', etc. as raw key presses.
+    if (sendChatMessage('@myco ' + key)) {
+      // Brief visual confirmation
+      btn.classList.add('tt-key-flash');
+      setTimeout(() => btn.classList.remove('tt-key-flash'), 200);
+    }
+  });
 }
 
 // Floating "waiting for Claude" pill — shown after sending @myco, auto-hides
