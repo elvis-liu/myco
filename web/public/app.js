@@ -342,9 +342,22 @@ function isConvAtBottom() {
   return wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 60;
 }
 
+// The live #terminal-tail is parented inside #conv-messages and must always
+// be the last child so the in-flight PTY xterm sits at the bottom of the
+// transcript scroll. Detach before mutating the container, re-append after.
+function detachTerminalTail() {
+  const tail = document.getElementById('terminal-tail');
+  if (tail && tail.parentElement) tail.parentElement.removeChild(tail);
+  return tail;
+}
+function reattachTerminalTail(tail, container) {
+  if (tail && container) container.appendChild(tail);
+}
+
 function renderTranscriptMessages(messages) {
   showConversationView();
   const container = document.getElementById('conv-messages');
+  const tail = detachTerminalTail();
   container.innerHTML = '';
   let turnEl = null;
   for (const m of messages) {
@@ -361,6 +374,7 @@ function renderTranscriptMessages(messages) {
       container.appendChild(el);
     }
   }
+  reattachTerminalTail(tail, container);
   scrollConvToBottom();
   renderMermaidInContainer(container);
 }
@@ -368,7 +382,15 @@ function renderTranscriptMessages(messages) {
 function appendTranscriptMessages(messages) {
   const wasAtBottom = isConvAtBottom();
   const container = document.getElementById('conv-messages');
+  // Detach the live terminal-tail card so its parentage doesn't trip up
+  // lastElementChild lookups (we'd otherwise append new turns inside the
+  // tail card). Re-append at the end after the new messages are inserted.
+  const tail = detachTerminalTail();
+  // The lastElementChild used to potentially be a .conv-turn we wanted to
+  // keep extending — but with the tail detached it's whatever came before
+  // the tail. Reuse it only if it's a conv-turn.
   let turnEl = container.lastElementChild;
+  if (turnEl && !turnEl.classList?.contains('conv-turn')) turnEl = null;
   for (const m of messages) {
     const el = renderConvMessage(m);
     if (m.role === 'user' || m.role === 'title') {
@@ -382,6 +404,7 @@ function appendTranscriptMessages(messages) {
       container.appendChild(el);
     }
   }
+  reattachTerminalTail(tail, container);
   if (wasAtBottom) scrollConvToBottom();
   renderMermaidInContainer(container);
 }
