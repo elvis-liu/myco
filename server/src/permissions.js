@@ -150,7 +150,12 @@ function extractPermissionTarget(rawText) {
   return { tool, input };
 }
 
-module.exports = {
+// Object.assign rather than `module.exports = {…}` so pty.js (which captures
+// `const permissions = require('./permissions')` early in a circular chain
+// via sessions.js → pty.js → permissions.js) sees the populated exports
+// object. Replacing module.exports would leave pty.js holding the empty
+// pre-cycle reference.
+Object.assign(module.exports, {
   DEFAULT_ALLOW,
   DEFAULT_DENY,
   ensureSessionLists,
@@ -161,4 +166,4 @@ module.exports = {
   removePattern,
   getSessionLists,
   extractPermissionTarget,
-};
+});

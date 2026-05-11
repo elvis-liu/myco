@@ -544,6 +544,136 @@ t('claude-as-user (ASSISTANT_USER) chat is ignored (no PTY write)', () => {
   assert.deepStrictEqual(session.pendingMenu, SAMPLE_MENU);  // unchanged
 });
 
+// ─── Menu broadcasts are session-specific ─────────────────────────────────
+//
+// Each session has its own EventEmitter; the 'menu' listener wired in
+// spawnClaude is closed over that session's id. A broadcast for session A
+// must not surface in session B's chat listeners. These tests pin that
+// invariant — without it the user sees "questions broadcasted to other
+// sessions" in their browser.
+section('Menu broadcast is session-specific');
+
+const captureChat = (sessionObj) => {
+  const chats = [];
+  sessionObj.on('chat', (msg) => chats.push(msg));
+  return chats;
+};
+
+const PLAN_MENU = {
+  kind: 'plan',
+  question: 'What would you like to do?',
+  options: [
+    { n: 1, label: 'Yes, proceed with this plan' },
+    { n: 2, label: 'Yes, but with changes' },
+    { n: 3, label: 'No, keep planning' },
+  ],
+  rawText: 'What would you like to do?\n1. Yes, proceed with this plan\n2. Yes, but with changes\n3. No, keep planning',
+};
+
+const PERMISSION_ASK_MENU = {
+  kind: 'permission',
+  question: 'Allow Bash command?',
+  // "curl" intentionally isn't in DEFAULT_ALLOW — decide() falls through to 'ask'.
+  options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }, { n: 3, label: 'Always allow' }],
+  rawText: 'Allow Bash command?\n> curl example.com\n1. Yes\n2. No\n3. Always allow',
+};
+
+t('plan-mode broadcast lands ONLY on the originating session', () => {
+  const A = makeFakeSession(null);
+  const B = makeFakeSession(null);
+  const aChats = captureChat(A.session);
+  const bChats = captureChat(B.session);
+  ptyMod.handleSessionMenu(A.session.sessionId, A.session, PLAN_MENU);
+  assert.strictEqual(aChats.length, 1, 'A should receive exactly one chat broadcast');
+  assert.strictEqual(bChats.length, 0, 'B must not receive A\'s broadcast');
+  // Sanity: the message text reflects the menu options
+  assert.ok(aChats[0].text.includes('keep planning'), 'broadcast should include menu option labels');
+});
+
+t('permission "ask" broadcast lands ONLY on the originating session', () => {
+  const A = makeFakeSession(null);
+  const B = makeFakeSession(null);
+  const aChats = captureChat(A.session);
+  const bChats = captureChat(B.session);
+  ptyMod.handleSessionMenu(A.session.sessionId, A.session, PERMISSION_ASK_MENU);
+  assert.strictEqual(aChats.length, 1, 'A should receive exactly one chat broadcast');
+  assert.strictEqual(bChats.length, 0, 'B must not receive A\'s broadcast');
+  // Permission-flavoured wording should be present
+  assert.ok(/permission to run|Claude wants/i.test(aChats[0].text),
+    `broadcast should use permission-tailored wording, got: ${aChats[0].text.slice(0, 100)}`);
+});
+
+t('two simultaneous broadcasts each stay on their own session', () => {
+  const A = makeFakeSession(null);
+  const B = makeFakeSession(null);
+  const aChats = captureChat(A.session);
+  const bChats = captureChat(B.session);
+  ptyMod.handleSessionMenu(A.session.sessionId, A.session, PLAN_MENU);
+  ptyMod.handleSessionMenu(B.session.sessionId, B.session, PERMISSION_ASK_MENU);
+  assert.strictEqual(aChats.length, 1);
+  assert.strictEqual(bChats.length, 1);
+  assert.notStrictEqual(aChats[0].text, bChats[0].text, 'A and B should see different broadcasts');
+  // Cross-check: A's chat is the plan menu, B's is the permission ask
+  assert.ok(aChats[0].text.includes('keep planning'),         'A should have plan broadcast');
+  assert.ok(/permission to run/i.test(bChats[0].text),        'B should have permission broadcast');
+});
+
+t('PTY writes from one session do not appear on the other (auto-respond)', () => {
+  // Auto-allow path: PERMISSION_ASK_MENU's input is "curl example.com" which
+  // is NOT in DEFAULT_ALLOW, so it falls through to 'ask' (broadcast). For
+  // this test, use a menu whose input ('git status') matches the conservative
+  // default allow list — handleSessionMenu should auto-pick option 1 on A
+  // and never touch B's session.write.
+  const A = makeFakeSession(null);
+  const B = makeFakeSession(null);
+  const ALLOWED_MENU = {
+    kind: 'permission',
+    question: 'Allow Bash command?',
+    options: [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }],
+    rawText: 'Allow Bash command?\n> git status\n1. Yes\n2. No',
+  };
+  // Make A's allowList include Bash(git). With sessionId not in the real
+  // store, permissions.decide falls back to 'ask' (no rec). Force-allow by
+  // giving the fake session a sessionId we'll temporarily insert into the
+  // store, or just simulate the broadcast path. Simplest: rely on the 'ask'
+  // path firing a broadcast on A and ensure NO write/chat reaches B.
+  const aChats = captureChat(A.session);
+  const bChats = captureChat(B.session);
+  ptyMod.handleSessionMenu(A.session.sessionId, A.session, ALLOWED_MENU);
+  assert.strictEqual(B.writes.length, 0, 'B must never receive a PTY write from A\'s menu');
+  assert.strictEqual(bChats.length, 0,   'B must never receive a chat broadcast from A\'s menu');
+  // A must have either a write (auto-respond) OR a chat broadcast (ask).
+  assert.ok(A.writes.length > 0 || aChats.length > 0,
+    'A must receive at least one side-effect for the menu fired against it');
+});
+
+t('broadcastMenuToChat directly: cross-session listeners are silent', () => {
+  // Exercise the inner helper too — it's the lowest-level seam where a
+  // future refactor could accidentally start leaking via a shared global
+  // emitter.
+  const A = makeFakeSession(null);
+  const B = makeFakeSession(null);
+  const aChats = captureChat(A.session);
+  const bChats = captureChat(B.session);
+  ptyMod.broadcastMenuToChat(A.session.sessionId, A.session, PLAN_MENU);
+  assert.strictEqual(aChats.length, 1);
+  assert.strictEqual(bChats.length, 0);
+  // The broadcast must NOT include any reference to B's session id.
+  assert.ok(!aChats[0].text.includes(B.session.sessionId),
+    'broadcast should not mention any other session\'s id');
+});
+
+t('chat event payload carries the menu metadata for client-side routing', () => {
+  const A = makeFakeSession(null);
+  const aChats = captureChat(A.session);
+  ptyMod.handleSessionMenu(A.session.sessionId, A.session, PLAN_MENU);
+  const msg = aChats[0];
+  assert.ok(msg.meta, 'message should carry a meta object');
+  assert.strictEqual(msg.meta.kind, 'menu');
+  assert.ok(msg.meta.menu, 'meta should embed the menu');
+  assert.strictEqual(msg.meta.menu.options.length, 3);
+});
+
 // ─── done ──────────────────────────────────────────────────────────────────
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

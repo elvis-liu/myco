@@ -668,4 +668,8 @@ module.exports = {
   attachWebSocket,
   attachViewerWebSocket,
   handleChatMessage,
+  // Exposed for menu-broadcast.test.js — exercises the per-session routing
+  // (auto-allow / auto-deny / broadcast) without spinning up a real PTY.
+  handleSessionMenu,
+  broadcastMenuToChat,
 };
