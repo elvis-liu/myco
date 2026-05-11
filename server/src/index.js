@@ -508,12 +508,15 @@ server.on('upgrade', (req, socket, head) => {
       ws.close();
       return;
     }
-    // Both owners and read-only viewers attach via the same path so viewers
-    // see the live xterm (alt-screen redraws, ANSI colors, interactive
-    // prompts) instead of a stripped-down transcript that misses prompts.
-    // The readOnly flag rejects inbound input/resize messages on the server;
-    // the client surfaces a "Read-only" badge and quick-reply key bar.
-    attachWebSocket(session, ws, { readOnly, user });
+    if (readOnly) {
+      // Read-only viewers see the structured transcript (clean, scrollable
+      // history of user/assistant/tool messages) + a docked live terminal-
+      // tail panel that surfaces interactive prompts and intermediate state
+      // that never make it into the transcript JSONL.
+      attachViewerWebSocket(session, ws, { user });
+    } else {
+      attachWebSocket(session, ws, { readOnly, user });
+    }
   });
 });
 

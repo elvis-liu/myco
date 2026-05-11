@@ -1915,32 +1915,30 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   }
 }
 
-/* ── conversation view (legacy share-token transcript fallback) ────────────── */
+/* ── conversation view (read-only viewer) ─────────────────────────────────── */
+/* Layout: [readonly-banner] [conv-messages flex:1 scroller] [terminal-tail].
+   The banner identifies the owner; conv-messages is the structured transcript
+   from the JSONL; terminal-tail is the live PTY footer that surfaces Claude's
+   interactive prompts (which never go into the JSONL). */
 
 #conversation-wrap {
   flex: 1;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   padding: 0;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
   background: #0d1117;
-  transform: translateZ(0);
-  will-change: scroll-position;
 }
-
-/* ── read-only banner over the live xterm (auth'd non-owner viewers) ───────── */
 
 #readonly-banner {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
   padding: 6px 10px;
   background: linear-gradient(180deg, #1a2233 0%, #0f1620 100%);
   border-bottom: 1px solid rgba(122, 178, 255, .2);
   font: 11.5px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   color: rgba(201, 209, 217, .9);
-  z-index: 4;
   flex: 0 0 auto;
 }
 #readonly-banner .ro-label {
@@ -1953,35 +1951,68 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   padding: 2px 8px;
   border-radius: 4px;
 }
-#readonly-banner .ro-owner {
-  color: rgba(201, 209, 217, .65);
-  font-style: italic;
-}
+#readonly-banner .ro-owner { color: rgba(201, 209, 217, .65); font-style: italic; }
 #readonly-banner .ro-owner:not(:empty)::before { content: "owned by "; opacity: .6; }
-#readonly-banner .ro-spacer { flex: 1; min-width: 8px; }
-#readonly-banner .ro-hint {
-  color: rgba(201, 209, 217, .55);
-  margin-right: 4px;
+
+/* Live PTY tail panel: fixed-ish height (cap), monospace, ANSI-aware HTML. */
+#terminal-tail {
+  flex: 0 0 auto;
+  border-top: 1px solid #30363d;
+  background: #010409;
+  color: #c9d1d9;
+  font-family: 'JetBrains Mono Nerd Font', 'JetBrains Mono', Menlo, monospace;
+  font-size: 12px;
+  max-height: 38vh;
+  display: flex;
+  flex-direction: column;
 }
-#readonly-banner .vk-key {
+#terminal-tail .tt-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 10px;
+  background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
+  border-bottom: 1px solid #21262d;
+  font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color: rgba(201, 209, 217, .85);
+}
+#terminal-tail .tt-label {
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-size: 10px;
+}
+#terminal-tail .tt-hint { color: rgba(201, 209, 217, .55); margin-left: auto; }
+.vk-key {
   background: #21262d;
   color: #c9d1d9;
   border: 1px solid #30363d;
   border-radius: 4px;
-  padding: 3px 9px;
-  min-width: 28px;
-  font: 12px 'JetBrains Mono', monospace;
+  padding: 2px 8px;
+  min-width: 26px;
+  font: 11.5px 'JetBrains Mono', monospace;
   cursor: pointer;
   user-select: none;
 }
-#readonly-banner .vk-key:hover { background: #2c333c; border-color: var(--accent); color: var(--accent); }
-#readonly-banner .vk-key:active { transform: scale(.94); }
-#readonly-banner .vk-key-danger { color: #f85149; border-color: rgba(248,81,73,.3); }
-#readonly-banner .vk-key-danger:hover { background: rgba(248,81,73,.12); border-color: #f85149; color: #f85149; }
-
-/* When the banner is visible, the soft-keyboard bar is useless (input rejected)
-   — hide it so we don't waste vertical space. */
-#readonly-banner:not([hidden]) ~ #keyboard-bar { display: none !important; }
+.vk-key:hover { background: #2c333c; border-color: var(--accent); color: var(--accent); }
+.vk-key:active { transform: scale(.94); }
+.vk-key-danger { color: #f85149; border-color: rgba(248,81,73,.3); }
+.vk-key-danger:hover { background: rgba(248,81,73,.12); border-color: #f85149; color: #f85149; }
+.vk-key-flash { background: var(--accent) !important; color: #000 !important; border-color: var(--accent) !important; }
+#terminal-tail-text {
+  flex: 1;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px 'JetBrains Mono Nerd Font', 'JetBrains Mono', Menlo, monospace;
+  color: #c9d1d9;
+  user-select: text;
+  -webkit-user-select: text;
+}
 
 #conv-messages {
   font-family: 'JetBrains Mono Nerd Font', 'JetBrains Mono', Menlo, monospace;

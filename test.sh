@@ -336,17 +336,21 @@ test_readonly_viewer() {
   grep -Pzoq '(?s)readOnly\s*\)\s*return.*?session\.write|session\.write.*?readOnly' server/src/pty.js \
     && pass "viewer drops PTY writes" \
     || fail "viewer drops PTY writes"
-  # Read-only viewers attach via the same xterm path as the owner so they
-  # see all intermediate output (alt-screen redraws, ANSI colors, prompts).
-  # The server emits a read-only signal so the client can render its banner.
-  grep -q "t: 'read-only'"        server/src/pty.js   && pass "server emits read-only signal"      || fail "server emits read-only signal"
+  # Read-only viewers stay on the structured-transcript pane (clean record of
+  # user/assistant/tool messages) and ALSO see a docked live terminal-tail
+  # panel that surfaces Claude's interactive prompts (which never make it
+  # into the JSONL). Owner login flows in via the viewer-mode message.
+  grep -q "t: 'viewer-mode'"      server/src/pty.js     && pass "server emits viewer-mode"          || fail "server emits viewer-mode"
+  grep -q "owner: ownerLogin"     server/src/pty.js     && pass "viewer-mode carries owner login"   || fail "viewer-mode carries owner login"
+  grep -q "t: 'terminal-tail'"    server/src/pty.js     && pass "server emits terminal-tail"        || fail "server emits terminal-tail"
+  grep -q "ansi-to-html"          server/src/pty.js     && pass "terminal-tail uses ansi-to-html"   || fail "terminal-tail uses ansi-to-html"
   grep -q "id=\"readonly-banner\"" web/public/index.html && pass "html: #readonly-banner"           || fail "html: #readonly-banner"
-  grep -q "function applyReadOnly" web/public/app.js  && pass "applyReadOnly() defined"            || fail "applyReadOnly() defined"
-  grep -q "function bindReadOnlyBanner" web/public/app.js && pass "bindReadOnlyBanner() defined"   || fail "bindReadOnlyBanner() defined"
-  # Routing: index.js no longer dispatches readOnly to the transcript-only path
-  ! grep -qE "if\s*\(\s*readOnly\s*\)\s*\{?\s*$" server/src/index.js && pass "readOnly route is unified" || fail "readOnly route still branches"
+  grep -q "id=\"terminal-tail\""   web/public/index.html && pass "html: #terminal-tail"             || fail "html: #terminal-tail"
+  grep -q "function applyReadOnly"      web/public/app.js && pass "applyReadOnly() defined"         || fail "applyReadOnly() defined"
+  grep -q "function applyTerminalTail"  web/public/app.js && pass "applyTerminalTail() defined"     || fail "applyTerminalTail() defined"
+  grep -q "function bindReadOnlyBanner" web/public/app.js && pass "bindReadOnlyBanner() defined"    || fail "bindReadOnlyBanner() defined"
   # Special-key shortcuts let viewers answer y/n/Enter/Esc prompts without
-  # typing into the (input-rejected) terminal directly.
+  # ever typing into the (rejected) terminal directly.
   grep -qE "SPECIAL_KEYS|'enter':|enter:" server/src/pty.js && pass "special key tokens recognized" || fail "special key tokens recognized"
 }
 

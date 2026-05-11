@@ -172,6 +172,7 @@ function openShareViewer(id) {
       if (msg.t === 'viewer-mode') {
         state.viewerMode = true;
         showConversationView();
+        applyReadOnly(msg.owner);
       } else if (msg.t === 'transcript-init') {
         state.transcriptMessages = msg.messages || [];
         renderTranscriptMessages(state.transcriptMessages);
@@ -185,9 +186,8 @@ function openShareViewer(id) {
         if (newMsgs.some((m) => m && m.role === 'assistant')) hideMycoWaiting();
       } else if (msg.t === 'transcript-waiting') {
         showTranscriptWaiting();
-      } else if (msg.t === 'read-only') {
-        applyReadOnly(msg.owner);
-        ensureXtermForFallback();                            // viewers get the live xterm
+      } else if (msg.t === 'terminal-tail') {
+        applyTerminalTail(msg);
       } else if (msg.t === 'output') {
         if (!state.viewerMode) ensureXtermForFallback();
         if (state.term) state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
@@ -938,10 +938,16 @@ function openSession(id) {
 
   document.getElementById('no-session').hidden = true;
 
-  // Both owners and read-only viewers get the live xterm — viewers see the
-  // same intermediate output (alt-screen, ANSI, prompts) the owner sees,
-  // they just can't type. The "read-only" WS message will pop the banner.
-  {
+  // Owner sessions get an xterm immediately. Viewer sessions wait for the
+  // server's viewer-mode message and then show the conversation pane
+  // (structured transcript + live terminal-tail).
+  if (isShared) {
+    showConversationView();
+    document.getElementById('conv-messages').innerHTML =
+      '<div class="conv-waiting">Connecting…</div>';
+  }
+
+  if (!isShared) {
     const wrap = document.getElementById('terminal-wrap');
     wrap.hidden = false;
 
@@ -1032,6 +1038,7 @@ function openSession(id) {
         // (e.g. transcript file unreadable). Without this, ryan attaching
         // to a non-owned session sees an empty <main>.
         showConversationView();
+        applyReadOnly(msg.owner);
       } else if (msg.t === 'transcript-init') {
         state.transcriptMessages = msg.messages || [];
         renderTranscriptMessages(state.transcriptMessages);
@@ -1042,8 +1049,8 @@ function openSession(id) {
         if (newMsgs.some((m) => m && m.role === 'assistant')) hideMycoWaiting();
       } else if (msg.t === 'transcript-waiting') {
         showTranscriptWaiting();
-      } else if (msg.t === 'read-only') {
-        applyReadOnly(msg.owner);
+      } else if (msg.t === 'terminal-tail') {
+        applyTerminalTail(msg);
       } else if (msg.t === 'output') {
         state.term?.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
       } else if (msg.t === 'pong') {
@@ -1446,12 +1453,10 @@ function sendChatMessage(text) {
   return true;
 }
 
-// Read-only viewer UI: when the server tells us we're attached as a viewer
-// (auth'd non-owner or share-token client), pop a banner above the live xterm
-// with the owner's login + quick-reply key buttons. The terminal still
-// renders all PTY data via xterm — we just can't type into it. The buttons
-// route through the existing chat path: server's @myco handler recognizes
-// 'enter', 'esc', 'ctrl-c', etc. as raw key presses.
+// Read-only viewer UI: a small banner above the structured transcript
+// identifies the session owner. The transcript pane renders the JSONL
+// (user/assistant/tool messages); the live terminal-tail pane below it
+// surfaces interactive PTY prompts (which never make it into the JSONL).
 function applyReadOnly(owner) {
   state.readOnly = true;
   state.sessionOwner = owner || null;
@@ -1471,13 +1476,40 @@ function clearReadOnly() {
     const ownerEl = banner.querySelector('.ro-owner');
     if (ownerEl) ownerEl.textContent = '';
   }
+  applyTerminalTail({ html: '', text: '' });
+}
+
+// Live terminal-tail panel: the server sends the last few lines of PTY
+// output every ~200ms (debounced) as both stripped text and ANSI-rendered
+// HTML. Render the HTML so Claude Code's colored TUI elements (yellow
+// confirm prompts, dim hint text) come through. Hide the panel when the
+// tail is empty so we don't clutter the conversation pane.
+function applyTerminalTail(payload) {
+  const panel = document.getElementById('terminal-tail');
+  const pre = document.getElementById('terminal-tail-text');
+  if (!panel || !pre) return;
+  const text = (payload && payload.text) ? String(payload.text).trimEnd() : '';
+  const html = (payload && payload.html) ? String(payload.html) : '';
+  if (!text && !html) {
+    panel.hidden = true;
+    pre.innerHTML = '';
+    return;
+  }
+  panel.hidden = false;
+  // Prefer HTML (ANSI-colored) when present; fall back to text.
+  if (html) pre.innerHTML = html;
+  else pre.textContent = text;
+  pre.scrollTop = pre.scrollHeight;
 }
 
 function bindReadOnlyBanner() {
-  const banner = document.getElementById('readonly-banner');
-  if (!banner || banner.dataset.bound) return;
-  banner.dataset.bound = '1';
-  banner.addEventListener('click', (e) => {
+  // The quick-reply key buttons now live inside #terminal-tail (more
+  // contextual to where the prompt is shown). One delegated click handler
+  // covers any .vk-key in the conversation pane.
+  const wrap = document.getElementById('conversation-wrap');
+  if (!wrap || wrap.dataset.vkBound) return;
+  wrap.dataset.vkBound = '1';
+  wrap.addEventListener('click', (e) => {
     const btn = e.target.closest('.vk-key');
     if (!btn) return;
     e.preventDefault();

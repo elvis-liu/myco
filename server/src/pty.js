@@ -1,11 +1,22 @@
 const pty = require('@homebridge/node-pty-prebuilt-multiarch');
 const { EventEmitter } = require('events');
+const AnsiToHtml = require('ansi-to-html');
 // Late-bound: sessions.js requires this module, so destructuring at load
 // time would capture undefined values from the partial export.
 const sessionsMod = require('./sessions');
 const { askAssistant, shouldAskAssistant, stripAnsi, tailLines, ASSISTANT_USER } = require('./btw');
 const slashcmds = require('./slashcmds');
 const transcriptMod = require('./transcript');
+
+// Convert ANSI escape sequences to HTML for the viewer's terminal-tail panel.
+// Github-dark-ish palette so colors land in the expected range against the
+// transcript background. fg/bg are the panel's defaults.
+const ansiToHtml = new AnsiToHtml({
+  fg: '#c9d1d9',
+  bg: '#010409',
+  newline: false,
+  escapeXML: true,
+});
 
 const MAX_BUFFER = 1024 * 1024;
 const CHAT_TEXT_LIMIT = 4000;
@@ -111,13 +122,6 @@ function attachWebSocket(session, ws, opts = {}) {
   const user = opts.user || null;
   const sessionId = session.sessionId;
 
-  // Read-only viewers get a flag up front so the client can render its
-  // "Read-only" badge + quick-reply key bar before the first PTY chunk.
-  if (readOnly) {
-    const ownerLogin = sessionsMod.getSessionRecord(sessionId)?.user || null;
-    ws.send(JSON.stringify({ t: 'read-only', owner: ownerLogin }));
-  }
-
   // Replay ring buffer first so reconnects see prior context.
   const replay = Buffer.concat(session.buffer.map((d) => Buffer.from(d, 'utf8')));
   if (replay.length) {
@@ -194,24 +198,32 @@ function attachViewerWebSocket(session, ws, opts = {}) {
   };
   session.on('chat', onChat);
 
-  ws.send(JSON.stringify({ t: 'viewer-mode' }));
+  // viewer-mode includes the owner login so the client can render a
+  // "Read-only — owned by @kkrazy" badge above the transcript.
+  const ownerLogin = sessionsMod.getSessionRecord(sessionId)?.user || null;
+  ws.send(JSON.stringify({ t: 'viewer-mode', owner: ownerLogin }));
 
   // Terminal-tail relay: viewers don't see the raw PTY (they see the
   // structured transcript), but Claude's interactive prompts ("Do you want
-  // me to apply this edit? (y/n)") only appear in the PTY — they never go
-  // into the JSONL. Without a tail viewers send @myco, Claude pauses for
-  // confirmation, and the session stalls because the viewer can't see it
-  // and doesn't know to type @myco y. The tail is the last few non-empty
-  // lines of stripped output, sent on connect and debounced on each PTY
-  // data event so the network doesn't get sprayed.
-  const TAIL_LINES = 8;
-  const TAIL_DEBOUNCE_MS = 250;
+  // me to apply this edit? (y/n)") never make it into the JSONL — they
+  // live only in the PTY. Without a tail, viewers send @myco, Claude pauses
+  // for confirmation, and the session stalls because the viewer can't see
+  // the prompt. The tail is sent as both stripped text (used for headings
+  // and accessibility) and ANSI-rendered HTML (preserves Claude Code's
+  // colored TUI elements), debounced so the network doesn't get sprayed.
+  const TAIL_LINES = 12;
+  const TAIL_DEBOUNCE_MS = 200;
   let tailTimer = null;
   function emitTail() {
     if (ws.readyState !== ws.OPEN) return;
-    const stripped = stripAnsi(session.buffer.join(''));
-    const text = tailLines(stripped, TAIL_LINES).trimEnd();
-    ws.send(JSON.stringify({ t: 'terminal-tail', text }));
+    const raw = session.buffer.join('');
+    // Take the tail in raw form first so escape sequences aren't truncated
+    // mid-CSI, then convert to HTML. tailLines on the stripped version is
+    // the source of truth for "how many lines is this?".
+    const strippedTail = tailLines(stripAnsi(raw), TAIL_LINES).trimEnd();
+    let html = '';
+    try { html = ansiToHtml.toHtml(tailLines(raw, TAIL_LINES + 4)); } catch { html = strippedTail; }
+    ws.send(JSON.stringify({ t: 'terminal-tail', text: strippedTail, html }));
   }
   emitTail(); // initial state on connect
   const onPtyData = () => {
