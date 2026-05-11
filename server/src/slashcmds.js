@@ -25,6 +25,12 @@ const COMMANDS = [
     handler: (ctx) => handleIssue(ctx, { kind: 'bug', labels: ['bug'] }),
   },
   {
+    names: ['decide', 'pick', 'choose'],
+    summary: 'Answer Claude\'s currently-pending dialog (e.g. plan-mode "what next" menu)',
+    usage: '/decide <n>',
+    handler: handleDecide,
+  },
+  {
     names: ['help'],
     summary: 'List available chat commands',
     usage: '/help',
@@ -108,6 +114,42 @@ async function handleIssue(ctx, { kind, labels }) {
     return;
   }
   ctx.reply(`✓ Filed ${kind} request #${result.number} on ${repo.owner}/${repo.repo}: ${result.url}`);
+}
+
+// /decide <n> — answer the currently-pending dialog by sending its option
+// number to the running Claude PTY. The dialog was previously detected by
+// the MenuInterceptor in pty.js, which posted its options into the chat as
+// an assistant message and stashed the menu on session.pendingMenu.
+async function handleDecide(ctx) {
+  const raw = (ctx.args || '').trim();
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) {
+    ctx.reply('Usage: `/decide <n>` — pick the option number from the most recent dialog. e.g. `/decide 1`.');
+    return;
+  }
+  const session = ctx.session;
+  if (!session || !session.alive) {
+    ctx.reply('(no live Claude session attached to this discussion — can\'t /decide.)');
+    return;
+  }
+  const pending = session.pendingMenu;
+  if (!pending) {
+    ctx.reply('(no Claude dialog is currently pending. /decide only works when Claude is showing a numbered menu.)');
+    return;
+  }
+  const matched = pending.options.find((o) => o.n === n);
+  if (!matched) {
+    const valid = pending.options.map((o) => o.n).join(', ');
+    ctx.reply(`(option ${n} isn't in the current dialog — valid options: ${valid})`);
+    return;
+  }
+  // Claude Code's menus accept digit + Enter to commit. We send the
+  // option number followed by \r; the menu disappears on the next render
+  // tick, which clears session.pendingMenu via MenuInterceptor's
+  // "cleared" transition.
+  session.write(String(n) + '\r');
+  session.pendingMenu = null;
+  ctx.reply(`✓ picked option ${n}: ${matched.label}`);
 }
 
 function handleHelp(ctx) {

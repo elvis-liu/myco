@@ -1,6 +1,7 @@
 const pty = require('@homebridge/node-pty-prebuilt-multiarch');
 const { EventEmitter } = require('events');
 const { Terminal: HeadlessTerminal } = require('@xterm/headless');
+const { MenuInterceptor } = require('./menu-interceptor');
 // Late-bound: sessions.js requires this module, so destructuring at load
 // time would capture undefined values from the partial export.
 const sessionsMod = require('./sessions');
@@ -38,15 +39,41 @@ class PtySession extends EventEmitter {
       logLevel: 'off',
     });
 
+    // Detects when Claude shows a TUI menu (plan-finalization etc.) so we
+    // can forward it to the discussion panel. The session caches the most
+    // recent fired menu in `pendingMenu` so the /decide slash command knows
+    // which dialog the user is responding to.
+    this.menuInterceptor = new MenuInterceptor();
+    this.pendingMenu = null;
+    this._menuDebounce = null;
+
     this.pty.onData((data) => {
       this._push(data);
       try { this.headless.write(data); } catch {}
+      // Debounce menu detection — wait until the alt-screen render settles
+      // before reading it, otherwise we'd scan partially-painted dialogs.
+      if (this._menuDebounce) clearTimeout(this._menuDebounce);
+      this._menuDebounce = setTimeout(() => this._checkMenu(), 250);
       this.emit('data', data);
     });
     this.pty.onExit(({ exitCode }) => {
       this.alive = false;
       this.emit('exit', exitCode);
     });
+  }
+
+  _checkMenu() {
+    this._menuDebounce = null;
+    if (!this.headless) return;
+    const change = this.menuInterceptor.detectChange(this.headless);
+    if (!change) return;
+    if (change.kind === 'newMenu') {
+      this.pendingMenu = change.menu;
+      this.emit('menu', change.menu);
+    } else if (change.kind === 'cleared') {
+      this.pendingMenu = null;
+      this.emit('menu-cleared');
+    }
   }
 
   _push(data) {
@@ -137,6 +164,7 @@ function spawnClaude(sessionId, { cwd, resumeId, cols = 120, rows = 30 }) {
   });
   const wrapped = new PtySession(sessionId, proc);
   sessions.set(sessionId, wrapped);
+  wrapped.on('menu', (menu) => broadcastMenuToChat(sessionId, wrapped, menu));
   wrapped.on('exit', () => {
     setTimeout(() => {
       const cur = sessions.get(sessionId);
@@ -335,6 +363,7 @@ function handleChatMessage(sessionId, session, user, text /* opts = {} */) {
       user,
       sessionId,
       absCwd,
+      session,                          // for /decide and future PTY-writing commands
       reply: (replyText, opts = {}) => {
         const replyMsg = {
           user: ASSISTANT_USER,
@@ -458,6 +487,28 @@ async function runAssistant(sessionId, session, lastMessage) {
   };
   sessionsMod.appendChatMessage(sessionId, reply);
   session.emit('chat', reply);
+}
+
+// When MenuInterceptor fires for a session, post the dialog into the
+// discussion panel so the user can pick an option via `/decide <n>`. We
+// route through the existing chat-broadcast path (appendChatMessage +
+// emit('chat')) so the message shows up for read-only viewers too and is
+// persisted in rec.chat for replay across reconnects.
+function broadcastMenuToChat(sessionId, session, menu) {
+  const lines = ['🤔 Claude is waiting on a decision:'];
+  if (menu.question) lines.push('> ' + menu.question);
+  for (const opt of menu.options) lines.push(`[${opt.n}] ${opt.label}`);
+  lines.push('');
+  lines.push('Reply with `/decide <n>` to pick an option.');
+  const msg = {
+    user: ASSISTANT_USER,
+    text: lines.join('\n'),
+    ts: new Date().toISOString(),
+    meta: { kind: 'menu', menu },
+  };
+  sessionsMod.appendChatMessage(sessionId, msg);
+  session.emit('chat', msg);
+  console.log(`[menu] ${sessionId} fired ${menu.kind} with ${menu.options.length} options: ${JSON.stringify(menu.question).slice(0, 80)}`);
 }
 
 // Read the bottom rows of the session's headless terminal and decide what

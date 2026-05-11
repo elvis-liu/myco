@@ -463,6 +463,34 @@ test_chat_window() {
   grep -q "'--dangerously-skip-permissions'" server/src/pty.js \
     && pass "claude spawned with --dangerously-skip-permissions" \
     || fail "claude spawned with --dangerously-skip-permissions"
+  # Regression: TUI-menu interception is wired so plan-mode dialogs (and
+  # any other numbered menu Claude displays) reach the web GUI via chat.
+  test -f server/src/menu-interceptor.js && pass "menu-interceptor.js exists" || fail "menu-interceptor.js missing"
+  grep -q "MenuInterceptor" server/src/pty.js && pass "PtySession uses MenuInterceptor" || fail "PtySession uses MenuInterceptor"
+  grep -q "broadcastMenuToChat" server/src/pty.js && pass "pty has broadcastMenuToChat" || fail "pty has broadcastMenuToChat"
+  grep -q "names: \['decide'" server/src/slashcmds.js && pass "/decide command registered" || fail "/decide command missing"
+  if have_node; then
+    node -e "
+      const { MenuInterceptor } = require('./server/src/menu-interceptor');
+      function fake(text) {
+        const lines = text.split('\n');
+        return { rows: lines.length, buffer: { active: { viewportY: 0, getLine: (y) => ({ translateToString: () => lines[y] || '' }) }}};
+      }
+      const i = new MenuInterceptor();
+      const plan = 'The plan is ready.\nWhat would you like to do?\n❯ 1. Yes, proceed with this plan\n  2. No, keep planning';
+      const r = i.detectChange(fake(plan));
+      if (!r || r.kind !== 'newMenu') throw new Error('expected newMenu, got ' + JSON.stringify(r));
+      if (r.menu.kind !== 'plan') throw new Error('expected kind=plan, got ' + r.menu.kind);
+      if (r.menu.options.length !== 2) throw new Error('expected 2 options, got ' + r.menu.options.length);
+      const r2 = i.detectChange(fake(plan));
+      if (!r2 || r2.kind !== 'sameMenu') throw new Error('expected sameMenu on repeat, got ' + JSON.stringify(r2));
+      const r3 = i.detectChange(fake('boring text no menu'));
+      if (!r3 || r3.kind !== 'cleared') throw new Error('expected cleared, got ' + JSON.stringify(r3));
+    " && pass "MenuInterceptor parses plan dialog + dedupes + clears" \
+      || fail "MenuInterceptor parses plan dialog + dedupes + clears"
+  else
+    skip "MenuInterceptor parser (no host node)"
+  fi
   grep -q "handleChatMessage" server/src/pty.js && pass "handleChatMessage in pty.js" || fail "handleChatMessage in pty.js"
   grep -q "handleChatMessage" server/src/index.js && pass "handleChatMessage imported by /run route" || fail "handleChatMessage imported"
   # Regression: parseStringArray must tolerate code fences + non-JSON.
