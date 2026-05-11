@@ -124,6 +124,12 @@ test_conv_view_js() {
   grep -q "document.getElementById('d' + id)" web/public/app.js \
     && pass "mermaid temp-div orphan cleanup" \
     || fail "mermaid temp-div orphan cleanup"
+  # Regression: read-only viewer's user messages must go through renderMd
+  # too. Earlier they used textContent and rendered markdown literally
+  # ("1. step", **bold**, ```code```).
+  grep -Pzoq "m.role === 'user'[\s\S]*?textEl.innerHTML = renderMd" web/public/app.js \
+    && pass "user-role transcript messages rendered as markdown" \
+    || fail "user-role transcript messages rendered as markdown"
   grep -q 'function openSession' web/public/app.js && pass "openSession" || fail "openSession"
   grep -q 'function renderTranscriptMessages' web/public/app.js && pass "renderTranscriptMessages" || fail "renderTranscriptMessages"
 }

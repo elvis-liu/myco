@@ -429,7 +429,12 @@ function renderConvMessage(m) {
     div.className = 'conv-msg conv-msg-user';
     const textEl = document.createElement('div');
     textEl.className = 'conv-text';
-    textEl.textContent = m.text;
+    // User messages historically used textContent, which rendered markdown
+    // literally (numbered lists showed as "1. step", bold as **bold**, code
+    // fences as triple backticks). Route through renderMd so the viewer
+    // sees the same formatting an editor preview would. marked escapes
+    // HTML by default, so this is safe for untrusted input.
+    textEl.innerHTML = renderMd(m.text);
     div.appendChild(textEl);
     return div;
   }
