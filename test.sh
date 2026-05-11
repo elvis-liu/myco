@@ -376,6 +376,14 @@ test_chat_window() {
   grep -q 'id="chat-send"' web/public/index.html && pass "#chat-send element" || fail "#chat-send element"
   grep -q 'id="chat-form"' web/public/index.html && pass "#chat-form element" || fail "#chat-form element"
   grep -q 'function sendChatMessage' web/public/app.js && pass "sendChatMessage() defined" || fail "sendChatMessage() defined"
+  # Regression: chat sends issued while the WS is reconnecting must NOT be
+  # silently dropped — they should land in an outbound queue and drain on
+  # the next 'open' event. Mobile background-suspend is the common trigger.
+  grep -q 'outboundChat'        web/public/app.js && pass "chat outbound queue" || fail "chat outbound queue"
+  grep -q '_flushOutboundChat'  web/public/app.js && pass "flushOutboundChat helper" || fail "flushOutboundChat helper"
+  grep -q 'this Claude session has exited' server/src/pty.js \
+    && pass "server warns when @myco hits dead PTY" \
+    || fail "server warns when @myco hits dead PTY"
   grep -q "t: 'chat'" server/src/pty.js && pass "chat WS frame format" || fail "chat WS frame"
   grep -q "t: 'chat-history'" server/src/pty.js && pass "chat-history replay" || fail "chat-history replay"
   grep -q "msg.t === 'chat-history'" web/public/app.js && pass "chat-history client handler" || fail "chat-history client handler"

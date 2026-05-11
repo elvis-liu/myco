@@ -367,7 +367,18 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
   // chat participants (owner + read-only viewers), since the chat is the
   // collaborative steering channel for the session.
   const mycoMatch = text.match(/^@myco\s+(.+)/i);
-  if (mycoMatch && session.alive) {
+  if (mycoMatch) {
+    if (!session.alive) {
+      // Used to silently drop here — viewers' @myco messages would
+      // disappear into the void with no feedback. Echo a warning so the
+      // sender knows the PTY is gone and to reattach.
+      session.emit('chat', {
+        user: ASSISTANT_USER,
+        text: '(this Claude session has exited — reopen the session to continue)',
+        ts: new Date().toISOString(),
+      });
+      return;
+    }
     const input = mycoMatch[1].trim();
     if (input) {
       // Reject Claude's interactive slash-commands. They aren't meaningful

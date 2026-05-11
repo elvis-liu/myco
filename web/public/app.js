@@ -166,6 +166,7 @@ function openShareViewer(id) {
     state.ws = ws;
     ws.addEventListener('open', () => {
       reconnectDelay = 1000;
+      _flushOutboundChat();                      // any sends queued during reconnect
     });
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
@@ -1033,6 +1034,7 @@ function openSession(id) {
     ws.addEventListener('open', () => {
       reconnectDelay = 1000;
       hideConnOverlay();
+      _flushOutboundChat();                      // any sends queued during reconnect
       if (state.term) {
         ws.send(JSON.stringify({ t: 'resize', cols: state.term.cols, rows: state.term.rows }));
       }
@@ -1445,12 +1447,40 @@ function formatChatTs(iso) {
   } catch { return ''; }
 }
 
+// Outbound chat queue. If the WebSocket isn't OPEN at submit time (mobile
+// background-suspend reconnect, brief network blip, page-load race),
+// silently dropping the message lets the user think they sent something
+// they didn't. Queue it locally instead and drain on the next WS open.
+// state.outboundChat holds {text, ts} entries in order.
+function _flushOutboundChat() {
+  const ws = state.ws;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!state.outboundChat || !state.outboundChat.length) return;
+  const queue = state.outboundChat;
+  state.outboundChat = [];
+  for (const item of queue) {
+    try { ws.send(JSON.stringify({ t: 'chat', text: item.text })); }
+    catch { state.outboundChat.push(item); break; }
+  }
+}
+
 function sendChatMessage(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return false;
   const ws = state.ws;
-  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  ws.send(JSON.stringify({ t: 'chat', text: trimmed }));
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    // Queue + return true so the input clears and the user moves on. The
+    // message goes out as soon as the WS reconnects (drainOutboundChat is
+    // wired to every `open` event in connect()/connectShare()).
+    if (!state.outboundChat) state.outboundChat = [];
+    state.outboundChat.push({ text: trimmed, ts: Date.now() });
+  } else {
+    try { ws.send(JSON.stringify({ t: 'chat', text: trimmed })); }
+    catch {
+      if (!state.outboundChat) state.outboundChat = [];
+      state.outboundChat.push({ text: trimmed, ts: Date.now() });
+    }
+  }
   // @myco messages get injected into the running Claude session. On mobile
   // the chat pane is a full-screen overlay, so close it so the user can
   // immediately see Claude's response in the session pane behind it. On
