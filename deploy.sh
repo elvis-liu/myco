@@ -22,6 +22,7 @@
 #   ./deploy.sh --dry-run                      # plan only; no image transfer or swap
 #   ./deploy.sh --allow-github-user <login>    # add a GitHub login to the allowlist (no build/ship)
 #   ./deploy.sh --set-oauth <id>:<secret>      # write OAuth client_id/secret into .env (no build/ship)
+#   ./deploy.sh --set-anthropic-key sk-ant-…   # write ANTHROPIC_API_KEY into .env + restart (no build/ship)
 #   MYCO_DEPLOY_HOST=user@host \
 #   MYCO_STATE_DIR=/path/on/remote ./deploy.sh
 set -euo pipefail
@@ -35,6 +36,7 @@ SKIP_TESTS=0
 DRY_RUN=0
 ADD_ALLOW=""
 SET_OAUTH=""
+SET_ANTHROPIC_KEY=""
 
 # Populated by open_ssh + build_image; consumed by later steps.
 SOCK=""
@@ -62,6 +64,9 @@ parse_args() {
       --set-oauth)             [ -n "${2:-}" ] || die "--set-oauth requires client_id:client_secret"
                                SET_OAUTH="$2"; shift 2 ;;
       --set-oauth=*)           SET_OAUTH="${1#--set-oauth=}"; shift ;;
+      --set-anthropic-key)     [ -n "${2:-}" ] || die "--set-anthropic-key requires the key value"
+                               SET_ANTHROPIC_KEY="$2"; shift 2 ;;
+      --set-anthropic-key=*)   SET_ANTHROPIC_KEY="${1#--set-anthropic-key=}"; shift ;;
       --help|-h)
         sed -n '2,28p' "$0" | sed 's/^# \?//'
         exit 0
@@ -224,6 +229,48 @@ REMOTE_SH
   warn "OAuth env changes only take effect after the container is restarted (re-run ./deploy.sh)"
 }
 
+# Write ANTHROPIC_API_KEY to the state-dir .env and restart the container so
+# the new value is picked up by process.env. Used by the Plan/Arch/Test
+# extractor and the existing session summarizer.
+set_anthropic_key_in_env() {
+  local key="$1"
+  if ! [[ "$key" =~ ^sk-ant-[A-Za-z0-9_-]{20,}$ ]]; then
+    die "invalid --set-anthropic-key (expected sk-ant-… with no whitespace)"
+  fi
+  step "Setting ANTHROPIC_API_KEY in .env"
+  ensure_state_dir
+  local result
+  result=$(remote "K='$key' EF='$STATE_DIR/.env' bash -s" <<'REMOTE_SH'
+    set -e
+    touch "$EF"
+    chmod 600 "$EF"
+    if grep -qE "^ANTHROPIC_API_KEY=" "$EF"; then
+      cur=$(sed -n 's/^ANTHROPIC_API_KEY=//p' "$EF" | head -1)
+      if [ "$cur" = "$K" ]; then echo unchanged; exit 0; fi
+      tmp=$(mktemp)
+      awk -v v="$K" 'BEGIN{FS=OFS="="} $1=="ANTHROPIC_API_KEY" {print "ANTHROPIC_API_KEY="v; next} {print}' "$EF" > "$tmp"
+      cat "$tmp" > "$EF"
+      rm -f "$tmp"
+    else
+      printf '%s=%s\n' ANTHROPIC_API_KEY "$K" >> "$EF"
+    fi
+    echo written
+REMOTE_SH
+  )
+  case "$result" in
+    written)   ok ".env: ANTHROPIC_API_KEY upserted" ;;
+    unchanged) ok ".env: ANTHROPIC_API_KEY already matches — no change"; return 0 ;;
+    *)         die "set_anthropic_key_in_env: unexpected result '$result'" ;;
+  esac
+  step "Restarting $NAME so the new env value takes effect"
+  if remote "docker ps --filter name=^${NAME}\$ --format '{{.Names}}' | grep -q ."; then
+    remote "docker restart '$NAME' >/dev/null"
+    ok "container restarted"
+  else
+    warn "container '$NAME' not running — start it with: ./deploy.sh"
+  fi
+}
+
 seed_caddyfile() {
   if remote "test -f '$STATE_DIR/Caddyfile'"; then return 0; fi
   if remote "test -f /home/kkrazy/myco/Caddyfile"; then
@@ -302,6 +349,11 @@ main() {
   if [ -n "$SET_OAUTH" ]; then
     open_ssh
     set_oauth_in_env "$SET_OAUTH"
+    exit 0
+  fi
+  if [ -n "$SET_ANTHROPIC_KEY" ]; then
+    open_ssh
+    set_anthropic_key_in_env "$SET_ANTHROPIC_KEY"
     exit 0
   fi
 
