@@ -272,8 +272,8 @@ function showConversationView() {
 
 function showTranscriptWaiting() {
   showConversationView();
-  const container = document.getElementById('conv-messages');
-  container.innerHTML = '<div class="conv-waiting">Waiting for session to start...</div>';
+  const content = document.getElementById('conv-content');
+  if (content) content.innerHTML = '<div class="conv-waiting">Waiting for session to start...</div>';
 }
 
 function escHtml(s) {
@@ -342,23 +342,15 @@ function isConvAtBottom() {
   return wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 60;
 }
 
-// The live #terminal-tail is parented inside #conv-messages and must always
-// be the last child so the in-flight PTY xterm sits at the bottom of the
-// transcript scroll. Detach before mutating the container, re-append after.
-function detachTerminalTail() {
-  const tail = document.getElementById('terminal-tail');
-  if (tail && tail.parentElement) tail.parentElement.removeChild(tail);
-  return tail;
-}
-function reattachTerminalTail(tail, container) {
-  if (tail && container) container.appendChild(tail);
-}
-
+// Transcript turns are inserted into #conv-content (a child of #conv-messages
+// that lives ABOVE #terminal-tail). Wiping conv-content via innerHTML never
+// touches the sibling tail card, so the embedded mini xterm survives every
+// transcript reset/append.
 function renderTranscriptMessages(messages) {
   showConversationView();
-  const container = document.getElementById('conv-messages');
-  const tail = detachTerminalTail();
-  container.innerHTML = '';
+  const content = document.getElementById('conv-content');
+  if (!content) return;
+  content.innerHTML = '';
   let turnEl = null;
   for (const m of messages) {
     const el = renderConvMessage(m);
@@ -366,47 +358,39 @@ function renderTranscriptMessages(messages) {
     if (m.role === 'user' || m.role === 'title') {
       turnEl = document.createElement('div');
       turnEl.className = 'conv-turn';
-      container.appendChild(turnEl);
+      content.appendChild(turnEl);
     }
     if (turnEl) {
       turnEl.appendChild(el);
     } else {
-      container.appendChild(el);
+      content.appendChild(el);
     }
   }
-  reattachTerminalTail(tail, container);
   scrollConvToBottom();
-  renderMermaidInContainer(container);
+  renderMermaidInContainer(content);
 }
 
 function appendTranscriptMessages(messages) {
   const wasAtBottom = isConvAtBottom();
-  const container = document.getElementById('conv-messages');
-  // Detach the live terminal-tail card so its parentage doesn't trip up
-  // lastElementChild lookups (we'd otherwise append new turns inside the
-  // tail card). Re-append at the end after the new messages are inserted.
-  const tail = detachTerminalTail();
-  // The lastElementChild used to potentially be a .conv-turn we wanted to
-  // keep extending — but with the tail detached it's whatever came before
-  // the tail. Reuse it only if it's a conv-turn.
-  let turnEl = container.lastElementChild;
+  const content = document.getElementById('conv-content');
+  if (!content) return;
+  let turnEl = content.lastElementChild;
   if (turnEl && !turnEl.classList?.contains('conv-turn')) turnEl = null;
   for (const m of messages) {
     const el = renderConvMessage(m);
     if (m.role === 'user' || m.role === 'title') {
       turnEl = document.createElement('div');
       turnEl.className = 'conv-turn';
-      container.appendChild(turnEl);
+      content.appendChild(turnEl);
     }
     if (turnEl) {
       turnEl.appendChild(el);
     } else {
-      container.appendChild(el);
+      content.appendChild(el);
     }
   }
-  reattachTerminalTail(tail, container);
   if (wasAtBottom) scrollConvToBottom();
-  renderMermaidInContainer(container);
+  renderMermaidInContainer(content);
 }
 
 function renderConvMessage(m) {
@@ -939,8 +923,11 @@ function openSession(id) {
   document.getElementById('terminal').innerHTML = '';
   document.getElementById('terminal-wrap').hidden = true;
   document.getElementById('conversation-wrap').hidden = true;
-  document.getElementById('conv-messages').innerHTML = '';
-  clearReadOnly();                               // reset banner + state
+  // Wipe only the transcript content; leave the sibling #terminal-tail
+  // (and its embedded mini xterm) for clearReadOnly to dispose properly.
+  const _conv = document.getElementById('conv-content');
+  if (_conv) _conv.innerHTML = '';
+  clearReadOnly();                               // resets banner + tail term
   // Reset file pane on session switch — paths and mtimes are session-scoped.
   hideFilesView();
   state.files.currentPath = '.';
@@ -968,8 +955,8 @@ function openSession(id) {
   // (structured transcript + live terminal-tail).
   if (isShared) {
     showConversationView();
-    document.getElementById('conv-messages').innerHTML =
-      '<div class="conv-waiting">Connecting…</div>';
+    const _conv = document.getElementById('conv-content');
+    if (_conv) _conv.innerHTML = '<div class="conv-waiting">Connecting…</div>';
   }
 
   if (!isShared) {

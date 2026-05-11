@@ -62,10 +62,12 @@
           <span class="ro-owner"></span>
         </div>
         <div id="conv-messages">
-          <!-- Live PTY xterm. JS keeps it pinned as the last child of
-               #conv-messages after each transcript update so completed
-               turns from the JSONL stack above and the in-flight terminal
-               sits at the end of the conversation. -->
+          <!-- Transcript turns are written into #conv-content (so callers
+               that wipe the transcript via innerHTML don't blow away the
+               sibling #terminal-tail card below). -->
+          <div id="conv-content"></div>
+          <!-- Live PTY xterm rendered as the in-flight tail of the
+               conversation, sitting after the structured transcript above. -->
           <div id="terminal-tail" hidden>
             <div class="tt-header">
               <span class="tt-label">Live terminal</span>
@@ -185,6 +187,6 @@
   <script src="/vendor/mermaid.min.js"></script>
   <script>if (typeof mermaid !== 'undefined') mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
   <script src="keyboard.js?v=7"></script>
-  <script src="app.js?v=117"></script>
+  <script src="app.js?v=118"></script>
 </body>
 </html>
