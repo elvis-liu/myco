@@ -4,6 +4,7 @@ const { EventEmitter } = require('events');
 // time would capture undefined values from the partial export.
 const sessionsMod = require('./sessions');
 const { askAssistant, shouldAskAssistant, stripAnsi, tailLines, ASSISTANT_USER } = require('./btw');
+const slashcmds = require('./slashcmds');
 const transcriptMod = require('./transcript');
 
 const MAX_BUFFER = 1024 * 1024;
@@ -250,6 +251,44 @@ function handleChatMessage(sessionId, session, user, text /* opts = {} */) {
   // response happened to end in '?'.
   if (user === ASSISTANT_USER) return;
 
+  // Registered slash commands (/feature, /bug, /help, …) are handled by
+  // the slashcmds dispatcher. /btw is intentionally NOT in the registry —
+  // it's the existing claude-in-chat trigger handled below by btw.js.
+  if (text.startsWith('/')) {
+    const rec = sessionsMod.loadStore().sessions[sessionId];
+    const absCwd = rec && rec.absCwd;
+    const ctx = {
+      user,
+      sessionId,
+      absCwd,
+      reply: (replyText, opts = {}) => {
+        const replyMsg = {
+          user: ASSISTANT_USER,
+          text: String(replyText || ''),
+          ts: new Date().toISOString(),
+        };
+        if (opts && opts.meta) replyMsg.meta = opts.meta;
+        sessionsMod.appendChatMessage(sessionId, replyMsg);
+        session.emit('chat', replyMsg);
+      },
+    };
+    slashcmds.dispatch(ctx, text).then((handled) => {
+      // If not a known slash command, fall through to the @myco / /btw paths
+      // synchronously. (Async fall-through is awkward; for /btw the existing
+      // shouldAskAssistant path below picks it up because parseCommand
+      // returned null for /btw specifically.)
+      if (handled) return;
+      handleChatPostfixes(sessionId, session, user, text, message);
+    });
+    return;
+  }
+
+  handleChatPostfixes(sessionId, session, user, text, message);
+}
+
+// The non-slash routing — kept as a separate function so the slash path
+// can fall through after dispatch().
+function handleChatPostfixes(sessionId, session, user, text, message) {
   // @myco → send the message to the running Claude PTY session. Open to all
   // chat participants (owner + read-only viewers), since the chat is the
   // collaborative steering channel for the session.

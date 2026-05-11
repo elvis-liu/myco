@@ -755,33 +755,80 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 }
 #login-dialog h2 { font-size: 1.1rem; color: var(--accent); }
 .login-hint { font-size: .85rem; color: var(--muted); }
-#login-token {
+#login-github {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #24292e;
+  color: #fff;
+  border: 1px solid #444c56;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  min-height: 44px;
+  transition: background-color .12s ease;
+}
+#login-github:hover { background: #2f363d; }
+#login-github:active { transform: scale(.98); }
+#login-github svg { display: block; }
+.login-fineprint { color: var(--muted); font-size: .8rem; margin: 4px 0 0; line-height: 1.45; }
+.login-fineprint a { color: #8ab8ff; }
+.login-fineprint code {
+  background: var(--border);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font: 11.5px 'JetBrains Mono', monospace;
+}
+
+.login-divider {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--muted); font-size: .75rem;
+  margin: 4px 0;
+}
+.login-divider::before,
+.login-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+
+#login-pat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+#login-pat {
   background: #2e2e2e;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 12px 14px;
-  font-size: 1rem;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  min-height: 44px;
+  padding: 10px 12px;
+  font: 13px 'JetBrains Mono', monospace;
+  min-height: 40px;
 }
-#login-ok {
+#login-pat:focus { outline: none; border-color: var(--accent); }
+#login-pat-submit {
   background: var(--accent);
   color: #000;
   border: none;
   border-radius: 8px;
-  padding: 12px;
-  font-size: 1rem;
+  padding: 10px;
+  font-size: .95rem;
   font-weight: 600;
-  min-height: 44px;
+  cursor: pointer;
+  min-height: 40px;
 }
-#login-ok:active { transform: scale(.96); }
+#login-pat-submit:active { transform: scale(.98); }
+#login-pat-submit:disabled { opacity: .55; cursor: progress; }
 #login-error {
   color: var(--danger);
   font-size: .85rem;
-  background: rgba(255,107,107,.1);
-  border: 1px solid rgba(255,107,107,.3);
-  padding: 8px;
+  background: rgba(255, 100, 100, .08);
+  border: 1px solid rgba(255, 100, 100, .25);
+  padding: 6px 10px;
   border-radius: 6px;
 }
 
@@ -1189,7 +1236,61 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   gap: 8px;
   padding: 8px 10px calc(10px + var(--safe-bottom));
   border-top: 1px solid var(--border);
+  position: relative;            /* anchor for #chat-autocomplete */
 }
+
+/* Slash-command + @-mention dropdown anchored above the chat input. */
+#chat-autocomplete {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 4px);      /* sit just above the input */
+  max-height: 220px;
+  overflow-y: auto;
+  background: rgba(28, 32, 42, .96);
+  border: 1px solid rgba(120, 160, 230, .35);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  z-index: 50;
+  padding: 4px 0;
+  font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+#chat-autocomplete .ac-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+#chat-autocomplete .ac-item:hover,
+#chat-autocomplete .ac-item.active {
+  background: rgba(80, 120, 200, .25);
+}
+#chat-autocomplete .ac-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  color: #aac8ff;
+  flex-shrink: 0;
+}
+#chat-autocomplete .ac-desc {
+  font-size: 12px;
+  color: rgba(255, 255, 255, .55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+#chat-autocomplete .ac-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, .35);
+  font-style: italic;
+}
+
 #chat-input {
   flex: 1;
   background: var(--surface-2);

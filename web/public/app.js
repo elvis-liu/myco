@@ -85,15 +85,16 @@ async function authedFetch(path, opts = {}) {
 
 function showLogin() {
   const modal = document.getElementById('login-modal');
-  modal.hidden = false;
-  document.getElementById('login-token').focus();
+  if (modal) modal.hidden = false;
 }
 
 function hideLogin() {
-  document.getElementById('login-modal').hidden = true;
+  const modal = document.getElementById('login-modal');
+  if (modal) modal.hidden = true;
 }
 
 async function tryToken(token) {
+  if (!token) return false;
   const res = await fetch('/auth/check', { headers: { Authorization: `Bearer ${token}` } });
   const body = await res.json().catch(() => ({}));
   if (body.ok && body.user) state.chatUser = body.user;
@@ -101,7 +102,20 @@ async function tryToken(token) {
 }
 
 async function bootstrap() {
-  const shareTok = new URL(window.location.href).searchParams.get('s');
+  // OAuth callback bridge: /auth/github/callback responds with HTML that
+  // writes the new myco session token into localStorage and bounces here.
+  // Older flows (and noscript fallbacks) may still arrive with ?mycoSession=
+  // in the URL; handle both forms.
+  const url = new URL(window.location.href);
+  const incomingTok = url.searchParams.get('mycoSession');
+  if (incomingTok) {
+    try { localStorage.setItem('myco_token', incomingTok); } catch {}
+    state.token = incomingTok;
+    url.searchParams.delete('mycoSession');
+    history.replaceState(null, '', url.pathname + (url.search ? url.search : '') + url.hash);
+  }
+
+  const shareTok = url.searchParams.get('s');
 
   // Share-link: validate, persist, then fall through to normal init.
   // The shared session appears as a card in the sidebar alongside owned sessions.
@@ -447,22 +461,69 @@ function renderConvMessage(m) {
   return div;
 }
 
-async function doLogin() {
-  const input = document.getElementById('login-token');
+// Logout — drop the local session and bounce to GitHub login.
+async function doLogout() {
+  try {
+    await fetch('/auth/logout', { method: 'POST', headers: { ...authHeaders() } });
+  } catch {}
+  try { localStorage.removeItem('myco_token'); } catch {}
+  state.token = '';
+  location.replace('/');
+}
+
+// PAT login: post the pasted token to /auth/login. On success the server
+// returns { token } — the minted myco session. We persist that and proceed
+// exactly like the OAuth-callback path.
+async function doPatLogin() {
+  const input = document.getElementById('login-pat');
+  const btn = document.getElementById('login-pat-submit');
   const errEl = document.getElementById('login-error');
-  const token = input.value.trim();
-  if (!token) return;
-  const ok = await tryToken(token);
-  if (ok) {
-    state.token = token;
-    localStorage.setItem('myco_token', token);
-    errEl.hidden = true;
+  if (!input || !btn) return;
+  const pat = (input.value || '').trim();
+  if (!pat) { input.focus(); return; }
+  btn.disabled = true;
+  if (errEl) errEl.hidden = true;
+  try {
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: pat }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.token) {
+      const msg = body.error
+        ? (body.hint ? `${body.error}. ${body.hint}` : body.error)
+        : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    state.token = body.token;
+    state.chatUser = body.user && body.user.login ? body.user.login : null;
+    try { localStorage.setItem('myco_token', body.token); } catch {}
+    input.value = '';
     hideLogin();
     init();
-  } else {
-    errEl.textContent = 'Invalid token';
-    errEl.hidden = false;
+  } catch (err) {
+    if (errEl) {
+      errEl.textContent = err.message || 'login failed';
+      errEl.hidden = false;
+    }
     input.select();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function bindLoginUi() {
+  // Bind on the form's submit event so click + Enter + mobile autofill all
+  // funnel through one path. The button is type="submit" inside <form>, so
+  // the browser handles every variation natively.
+  const form = document.getElementById('login-pat-form');
+  if (form && !form.dataset.bound) {
+    form.dataset.bound = '1';
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      doPatLogin();
+    });
   }
 }
 
@@ -539,7 +600,17 @@ function showUserStamp() {
   const el = document.getElementById('user-stamp');
   if (!el) return;
   el.textContent = state.chatUser ? `@${state.chatUser}` : '';
-  el.title = state.chatUser ? `Logged in as ${state.chatUser}` : '';
+  el.title = state.chatUser ? `Logged in as ${state.chatUser} — click to sign out` : '';
+  if (state.chatUser && !el.dataset.logoutBound) {
+    el.dataset.logoutBound = '1';
+    el.style.cursor = 'pointer';
+    el.addEventListener('click', (e) => {
+      // Status-bar parent has its own click handler (toggleLogPanel); don't
+      // open the log panel when the user clicks the username.
+      e.stopPropagation();
+      if (confirm('Sign out of myco?')) doLogout();
+    });
+  }
 }
 
 async function refreshWorkspace() {
@@ -1399,12 +1470,148 @@ function bindChatUi() {
   form.dataset.bound = '1';
   form.addEventListener('submit', (e) => {
     e.preventDefault();
+    // If the autocomplete is open and the user just hit Enter, the keydown
+    // handler picks the active item instead of submitting. The form-submit
+    // path here only fires on a clean send (no autocomplete, or already
+    // dismissed).
     if (sendChatMessage(input.value)) input.value = '';
   });
 
   document.getElementById('btn-chat')?.addEventListener('click', () => setChatPane(!state.chatPaneVisible));
   document.getElementById('chatpane-close')?.addEventListener('click', () => setChatPane(false));
   bindChatpaneResize();
+  bindChatAutocomplete();
+}
+
+// Slash-command + @-mention dropdown for the chat input.
+//
+// State machine: as the user types, we look at the active token before the
+// caret. If it begins with `/` we show known slash commands; if it begins
+// with `@` we show known users. Up/Down navigates, Enter/Tab inserts.
+// Esc dismisses. Picks happen on click too. The popup is positioned by CSS
+// (anchored above the chat-form via #chat-autocomplete).
+let _chatAcCache = { commands: null, users: null, fetchedAt: 0 };
+
+async function _loadAcData() {
+  const stale = !_chatAcCache.commands || (Date.now() - _chatAcCache.fetchedAt) > 60000;
+  if (!stale) return _chatAcCache;
+  try {
+    const [cRes, uRes] = await Promise.all([
+      fetch('/commands').catch(() => null),
+      authedFetch('/users').catch(() => null),
+    ]);
+    const cBody = cRes && cRes.ok ? await cRes.json().catch(() => ({})) : {};
+    const uBody = uRes && uRes.ok ? await uRes.json().catch(() => ({})) : {};
+    _chatAcCache = {
+      commands: Array.isArray(cBody.commands) ? cBody.commands : [],
+      users: Array.isArray(uBody.users) ? uBody.users : [],
+      fetchedAt: Date.now(),
+    };
+  } catch {
+    _chatAcCache = { commands: [], users: [], fetchedAt: Date.now() };
+  }
+  return _chatAcCache;
+}
+
+function bindChatAutocomplete() {
+  const input = document.getElementById('chat-input');
+  const dropdown = document.getElementById('chat-autocomplete');
+  if (!input || !dropdown || input.dataset.acBound) return;
+  input.dataset.acBound = '1';
+
+  let items = [];           // current list: [{ name, desc, insert }]
+  let active = -1;          // highlighted index
+  let tokenStart = -1;      // index in input.value where the active token begins
+  let tokenEnd = -1;        // exclusive
+  let open = false;
+
+  function close() {
+    open = false;
+    dropdown.hidden = true;
+    items = [];
+    active = -1;
+  }
+
+  function render() {
+    if (!items.length) {
+      dropdown.innerHTML = '<div class="ac-empty">No matches</div>';
+      return;
+    }
+    dropdown.innerHTML = items.map((it, i) =>
+      `<div class="ac-item${i === active ? ' active' : ''}" data-idx="${i}">` +
+      `<span class="ac-name">${escHtml(it.name)}</span>` +
+      `<span class="ac-desc">${escHtml(it.desc || '')}</span>` +
+      `</div>`
+    ).join('');
+  }
+
+  function pick(idx) {
+    if (idx < 0 || idx >= items.length) return;
+    const it = items[idx];
+    const before = input.value.slice(0, tokenStart);
+    const after = input.value.slice(tokenEnd);
+    const insert = it.insert + ' ';
+    input.value = before + insert + after;
+    const caret = (before + insert).length;
+    input.setSelectionRange(caret, caret);
+    close();
+    input.focus();
+  }
+
+  async function refresh() {
+    const v = input.value;
+    const caret = input.selectionStart || 0;
+    // Find the start of the active token (whitespace boundary or start of string).
+    let i = caret - 1;
+    while (i >= 0 && !/\s/.test(v[i])) i--;
+    const start = i + 1;
+    const tok = v.slice(start, caret);
+    if (!tok || (tok[0] !== '/' && tok[0] !== '@')) return close();
+    // Slash commands only at the very start of the input, mentions anywhere.
+    if (tok[0] === '/' && start !== 0) return close();
+    tokenStart = start;
+    tokenEnd = caret;
+    const data = await _loadAcData();
+    const q = tok.slice(1).toLowerCase();
+    if (tok[0] === '/') {
+      const matches = (data.commands || []).filter((c) =>
+        c.name.toLowerCase().startsWith(q) ||
+        (c.aliases || []).some((a) => a.toLowerCase().startsWith(q))
+      );
+      items = matches.map((c) => ({
+        name: c.usage || ('/' + c.name),
+        desc: c.summary || '',
+        insert: '/' + c.name,
+      }));
+    } else {
+      const matches = (data.users || []).filter((u) => u.toLowerCase().startsWith(q));
+      items = matches.map((u) => ({ name: '@' + u, desc: '', insert: '@' + u }));
+    }
+    if (!items.length) { close(); return; }
+    active = 0;
+    open = true;
+    dropdown.hidden = false;
+    render();
+  }
+
+  input.addEventListener('input', refresh);
+  input.addEventListener('focus', refresh);
+  input.addEventListener('blur', () => setTimeout(close, 120));   // allow click-pick
+
+  input.addEventListener('keydown', (e) => {
+    if (!open) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % items.length; render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + items.length) % items.length; render(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(active); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+  });
+
+  dropdown.addEventListener('mousedown', (e) => {
+    const item = e.target.closest('.ac-item');
+    if (!item) return;
+    e.preventDefault();
+    pick(parseInt(item.dataset.idx, 10));
+  });
 }
 
 // Desktop chatpane resize: drag the left-edge handle to grow/shrink. Width
@@ -2545,9 +2752,9 @@ window.addEventListener('pagehide', stopVisibilityProbing);
 if (document.visibilityState === 'visible') startVisibilityProbing();
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('login-ok').addEventListener('click', doLogin);
-  document.getElementById('login-token').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); doLogin(); }
-  });
+  // Login modal exposes both GitHub OAuth (anchor → /auth/github/start) and
+  // PAT login (input + button → POST /auth/login). The OAuth side needs no
+  // wiring; the PAT side does.
+  bindLoginUi();
   bootstrap();
 });

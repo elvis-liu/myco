@@ -12,7 +12,8 @@ SMOKE_PORT=""
 SMOKE_STATE_DIR=""
 SMOKE_WORKSPACE=""
 
-# Persistence test runtime state
+# Persistence test runtime state. PERSIST_TOKEN/PERSIST_NEW_TOKEN are
+# OAuth-derived myco session tokens minted via the /auth/github/* test bypass.
 PERSIST_DIR=""
 PERSIST_HOME=""
 PERSIST_WKS=""
@@ -32,15 +33,40 @@ free_port() {
   python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()"
 }
 
+# Some checks need a host-side node binary (`node -e "require(...)"`). The
+# Docker-based persistence section never needs this — the image bakes node
+# in. Hosts without node can still run static + docker tests; we surface
+# that those node-dependent slots were skipped instead of marking failed.
+SKIP=0
+skip()    { SKIP=$((SKIP+1)); echo "  ~ $1 (skipped)"; }
+have_node() { command -v node >/dev/null 2>&1; }
+
+# Drive one OAuth round-trip via the /auth/github/* test bypass and echo the
+# minted myco session token. Args: <port> <login>. Echoes the token on stdout
+# (empty on failure).
+mint_session_via_oauth() {
+  local port="$1" login="$2"
+  # /start returns 302 to github.com/...&state=<nonce>; pull the nonce.
+  local state
+  state=$(curl -sI "http://127.0.0.1:$port/auth/github/start" 2>/dev/null \
+          | tr -d '\r' | grep -i '^location:' \
+          | grep -oE 'state=[A-Fa-f0-9]+' | head -1 | sed 's/^state=//')
+  [ -n "$state" ] || { echo ""; return 1; }
+  # Callback returns a tiny HTML bridge with the token in a localStorage call.
+  local body
+  body=$(curl -s "http://127.0.0.1:$port/auth/github/callback?code=$login&state=$state" 2>/dev/null)
+  echo "$body" | grep -oE "myco_token', \"[A-Fa-f0-9]+\"" | head -1 \
+      | sed -E "s/.*\"([A-Fa-f0-9]+)\".*/\1/"
+}
+
 # ─── static checks ───────────────────────────────────────────────────────────
 
 test_server_js_files() {
-  node -e "
-    const fs = require('fs');
-    ['src/index.js','src/pty.js','src/sessions.js','src/transcript.js','src/auth.js','src/btw.js'].forEach(f => {
-      try { require('fs').readFileSync('server/' + f, 'utf8'); } catch(e) { throw new Error('Missing: server/' + f); }
-    });
-  " && pass "Server JS files readable" || fail "Server JS files"
+  local missing=""
+  for f in src/index.js src/pty.js src/sessions.js src/transcript.js src/auth.js src/btw.js src/oauth.js; do
+    [ -r "server/$f" ] || missing="$missing $f"
+  done
+  [ -z "$missing" ] && pass "Server JS files readable" || fail "Server JS files (missing:$missing)"
 }
 
 test_frontend_files() {
@@ -56,6 +82,7 @@ test_vendor_assets() {
 }
 
 test_npm_deps() {
+  if ! have_node; then skip "npm deps (no host node)"; return; fi
   (cd server && node -e "
     ['express','ws','marked','highlight.js','@homebridge/node-pty-prebuilt-multiarch','ansi-to-html'].forEach(p => {
       try { require.resolve(p); } catch { throw new Error('Missing npm dep: ' + p); }
@@ -94,6 +121,7 @@ test_at_myco_chat_handler() {
   # Regression guard: the old shouldAskAssistant treated any '?'-ending
   # message as an assistant trigger, making every question look like claude
   # was replying even without a /btw prefix.
+  if ! have_node; then skip "shouldAskAssistant runtime (no host node)"; return; fi
   node -e "
     const { shouldAskAssistant } = require('./server/src/btw');
     const cases = [
@@ -141,8 +169,6 @@ test_mermaid_html_init() {
 test_file_viewer_polish_static() {
   # Header chrome + action bar additions in HTML
   grep -q 'id="files-view-crumbs"' web/public/index.html && pass "html: #files-view-crumbs" || fail "html: #files-view-crumbs"
-  grep -q 'id="files-view-lang"'   web/public/index.html && pass "html: #files-view-lang"   || fail "html: #files-view-lang"
-  grep -q 'id="files-view-size"'   web/public/index.html && pass "html: #files-view-size"   || fail "html: #files-view-size"
   grep -q 'id="files-view-body"'   web/public/index.html && pass "html: #files-view-body"   || fail "html: #files-view-body"
   grep -q 'id="files-action-bar"'  web/public/index.html && pass "html: #files-action-bar"  || fail "html: #files-action-bar"
   grep -q 'id="files-copy"'        web/public/index.html && pass "html: #files-copy"        || fail "html: #files-copy"
@@ -154,7 +180,6 @@ test_file_viewer_polish_static() {
   grep -q '\.claude-card'     web/public/styles.css && pass "css: .claude-card"     || fail "css: .claude-card"
   grep -q '\.code-chunk'      web/public/styles.css && pass "css: .code-chunk"      || fail "css: .code-chunk"
   grep -q '\.ln-gutter'       web/public/styles.css && pass "css: .ln-gutter"       || fail "css: .ln-gutter"
-  grep -q '\.lang-badge'      web/public/styles.css && pass "css: .lang-badge"      || fail "css: .lang-badge"
 
   # JS
   grep -q 'function renderFileViewerWithCards' web/public/app.js && pass "js: renderFileViewerWithCards" || fail "js: renderFileViewerWithCards"
@@ -197,20 +222,69 @@ test_file_explorer_static() {
   grep -q '#files-wrap'      web/public/styles.css && pass "css: #files-wrap"   || fail "css: #files-wrap"
   grep -q '#btn-files'       web/public/styles.css && pass "css: #btn-files"    || fail "css: #btn-files"
 
-  # Frontend JS
+  # Frontend JS — file editing now happens through the inline action-bar
+  # comment editor, so saveFile/enterEditMode are no longer separate functions.
   grep -q 'function loadFileTree'    web/public/app.js && pass "js: loadFileTree"    || fail "js: loadFileTree"
   grep -q 'function openFileInViewer' web/public/app.js && pass "js: openFileInViewer" || fail "js: openFileInViewer"
-  grep -q 'function saveFile'        web/public/app.js && pass "js: saveFile"        || fail "js: saveFile"
-  grep -q 'function enterEditMode'   web/public/app.js && pass "js: enterEditMode"   || fail "js: enterEditMode"
   grep -q 'expectedMtimeMs'          web/public/app.js && pass "js: mtime guard sent"|| fail "js: mtime guard sent"
 }
 
-test_deploy_add_token() {
-  grep -q '^add_token()' deploy.sh             && pass "deploy.sh: add_token() defined"        || fail "deploy.sh: add_token() defined"
-  grep -q '^upsert_token_in_env()' deploy.sh   && pass "deploy.sh: upsert_token_in_env()"      || fail "deploy.sh: upsert_token_in_env()"
-  grep -q '^hot_reload_auth()' deploy.sh       && pass "deploy.sh: hot_reload_auth()"          || fail "deploy.sh: hot_reload_auth()"
-  grep -q -- '--add-token)' deploy.sh          && pass "deploy.sh: --add-token flag parsed"    || fail "deploy.sh: --add-token flag parsed"
-  grep -q 'add_token "$ADD_TOKEN"' deploy.sh   && pass "deploy.sh: main() dispatches add_token" || fail "deploy.sh: main() dispatches add_token"
+# Replaces the old test_deploy_add_token. The MYCO_TOKENS bearer-token system
+# is gone; deploy.sh now manages the GitHub OAuth allowlist via
+# --allow-github-user and OAuth client credentials via --set-oauth.
+test_deploy_oauth_flags() {
+  grep -q '^allow_github_user()'   deploy.sh && pass "deploy.sh: allow_github_user()"          || fail "deploy.sh: allow_github_user()"
+  grep -q '^set_oauth_in_env()'    deploy.sh && pass "deploy.sh: set_oauth_in_env()"           || fail "deploy.sh: set_oauth_in_env()"
+  grep -q '^ensure_allowlist_seed()' deploy.sh && pass "deploy.sh: ensure_allowlist_seed()"   || fail "deploy.sh: ensure_allowlist_seed()"
+  grep -q '^warn_if_oauth_unset()' deploy.sh && pass "deploy.sh: warn_if_oauth_unset()"        || fail "deploy.sh: warn_if_oauth_unset()"
+  grep -q -- '--allow-github-user)' deploy.sh && pass "deploy.sh: --allow-github-user parsed"  || fail "deploy.sh: --allow-github-user parsed"
+  grep -q -- '--set-oauth)'         deploy.sh && pass "deploy.sh: --set-oauth parsed"          || fail "deploy.sh: --set-oauth parsed"
+  # Regression: the token-based flags must NOT come back without an explicit
+  # design decision — we removed --add-token entirely.
+  ! grep -qE -- '--add-token' deploy.sh && pass "deploy.sh: --add-token removed"               || fail "deploy.sh: --add-token still referenced"
+  ! grep -q 'MYCO_TOKENS' deploy.sh     && pass "deploy.sh: MYCO_TOKENS removed"               || fail "deploy.sh: MYCO_TOKENS still referenced"
+}
+
+test_oauth_static() {
+  # Server-side OAuth wiring.
+  grep -q "require('./oauth')"             server/src/index.js && pass "index.js: requires oauth"            || fail "index.js: requires oauth"
+  grep -q "app.get.*'/auth/github/start'"  server/src/index.js && pass "route: /auth/github/start"           || fail "route: /auth/github/start"
+  grep -q "app.get.*'/auth/github/callback'" server/src/index.js && pass "route: /auth/github/callback"      || fail "route: /auth/github/callback"
+  grep -q "app.post.*'/auth/logout'"       server/src/index.js && pass "route: /auth/logout"                 || fail "route: /auth/logout"
+  grep -q 'function startUrl'              server/src/oauth.js && pass "oauth.js: startUrl"                  || fail "oauth.js: startUrl"
+  grep -q 'function exchangeCode'          server/src/oauth.js && pass "oauth.js: exchangeCode"              || fail "oauth.js: exchangeCode"
+  grep -q 'function fetchUser'             server/src/oauth.js && pass "oauth.js: fetchUser"                 || fail "oauth.js: fetchUser"
+  grep -q 'MYCO_TEST_OAUTH_BYPASS'         server/src/oauth.js && pass "oauth.js: test bypass"               || fail "oauth.js: test bypass"
+  grep -q 'function mintSession'           server/src/auth.js  && pass "auth.js: mintSession"                || fail "auth.js: mintSession"
+  grep -q 'function revokeSession'         server/src/auth.js  && pass "auth.js: revokeSession"              || fail "auth.js: revokeSession"
+  grep -q 'function loadAllowlist'         server/src/auth.js  && pass "auth.js: loadAllowlist"              || fail "auth.js: loadAllowlist"
+  grep -q 'function isAllowed'             server/src/auth.js  && pass "auth.js: isAllowed"                  || fail "auth.js: isAllowed"
+  # The bearer-token auth model is gone.
+  ! grep -qE 'MYCO_TOKEN[S]?\b' server/src/auth.js  && pass "auth.js: MYCO_TOKEN(S) removed"               || fail "auth.js: MYCO_TOKEN(S) still referenced"
+  ! grep -qE "'/auth/reload'|'/github/token'" server/src/index.js && pass "index.js: /auth/reload + /github/token routes removed" || fail "index.js: stale auth routes still present"
+  # Allowlist is the gate.
+  grep -q 'allowed-github-users.txt' server/src/auth.js && pass "auth.js: references allowlist file" || fail "auth.js: allowlist file"
+}
+
+test_login_modal_static() {
+  # Login modal exposes BOTH paths: GitHub OAuth button + PAT paste input.
+  grep -q 'id="login-github"'      web/public/index.html && pass "html: #login-github (OAuth button)" || fail "html: #login-github (OAuth button)"
+  grep -q 'id="login-pat"'         web/public/index.html && pass "html: #login-pat (PAT input)"       || fail "html: #login-pat (PAT input)"
+  grep -q 'id="login-pat-submit"'  web/public/index.html && pass "html: #login-pat-submit"            || fail "html: #login-pat-submit"
+  grep -q 'id="login-pat-form"'    web/public/index.html && pass "html: #login-pat-form (real form)"  || fail "html: #login-pat-form (real form)"
+  ! grep -q 'id="login-token"'     web/public/index.html && pass "html: #login-token removed"          || fail "html: #login-token still in HTML"
+  ! grep -q 'id="github-modal"'    web/public/index.html && pass "html: #github-modal removed"        || fail "html: #github-modal still in HTML"
+  # JS doesn't reference the dropped widgets.
+  ! grep -q 'bindGithubModal' web/public/app.js && pass "js: bindGithubModal call removed"          || fail "js: bindGithubModal still referenced"
+  ! grep -q "getElementById('login-token')" web/public/app.js && pass "js: login-token usage removed" || fail "js: login-token still used"
+  ! grep -q "getElementById('login-ok')"    web/public/app.js && pass "js: login-ok usage removed"    || fail "js: login-ok still used"
+  # Bootstrap handles the OAuth callback bridge token; PAT submit posts to /auth/login.
+  grep -q "mycoSession"            web/public/app.js && pass "js: bootstrap honors ?mycoSession="              || fail "js: bootstrap honors ?mycoSession="
+  grep -q "function bindChatAutocomplete" web/public/app.js && pass "js: bindChatAutocomplete defined" || fail "js: bindChatAutocomplete defined"
+  grep -q "function doLogout"      web/public/app.js && pass "js: doLogout defined"                    || fail "js: doLogout defined"
+  grep -q "function doPatLogin"    web/public/app.js && pass "js: doPatLogin defined"                  || fail "js: doPatLogin defined"
+  grep -q "/auth/login"            web/public/app.js && pass "js: posts to /auth/login"                || fail "js: posts to /auth/login"
+  grep -q "app.post.*'/auth/login'" server/src/index.js && pass "route: POST /auth/login"              || fail "route: POST /auth/login"
 }
 
 run_static_checks() {
@@ -228,7 +302,9 @@ run_static_checks() {
   test_session_switching_clears_panes
   test_mermaid_html_init
   test_status_bar_user_and_build_stamps
-  test_deploy_add_token
+  test_deploy_oauth_flags
+  test_oauth_static
+  test_login_modal_static
   test_file_explorer_static
   test_file_viewer_polish_static
 }
@@ -380,6 +456,10 @@ test_cache_headers() {
 
 run_server_smoke() {
   section "Server smoke test"
+  if ! have_node; then
+    skip "Server smoke (no host node — Docker persistence section still covers runtime behaviour)"
+    return
+  fi
   start_smoke_server
   test_server_root
   test_sessions_endpoint
@@ -404,18 +484,27 @@ setup_persist_env() {
   PERSIST_DIR=$(mktemp -d)
   PERSIST_HOME=$(mktemp -d)
   PERSIST_WKS=$(mktemp -d)
-  PERSIST_TOKEN="t-$(date +%s%N | tail -c 12)"
-  PERSIST_NEW_TOKEN="t-new-$(date +%s%N | tail -c 12)"
   PERSIST_SID="myco-persist-test-$(date +%s%N | tail -c 8)"
   PERSIST_PORT=$(free_port)
   PERSIST_NAME="myco-persist-$$"
 
-  # .env: auth token mycod should load
+  # .env: GitHub OAuth + the test bypass that lets us mint sessions without
+  # ever talking to github.com.
   cat > "$PERSIST_DIR/.env" <<EOF
-MYCO_TOKENS=alice:$PERSIST_TOKEN
+MYCO_GH_CLIENT_ID=test-client-id
+MYCO_GH_CLIENT_SECRET=test-client-secret
+MYCO_PUBLIC_ORIGIN=http://localhost
+MYCO_TEST_OAUTH_BYPASS=alice
 EOF
 
-  # sessions.json: pre-seeded session that should appear post-restart
+  # Allowlist: alice and bob are invited. eve stays out.
+  cat > "$PERSIST_DIR/allowed-github-users.txt" <<EOF
+# test allowlist
+alice
+bob
+EOF
+
+  # sessions.json: pre-seeded session that should appear post-restart.
   cat > "$PERSIST_DIR/sessions.json" <<EOF
 {"sessions":{"$PERSIST_SID":{"id":"$PERSIST_SID","user":"alice","cwd":"persist-test","absCwd":"/wks/alice/persist-test","claudeSessionId":null,"createdAt":"2026-01-01T00:00:00.000Z"}},"dismissed":[]}
 EOF
@@ -450,11 +539,13 @@ start_persist_container() {
     myco-test >/dev/null 2>&1
 }
 
+# Wait for the server to come up. Uses /auth/check, which is unauthenticated
+# and always returns 200 — so we don't need a token before the OAuth round-trip.
 wait_persist_ready() {
   local label="$1"
   local ready=0 i
   for i in $(seq 1 30); do
-    if curl -sf "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $PERSIST_TOKEN" -o /dev/null 2>/dev/null; then
+    if curl -sf "http://127.0.0.1:$PERSIST_PORT/auth/check" -o /dev/null 2>/dev/null; then
       ready=1; break
     fi
     sleep 0.5
@@ -466,9 +557,21 @@ test_persist_initial() {
   start_persist_container && pass "container started" || fail "container started"
   wait_persist_ready "container ready"
 
+  # Mint a session for alice and bob via the OAuth test bypass.
+  PERSIST_TOKEN=$(mint_session_via_oauth "$PERSIST_PORT" alice)
+  [ -n "$PERSIST_TOKEN" ] && pass "OAuth: minted session for alice" \
+    || fail "OAuth: minted session for alice"
+
+  PERSIST_NEW_TOKEN=$(mint_session_via_oauth "$PERSIST_PORT" bob)
+  [ -n "$PERSIST_NEW_TOKEN" ] && pass "OAuth: minted session for bob" \
+    || fail "OAuth: minted session for bob"
+
   local resp sessions
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' && pass "auth token from .env works" || fail "auth from .env (got: $resp)"
+  echo "$resp" | grep -q '"ok":true' && pass "auth: alice session token works" \
+    || fail "auth: alice session token works (got: $resp)"
+  echo "$resp" | grep -q '"user":"alice"' && pass "auth: /auth/check returns login" \
+    || fail "auth: /auth/check returns login (got: $resp)"
 
   sessions=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions?all=1" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
   echo "$sessions" | grep -q "$PERSIST_SID" && pass "seeded session visible" || fail "seeded session visible"
@@ -478,13 +581,44 @@ test_persist_initial() {
   docker exec "$PERSIST_NAME" grep -q 'persistMarker' /root/.claude.json && pass ".claude.json contents preserved" || fail ".claude.json contents"
 }
 
+test_allowlist_gate() {
+  # eve is NOT on the allowlist — the OAuth callback should bounce her with
+  # a 403 "not invited" page and refuse to mint a session.
+  local state code
+  state=$(curl -sI "http://127.0.0.1:$PERSIST_PORT/auth/github/start" 2>/dev/null \
+          | tr -d '\r' | grep -i '^location:' \
+          | grep -oE 'state=[A-Fa-f0-9]+' | head -1 | sed 's/^state=//')
+  [ -n "$state" ] && pass "OAuth /start returns a state nonce" || fail "OAuth /start returns a state nonce"
+
+  code=$(curl -s -o /tmp/myco-eve-body -w '%{http_code}' \
+    "http://127.0.0.1:$PERSIST_PORT/auth/github/callback?code=eve&state=$state" 2>/dev/null)
+  [ "$code" = "403" ] && pass "OAuth callback for non-allowlisted login → 403" \
+    || fail "OAuth callback for non-allowlisted login → 403 (got HTTP $code)"
+  grep -qiE 'not invited|--allow-github-user' /tmp/myco-eve-body \
+    && pass "403 page mentions allowlist" \
+    || fail "403 page mentions allowlist"
+  rm -f /tmp/myco-eve-body
+}
+
+test_oauth_state_validation() {
+  # A callback with an unknown state nonce must be rejected, even for a
+  # login that's on the allowlist. Otherwise the server would mint sessions
+  # for any caller that knew a username.
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:$PERSIST_PORT/auth/github/callback?code=alice&state=bogusnonce" 2>/dev/null)
+  [ "$code" = "400" ] && pass "OAuth callback with bad state → 400" \
+    || fail "OAuth callback with bad state → 400 (got HTTP $code)"
+}
+
 test_persist_after_restart() {
   docker restart "$PERSIST_NAME" >/dev/null 2>&1
   wait_persist_ready "container ready after restart"
 
   local resp sessions
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' && pass "auth survives restart" || fail "auth survives restart"
+  echo "$resp" | grep -q '"ok":true' && pass "auth survives restart (auth-sessions.json reloaded)" \
+    || fail "auth survives restart (got: $resp)"
 
   sessions=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions?all=1" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
   echo "$sessions" | grep -q "$PERSIST_SID" && pass "session survives restart" || fail "session survives restart"
@@ -508,45 +642,69 @@ test_persist_after_redeploy() {
   docker exec "$PERSIST_NAME" grep -q 'persistMarker' /root/.claude.json && pass "claude config survives redeploy" || fail "claude config survives redeploy"
 }
 
-test_auth_hot_reload() {
-  # Pre-flight: brand-new bob token must NOT auth yet.
+test_pat_login_flow() {
+  # Positive: posting a PAT for an allowlisted login mints a session, just
+  # like the OAuth callback path. Test bypass parses `test-token-<login>`.
+  local body code
+  body=$(curl -s -X POST "http://127.0.0.1:$PERSIST_PORT/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"token":"test-token-alice"}' 2>/dev/null)
+  echo "$body" | grep -q '"ok":true' && pass "PAT login: alice (allowlisted) → ok" \
+    || fail "PAT login: alice (allowlisted) → ok (got: $body)"
+  echo "$body" | grep -qE '"token":"[A-Fa-f0-9]+"' && pass "PAT login: returns minted myco session" \
+    || fail "PAT login: returns minted myco session (got: $body)"
+  echo "$body" | grep -q '"login":"alice"' && pass "PAT login: returns user.login" \
+    || fail "PAT login: returns user.login (got: $body)"
+
+  # The minted token actually authenticates subsequent requests.
+  local pat_tok
+  pat_tok=$(echo "$body" | grep -oE '"token":"[A-Fa-f0-9]+"' | head -1 | sed -E 's/.*"([A-Fa-f0-9]+)".*/\1/')
+  if [ -n "$pat_tok" ]; then
+    body=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $pat_tok" 2>/dev/null)
+    echo "$body" | grep -q '"ok":true' && pass "PAT login: minted token authenticates" \
+      || fail "PAT login: minted token authenticates (got: $body)"
+  fi
+
+  # Negative: PAT for a non-allowlisted login → 403 with hint.
+  code=$(curl -s -o /tmp/myco-pat-eve -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$PERSIST_PORT/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"token":"test-token-eve"}' 2>/dev/null)
+  [ "$code" = "403" ] && pass "PAT login: non-allowlisted → 403" \
+    || fail "PAT login: non-allowlisted → 403 (got HTTP $code)"
+  grep -qiE 'not invited|allow-github-user' /tmp/myco-pat-eve \
+    && pass "PAT login: 403 body explains the gate" \
+    || fail "PAT login: 403 body explains the gate"
+  rm -f /tmp/myco-pat-eve
+
+  # Empty body → 400.
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$PERSIST_PORT/auth/login" \
+    -H "Content-Type: application/json" -d '{}' 2>/dev/null)
+  [ "$code" = "400" ] && pass "PAT login: missing token → 400" \
+    || fail "PAT login: missing token → 400 (got HTTP $code)"
+}
+
+test_logout() {
+  # Mint a throw-away session, log out, confirm it's now rejected.
+  local tok code
+  tok=$(mint_session_via_oauth "$PERSIST_PORT" alice)
+  [ -n "$tok" ] || { fail "logout: minted session for logout test"; return; }
+  pass "logout: minted throw-away session"
+
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "http://127.0.0.1:$PERSIST_PORT/auth/logout" \
+    -H "Authorization: Bearer $tok" 2>/dev/null)
+  [ "$code" = "200" ] && pass "POST /auth/logout → 200" \
+    || fail "POST /auth/logout → 200 (got HTTP $code)"
+
   local resp
-  resp=$(curl -s -o /dev/null -w '%{http_code}' \
-    "http://127.0.0.1:$PERSIST_PORT/sessions?all=1" \
-    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
-  [ "$resp" = "401" ] \
-    && pass "new token rejected before reload" \
-    || fail "new token rejected before reload (got HTTP $resp)"
-
-  # Add bob to /data/.env (kept on the host bind-mount so the container sees it).
-  cat > "$PERSIST_DIR/.env" <<EOF
-MYCO_TOKENS=alice:$PERSIST_TOKEN,bob:$PERSIST_NEW_TOKEN
-EOF
-
-  # Trigger hot-reload using alice's existing token.
-  resp=$(curl -s -X POST "http://127.0.0.1:$PERSIST_PORT/auth/reload" \
-    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' \
-    && pass "POST /auth/reload returns ok" \
-    || fail "POST /auth/reload (got: $resp)"
-
-  # Bob's token should now authenticate without a service restart.
-  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" \
-    -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' \
-    && pass "new token accepted after hot-reload" \
-    || fail "new token accepted after hot-reload (got: $resp)"
-
-  # Sanity: alice still works after reload.
-  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" \
-    -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' \
-    && pass "existing token still works after hot-reload" \
-    || fail "existing token still works (got: $resp)"
+  resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $tok" 2>/dev/null)
+  echo "$resp" | grep -q '"ok":false' && pass "logged-out token no longer authenticates" \
+    || fail "logged-out token no longer authenticates (got: $resp)"
 }
 
 test_non_owner_sees_session_with_owner_tag() {
-  # After test_auth_hot_reload, both alice's token and bob's token are loaded.
   # bob (a non-owner) should see alice's seeded session in /sessions?all=1
   # tagged with owned=false and owner="alice", so the client can render the
   # read-only badge and route through the viewer WS path.
@@ -562,86 +720,6 @@ test_non_owner_sees_session_with_owner_tag() {
   echo "$sessions" | grep -q '"owner":"alice"' \
     && pass "session carries owner name for non-owner" \
     || fail "session carries owner name (got: $sessions)"
-}
-
-test_auth_enables_via_hot_reload() {
-  # Verify the flip-on path: a server started with NO tokens should become
-  # auth-required after MYCO_TOKENS is added to .env and /auth/reload is hit.
-  # Regression test for the const-AUTH_REQUIRED bug — the flag used to be
-  # captured at module load and never re-evaluated.
-  local tmp_dir tmp_home tmp_wks tmp_port tmp_name new_tok
-  tmp_dir=$(mktemp -d)
-  tmp_home=$(mktemp -d)
-  tmp_wks=$(mktemp -d)
-  tmp_port=$(free_port)
-  tmp_name="myco-flip-$$"
-  new_tok="t-flip-$(date +%s%N | tail -c 12)"
-
-  # Start with NO MYCO_TOKENS in .env — auth should be disabled.
-  : > "$tmp_dir/.env"
-  cat > "$tmp_dir/Caddyfile" <<EOF
-:80 {
-    reverse_proxy localhost:3000
-}
-EOF
-
-  docker rm -f "$tmp_name" >/dev/null 2>&1 || true
-  docker run -d --name "$tmp_name" \
-    -p "$tmp_port:80" \
-    -v "$tmp_dir:/data" \
-    -v "$tmp_home:/root" \
-    -v "$tmp_wks:/wks" \
-    -v "$tmp_dir/Caddyfile:/etc/caddy/Caddyfile:ro" \
-    myco-test >/dev/null 2>&1
-
-  local ready=0 i
-  for i in $(seq 1 30); do
-    if curl -sf "http://127.0.0.1:$tmp_port/auth/check" -o /dev/null 2>/dev/null; then
-      ready=1; break
-    fi
-    sleep 0.5
-  done
-  [ "$ready" = "1" ] && pass "no-auth container ready" || fail "no-auth container ready"
-
-  local resp code
-  resp=$(curl -s "http://127.0.0.1:$tmp_port/auth/check" 2>/dev/null)
-  echo "$resp" | grep -q '"required":false' \
-    && pass "auth disabled at start" \
-    || fail "auth disabled at start (got: $resp)"
-
-  # Add a token to .env and hot-reload (no auth currently, anyone can hit it).
-  echo "MYCO_TOKENS=admin:$new_tok" > "$tmp_dir/.env"
-  resp=$(curl -s -X POST "http://127.0.0.1:$tmp_port/auth/reload" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' \
-    && pass "POST /auth/reload accepted while open" \
-    || fail "POST /auth/reload while open (got: $resp)"
-
-  # The flag must now reflect the populated TOKENS map.
-  resp=$(curl -s "http://127.0.0.1:$tmp_port/auth/check" 2>/dev/null)
-  echo "$resp" | grep -q '"required":true' \
-    && pass "auth REQUIRED after hot-reload (was the bug)" \
-    || fail "auth REQUIRED after hot-reload (got: $resp)"
-
-  # Unauth request should now get 401.
-  code=$(curl -s -o /dev/null -w '%{http_code}' \
-    "http://127.0.0.1:$tmp_port/sessions?all=1" 2>/dev/null)
-  [ "$code" = "401" ] \
-    && pass "unauth request rejected after reload" \
-    || fail "unauth request rejected (got HTTP $code)"
-
-  # New token should authenticate.
-  resp=$(curl -s "http://127.0.0.1:$tmp_port/auth/check" \
-    -H "Authorization: Bearer $new_tok" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' \
-    && pass "new token authenticates after flip-on" \
-    || fail "new token authenticates after flip-on (got: $resp)"
-
-  # Cleanup
-  docker rm -f "$tmp_name" >/dev/null 2>&1
-  docker run --rm \
-    -v "$tmp_dir:/d" -v "$tmp_home:/h" -v "$tmp_wks:/w" \
-    alpine sh -c 'rm -rf /d/* /d/.* /h/* /h/.* /w/* /w/.* 2>/dev/null; true' >/dev/null 2>&1 || true
-  rmdir "$tmp_dir" "$tmp_home" "$tmp_wks" 2>/dev/null || true
 }
 
 test_files_api() {
@@ -708,7 +786,7 @@ test_files_api() {
   [ "$code" = "409" ] && pass "files: stale mtime → 409" \
     || fail "files: stale mtime → 409 (got HTTP $code)"
 
-  # ── 7. Bob (non-owner) — viewer access: GETs OK (200), writes 403.
+  # ── 7. Bob (non-owner) — viewer access: GETs OK (200), writes 200 (collaborator).
   code=$(curl -s -o /dev/null -w '%{http_code}' \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/files?path=." \
     -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
@@ -825,7 +903,7 @@ test_file_chat_api() {
   [ "$code" = "403" ] && pass "file-chat: GET path traversal → 403" \
     || fail "file-chat: GET path traversal → 403 (got HTTP $code)"
 
-  # ── 7. Bob (non-owner) — viewer access: GET OK (200), POST 403 (writes owner-only).
+  # ── 7. Bob (non-owner) — viewer access: GET OK (200), POST 200 (collaborator).
   code=$(curl -s -o /dev/null -w '%{http_code}' \
     "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
     -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
@@ -893,13 +971,15 @@ run_persistence_checks() {
   section "Persistence: claude config / auth / sessions survive restart"
   setup_persist_env
   test_persist_initial
+  test_allowlist_gate
+  test_oauth_state_validation
   test_persist_after_restart
   test_persist_after_redeploy
-  test_auth_hot_reload
+  test_pat_login_flow
+  test_logout
   test_non_owner_sees_session_with_owner_tag
   test_files_api
   test_file_chat_api
-  test_auth_enables_via_hot_reload
   cleanup_persist_env
 }
 
@@ -908,8 +988,9 @@ run_persistence_checks() {
 print_summary() {
   echo ""
   echo "─────────────────────────"
-  echo "  Passed: $PASS"
-  echo "  Failed: $FAIL"
+  echo "  Passed:  $PASS"
+  echo "  Failed:  $FAIL"
+  [ "$SKIP" -gt 0 ] && echo "  Skipped: $SKIP"
   if [ "$FAIL" -gt 0 ]; then
     echo "  FAILED — fix before committing"
     exit 1

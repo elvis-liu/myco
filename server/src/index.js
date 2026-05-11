@@ -7,12 +7,16 @@ const path = require('path');
 const { listSessions, spawnSession, sessionBelongsToUser, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts, loadStore, getSessionRecord, readDescriptionForCwd: readDescriptionForCwdPublic, resolveCwd, getFileChat, getRecentFileChatMessages, appendFileChatMessage, deleteFileChatMessage } = require('./sessions');
 const filesApi = require('./files');
 const { askAboutFile, ASSISTANT_USER } = require('./btw');
+const githubMod = require('./github');
+const slashcmds = require('./slashcmds');
+const oauth = require('./oauth');
 const crypto = require('crypto');
 const { attachWebSocket, attachViewerWebSocket } = require('./pty');
 const {
   isAuthRequired, userFromRequest, userFromToken,
+  profileFromToken, listUsernames,
+  mintSession, revokeSession, loadAllowlist, isAllowed,
   createShareToken, shareTokenInfo, revokeShareTokensForSession,
-  reloadFromEnv,
 } = require('./auth');
 const logCapture = require('./logCapture');
 const { startSummaryWatcher } = require('./summarizer');
@@ -80,14 +84,171 @@ app.get('/auth/check', (req, res) => {
     }
     return res.status(401).json({ ok: false });
   }
-  const user = userFromRequest(req);
-  res.json({ ok: !!user, required: isAuthRequired(), user: user || null });
+  const auth = req.headers.authorization || '';
+  const headerTok = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const queryTok = (req.query && req.query.token) || '';
+  const profile = profileFromToken(headerTok || queryTok);
+  if (profile) {
+    return res.json({
+      ok: true, required: isAuthRequired(),
+      user: profile.login,
+      name: profile.name || null,
+      avatar_url: profile.avatarUrl || null,
+    });
+  }
+  res.json({ ok: false, required: isAuthRequired(), login: 'github', user: null });
 });
 
-app.post('/auth/reload', requireAuth, (req, res) => {
-  const result = reloadFromEnv();
-  res.json({ ok: true, ...result });
+// ─── GitHub OAuth login ─────────────────────────────────────────────────────
+//
+// Three routes back the GitHub-SSO login: /auth/github/start kicks the user
+// off to GitHub, /auth/github/callback exchanges the auth code and (if the
+// resulting login is on the allowlist) mints a myco session token, and
+// /auth/logout revokes the current session.
+//
+// State nonces are kept in-memory; a server restart invalidates any
+// in-flight login (which has to be retried). 5-minute TTL.
+
+const PENDING_STATES = new Map(); // nonce -> { createdAt }
+const STATE_TTL_MS = 5 * 60 * 1000;
+
+function _gcStates() {
+  const cutoff = Date.now() - STATE_TTL_MS;
+  for (const [nonce, s] of PENDING_STATES) {
+    if (s.createdAt < cutoff) PENDING_STATES.delete(nonce);
+  }
+}
+
+app.get('/auth/github/start', (req, res) => {
+  if (!oauth.isConfigured()) {
+    return res.status(500).type('text/plain').send(
+      'GitHub OAuth is not configured on this server. Set MYCO_GH_CLIENT_ID, ' +
+      'MYCO_GH_CLIENT_SECRET, and MYCO_PUBLIC_ORIGIN in $MYCO_STATE_DIR/.env.'
+    );
+  }
+  _gcStates();
+  const nonce = crypto.randomBytes(32).toString('hex');
+  PENDING_STATES.set(nonce, { createdAt: Date.now() });
+  res.redirect(302, oauth.startUrl(nonce));
 });
+
+function _renderHtml(res, status, bodyHtml) {
+  res.status(status).type('text/html').send(
+    `<!doctype html><meta charset="utf-8"><title>myco</title>` +
+    `<style>body{font:14px -apple-system,system-ui,sans-serif;background:#0d0d0d;` +
+    `color:#ccc;margin:0;display:flex;align-items:center;justify-content:center;` +
+    `min-height:100vh;padding:24px;text-align:center}` +
+    `.card{background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:32px;` +
+    `max-width:480px}h1{color:#7fb3ff;font-size:18px;margin:0 0 12px}` +
+    `code{background:#222;padding:2px 6px;border-radius:4px;font-size:13px}` +
+    `a{color:#8ab8ff}</style><div class=card>${bodyHtml}</div>`
+  );
+}
+
+app.get('/auth/github/callback', async (req, res) => {
+  const code = String(req.query.code || '');
+  const state = String(req.query.state || '');
+  if (!code || !state) {
+    return _renderHtml(res, 400, `<h1>Login failed</h1><p>Missing OAuth code/state. <a href="/">Back</a></p>`);
+  }
+  _gcStates();
+  if (!PENDING_STATES.delete(state)) {
+    return _renderHtml(res, 400, `<h1>Login failed</h1><p>OAuth state expired or invalid. <a href="/auth/github/start">Try again</a></p>`);
+  }
+  let tokens, user;
+  try {
+    tokens = await oauth.exchangeCode(code);
+    user = await oauth.fetchUser(tokens.access_token);
+  } catch (err) {
+    console.error('[oauth] callback error:', err.message);
+    return _renderHtml(res, 502, `<h1>Login failed</h1><p>GitHub said: ${escHtmlServer(err.message)}. <a href="/auth/github/start">Try again</a></p>`);
+  }
+  const login = require('./auth').sanitize(user.login || '');
+  if (!login) {
+    return _renderHtml(res, 400, `<h1>Login failed</h1><p>GitHub returned no login.</p>`);
+  }
+  if (!isAllowed(login)) {
+    return _renderHtml(res, 403,
+      `<h1>Not invited yet</h1>` +
+      `<p>Hi <code>${escHtmlServer(login)}</code> — your GitHub login isn't on the allowlist.</p>` +
+      `<p>Ask the admin to run:<br><code>./deploy.sh --allow-github-user ${escHtmlServer(login)}</code></p>`
+    );
+  }
+
+  // Stash the OAuth access token for git/issue operations later.
+  try { githubMod.setToken(login, tokens.access_token); }
+  catch (err) { console.error('[oauth] stash token failed:', err.message); }
+
+  const mycoTok = mintSession(login, {
+    githubId: user.id || null,
+    name: user.name || null,
+    avatarUrl: user.avatar_url || null,
+  });
+
+  // Bridge: hand the new session token to the SPA via localStorage and bounce
+  // to the root. Avoids needing cookies, which would require a broader rewrite
+  // of authedFetch / WS ?token= handling.
+  const tokJson = JSON.stringify(mycoTok);
+  res.type('text/html').send(
+    `<!doctype html><meta charset="utf-8"><title>Signing in…</title>` +
+    `<script>try{localStorage.setItem('myco_token', ${tokJson});}catch(e){}` +
+    `location.replace('/');</script>` +
+    `<noscript>Login complete — JavaScript is required to continue. ` +
+    `<a href="/">Open myco</a></noscript>`
+  );
+});
+
+app.post('/auth/logout', (req, res) => {
+  const auth = req.headers.authorization || '';
+  const tok = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const removed = revokeSession(tok);
+  res.json({ ok: true, removed });
+});
+
+// PAT login: a friendlier alternative to the OAuth round-trip. The user
+// pastes a GitHub Personal Access Token; we validate it by hitting
+// api.github.com/user, check the resulting login against the allowlist, and
+// mint a myco session — same end state as the OAuth callback path. The PAT
+// itself is also stashed for /feature/bug, so a single token does double duty.
+app.post('/auth/login', async (req, res) => {
+  const pat = String((req.body && req.body.token) || '').trim();
+  if (!pat) return res.status(400).json({ error: 'token required' });
+  // Minimum sanity: real GitHub PATs are 40+ chars (classic) or 90+ chars
+  // (fine-grained). Test-bypass tokens are short ("test-token-alice"); we
+  // accept those too because oauth.fetchUser honors the bypass env var.
+  if (pat.length < 8) return res.status(400).json({ error: 'token looks too short' });
+
+  let user;
+  try { user = await oauth.fetchUser(pat); }
+  catch (err) {
+    return res.status(401).json({ error: `github rejected the token: ${err.message}` });
+  }
+  const login = require('./auth').sanitize(user.login || '');
+  if (!login) return res.status(401).json({ error: 'github returned no login' });
+  if (!isAllowed(login)) {
+    return res.status(403).json({
+      error: `not invited`,
+      login,
+      hint: `Ask an admin to run: ./deploy.sh --allow-github-user ${login}`,
+    });
+  }
+
+  try { githubMod.setToken(login, pat); }
+  catch (err) { console.error('[login] stash token failed:', err.message); }
+
+  const mycoTok = mintSession(login, {
+    githubId: user.id || null,
+    name: user.name || null,
+    avatarUrl: user.avatar_url || null,
+  });
+  res.json({ ok: true, token: mycoTok, user: { login, name: user.name || null, avatarUrl: user.avatar_url || null } });
+});
+
+function escHtmlServer(s) {
+  return String(s || '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
 
 // Drop a .vscode/tasks.json into the session's cwd that auto-runs
 // `myco attach <id>` in a terminal when VS Code opens the folder. Together
@@ -562,6 +723,21 @@ app.delete('/sessions/:id/file-chat', async (req, res) => {
   const removed = deleteFileChatMessage(ctx.id, relPath, messageId);
   if (!removed) return res.status(404).json({ error: 'message not found' });
   res.json({ ok: true });
+});
+
+// ─── autocomplete data ──────────────────────────────────────────────────────
+// /commands and /users back the chat-input dropdown. /users sources the
+// `@`-mention list from session-active users plus everyone on the allowlist
+// (so admins-listed-but-not-yet-logged-in users still appear).
+
+app.get('/commands', (req, res) => {
+  res.json({ commands: slashcmds.listCommands() });
+});
+
+app.get('/users', requireAuth, (req, res) => {
+  const merged = new Set(listUsernames());
+  for (const login of loadAllowlist()) merged.add(login);
+  res.json({ users: Array.from(merged).sort() });
 });
 
 app.get('/logs', requireAuth, (req, res) => {
