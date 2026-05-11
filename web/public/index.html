@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.json" />
   <title>myco</title>
   <link rel="stylesheet" href="/vendor/xterm-css/xterm.css" />
-  <link rel="stylesheet" href="styles.css?v=81" />
+  <link rel="stylesheet" href="styles.css?v=82" />
   <link rel="stylesheet" href="/vendor/github-dark.min.css" />
 </head>
 <body>
@@ -44,6 +44,17 @@
         <span class="mw-dot"></span>
       </div>
       <div id="terminal-wrap" hidden>
+        <div id="readonly-banner" hidden>
+          <span class="ro-label">👁 Read-only</span>
+          <span class="ro-owner"></span>
+          <span class="ro-spacer"></span>
+          <span class="ro-hint">Reply with</span>
+          <button class="vk-key" data-key="y" title="Send y">y</button>
+          <button class="vk-key" data-key="n" title="Send n">n</button>
+          <button class="vk-key" data-key="enter" title="Send Enter">↵</button>
+          <button class="vk-key" data-key="esc" title="Send Esc">Esc</button>
+          <button class="vk-key vk-key-danger" data-key="ctrl-c" title="Send Ctrl-C">^C</button>
+        </div>
         <div id="terminal"></div>
         <div id="keyboard-bar"></div>
         <div id="conn-overlay" hidden>
@@ -58,20 +69,6 @@
       </div>
       <div id="conversation-wrap" hidden>
         <div id="conv-messages"></div>
-        <div id="terminal-tail" hidden>
-          <div class="tt-header">
-            <span class="tt-label">Claude terminal</span>
-            <span class="tt-hint">Type <code>@myco y</code> / <code>@myco n</code> in chat to respond, or:</span>
-            <div class="tt-keys">
-              <button class="tt-key" data-key="y" title="Send y">y</button>
-              <button class="tt-key" data-key="n" title="Send n">n</button>
-              <button class="tt-key" data-key="enter" title="Send Enter">↵</button>
-              <button class="tt-key" data-key="esc" title="Send Esc">Esc</button>
-              <button class="tt-key tt-key-danger" data-key="ctrl-c" title="Send Ctrl-C">^C</button>
-            </div>
-          </div>
-          <pre id="terminal-tail-text"></pre>
-        </div>
       </div>
       <div id="files-wrap" hidden>
         <div id="files-tree-pane">
@@ -178,6 +175,6 @@
   <script src="/vendor/mermaid.min.js"></script>
   <script>if (typeof mermaid !== 'undefined') mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
   <script src="keyboard.js?v=7"></script>
-  <script src="app.js?v=112"></script>
+  <script src="app.js?v=113"></script>
 </body>
 </html>

@@ -110,6 +110,14 @@ function attachWebSocket(session, ws, opts = {}) {
   const readOnly = !!opts.readOnly;
   const user = opts.user || null;
   const sessionId = session.sessionId;
+
+  // Read-only viewers get a flag up front so the client can render its
+  // "Read-only" badge + quick-reply key bar before the first PTY chunk.
+  if (readOnly) {
+    const ownerLogin = sessionsMod.getSessionRecord(sessionId)?.user || null;
+    ws.send(JSON.stringify({ t: 'read-only', owner: ownerLogin }));
+  }
+
   // Replay ring buffer first so reconnects see prior context.
   const replay = Buffer.concat(session.buffer.map((d) => Buffer.from(d, 'utf8')));
   if (replay.length) {

@@ -185,8 +185,9 @@ function openShareViewer(id) {
         if (newMsgs.some((m) => m && m.role === 'assistant')) hideMycoWaiting();
       } else if (msg.t === 'transcript-waiting') {
         showTranscriptWaiting();
-      } else if (msg.t === 'terminal-tail') {
-        applyTerminalTail(msg.text);
+      } else if (msg.t === 'read-only') {
+        applyReadOnly(msg.owner);
+        ensureXtermForFallback();                            // viewers get the live xterm
       } else if (msg.t === 'output') {
         if (!state.viewerMode) ensureXtermForFallback();
         if (state.term) state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
@@ -574,7 +575,7 @@ async function init() {
   document.getElementById('log-panel-close').addEventListener('click', toggleLogPanel);
   bindChatUi();
   bindFilesUi();
-  bindTerminalTail();
+  bindReadOnlyBanner();
   // Desktop default: chat pane visible alongside the terminal. Mobile: hidden,
   // user opens it explicitly via the 💬 button (mutually exclusive with the
   // session sidebar).
@@ -914,7 +915,7 @@ function openSession(id) {
   document.getElementById('terminal-wrap').hidden = true;
   document.getElementById('conversation-wrap').hidden = true;
   document.getElementById('conv-messages').innerHTML = '';
-  applyTerminalTail('');                         // clear any leftover viewer tail
+  clearReadOnly();                               // reset banner + state
   // Reset file pane on session switch — paths and mtimes are session-scoped.
   hideFilesView();
   state.files.currentPath = '.';
@@ -1050,8 +1051,8 @@ function openSession(id) {
         if (newMsgs.some((m) => m && m.role === 'assistant')) hideMycoWaiting();
       } else if (msg.t === 'transcript-waiting') {
         showTranscriptWaiting();
-      } else if (msg.t === 'terminal-tail') {
-        applyTerminalTail(msg.text);
+      } else if (msg.t === 'read-only') {
+        applyReadOnly(msg.owner);
       } else if (msg.t === 'output') {
         state.term?.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
       } else if (msg.t === 'pong') {
@@ -1454,43 +1455,46 @@ function sendChatMessage(text) {
   return true;
 }
 
-// Terminal-tail panel: viewers don't see the raw PTY (they see the
-// structured transcript), but Claude's interactive prompts ("Apply this
-// edit? (y/n)") only appear in the PTY. The server sends a debounced
-// "terminal-tail" message with the last few lines of stripped output;
-// we render it in a sticky footer with quick-reply buttons so the viewer
-// can answer without typing @myco y by hand.
-function applyTerminalTail(text) {
-  const panel = document.getElementById('terminal-tail');
-  const pre = document.getElementById('terminal-tail-text');
-  if (!panel || !pre) return;
-  const t = String(text || '').trimEnd();
-  if (!t) {
-    panel.hidden = true;
-    pre.textContent = '';
-    return;
-  }
-  panel.hidden = false;
-  pre.textContent = t;
-  pre.scrollTop = pre.scrollHeight;
+// Read-only viewer UI: when the server tells us we're attached as a viewer
+// (auth'd non-owner or share-token client), pop a banner above the live xterm
+// with the owner's login + quick-reply key buttons. The terminal still
+// renders all PTY data via xterm — we just can't type into it. The buttons
+// route through the existing chat path: server's @myco handler recognizes
+// 'enter', 'esc', 'ctrl-c', etc. as raw key presses.
+function applyReadOnly(owner) {
+  state.readOnly = true;
+  state.sessionOwner = owner || null;
+  const banner = document.getElementById('readonly-banner');
+  if (!banner) return;
+  banner.hidden = false;
+  const ownerEl = banner.querySelector('.ro-owner');
+  if (ownerEl) ownerEl.textContent = owner ? '@' + owner : '';
 }
 
-function bindTerminalTail() {
-  const panel = document.getElementById('terminal-tail');
-  if (!panel || panel.dataset.bound) return;
-  panel.dataset.bound = '1';
-  panel.addEventListener('click', (e) => {
-    const btn = e.target.closest('.tt-key');
+function clearReadOnly() {
+  state.readOnly = false;
+  state.sessionOwner = null;
+  const banner = document.getElementById('readonly-banner');
+  if (banner) {
+    banner.hidden = true;
+    const ownerEl = banner.querySelector('.ro-owner');
+    if (ownerEl) ownerEl.textContent = '';
+  }
+}
+
+function bindReadOnlyBanner() {
+  const banner = document.getElementById('readonly-banner');
+  if (!banner || banner.dataset.bound) return;
+  banner.dataset.bound = '1';
+  banner.addEventListener('click', (e) => {
+    const btn = e.target.closest('.vk-key');
     if (!btn) return;
     e.preventDefault();
     const key = btn.dataset.key;
     if (!key) return;
-    // Route through the existing chat path — the server's @myco handler
-    // recognizes 'enter', 'esc', 'ctrl-c', etc. as raw key presses.
     if (sendChatMessage('@myco ' + key)) {
-      // Brief visual confirmation
-      btn.classList.add('tt-key-flash');
-      setTimeout(() => btn.classList.remove('tt-key-flash'), 200);
+      btn.classList.add('vk-key-flash');
+      setTimeout(() => btn.classList.remove('vk-key-flash'), 200);
     }
   });
 }

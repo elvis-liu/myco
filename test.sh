@@ -336,14 +336,17 @@ test_readonly_viewer() {
   grep -Pzoq '(?s)readOnly\s*\)\s*return.*?session\.write|session\.write.*?readOnly' server/src/pty.js \
     && pass "viewer drops PTY writes" \
     || fail "viewer drops PTY writes"
-  # Terminal-tail surfaces Claude's interactive prompts to viewers (otherwise
-  # @myco confirm prompts stall the session — read-only viewers can't see the
-  # PTY where the prompt appears).
-  grep -q "t: 'terminal-tail'" server/src/pty.js && pass "terminal-tail emitted to viewers" || fail "terminal-tail emitted to viewers"
-  grep -q "terminal-tail" web/public/index.html  && pass "terminal-tail panel in HTML"   || fail "terminal-tail panel in HTML"
-  grep -q "function applyTerminalTail" web/public/app.js && pass "applyTerminalTail() defined" || fail "applyTerminalTail() defined"
-  grep -q "function bindTerminalTail" web/public/app.js  && pass "bindTerminalTail() defined"  || fail "bindTerminalTail() defined"
-  # Special-key shortcuts let viewers answer y/n/Enter/Esc prompts without a real terminal.
+  # Read-only viewers attach via the same xterm path as the owner so they
+  # see all intermediate output (alt-screen redraws, ANSI colors, prompts).
+  # The server emits a read-only signal so the client can render its banner.
+  grep -q "t: 'read-only'"        server/src/pty.js   && pass "server emits read-only signal"      || fail "server emits read-only signal"
+  grep -q "id=\"readonly-banner\"" web/public/index.html && pass "html: #readonly-banner"           || fail "html: #readonly-banner"
+  grep -q "function applyReadOnly" web/public/app.js  && pass "applyReadOnly() defined"            || fail "applyReadOnly() defined"
+  grep -q "function bindReadOnlyBanner" web/public/app.js && pass "bindReadOnlyBanner() defined"   || fail "bindReadOnlyBanner() defined"
+  # Routing: index.js no longer dispatches readOnly to the transcript-only path
+  ! grep -qE "if\s*\(\s*readOnly\s*\)\s*\{?\s*$" server/src/index.js && pass "readOnly route is unified" || fail "readOnly route still branches"
+  # Special-key shortcuts let viewers answer y/n/Enter/Esc prompts without
+  # typing into the (input-rejected) terminal directly.
   grep -qE "SPECIAL_KEYS|'enter':|enter:" server/src/pty.js && pass "special key tokens recognized" || fail "special key tokens recognized"
 }
 
