@@ -227,6 +227,12 @@ test_file_explorer_static() {
   grep -q 'function loadFileTree'    web/public/app.js && pass "js: loadFileTree"    || fail "js: loadFileTree"
   grep -q 'function openFileInViewer' web/public/app.js && pass "js: openFileInViewer" || fail "js: openFileInViewer"
   grep -q 'expectedMtimeMs'          web/public/app.js && pass "js: mtime guard sent"|| fail "js: mtime guard sent"
+  # Regression: mobile hides files-tree-pane when opening a file. Re-showing
+  # the explorer must reset both inner panes so we don't land on a wrap
+  # where every child is hidden (empty screen).
+  grep -Pzoq "(?s)showFilesView[^}]+files-tree-pane.*hidden.*=.*false" web/public/app.js \
+    && pass "js: showFilesView resets files-tree-pane visibility" \
+    || fail "js: showFilesView resets files-tree-pane visibility"
 }
 
 # Replaces the old test_deploy_add_token. The MYCO_TOKENS bearer-token system

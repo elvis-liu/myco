@@ -1837,6 +1837,12 @@ function showFilesView() {
   termWrap.hidden = true;
   convWrap.hidden = true;
   document.getElementById('files-wrap').hidden = false;
+  // Reset the inner panes — on mobile, opening a file hides the tree-pane
+  // so the viewer can take the full width. Without this reset the next
+  // show-files lands on an explorer where BOTH inner panes are hidden,
+  // and the user just sees an empty screen.
+  document.getElementById('files-tree-pane').hidden = false;
+  document.getElementById('files-view-pane').hidden = true;
   document.getElementById('btn-files')?.classList.add('active');
   state.files.visible = true;
   loadFileTree(state.files.currentPath || '.');
