@@ -518,6 +518,19 @@ test_chat_window() {
   grep -q "MenuInterceptor" server/src/pty.js && pass "PtySession uses MenuInterceptor" || fail "PtySession uses MenuInterceptor"
   grep -q "broadcastMenuToChat" server/src/pty.js && pass "pty has broadcastMenuToChat" || fail "pty has broadcastMenuToChat"
   grep -q "names: \['decide'" server/src/slashcmds.js && pass "/decide command registered" || fail "/decide command missing"
+  # Intensive coverage: 65 cases across MenuInterceptor parse + state machine,
+  # permissions.matchesPattern / decide / extractPermissionTarget, and the
+  # @myco-shortcut routing when a TUI menu is pending. Lives in a dedicated
+  # file because the case list is too long for an inline `node -e` block.
+  if have_node; then
+    if node test/menu-broadcast.test.js >/dev/null 2>&1; then
+      pass "test/menu-broadcast.test.js (65 cases)"
+    else
+      fail "test/menu-broadcast.test.js — re-run with 'node test/menu-broadcast.test.js' to see failures"
+    fi
+  else
+    skip "test/menu-broadcast.test.js (no host node)"
+  fi
   if have_node; then
     node -e "
       const { MenuInterceptor } = require('./server/src/menu-interceptor');

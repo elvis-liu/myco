@@ -104,10 +104,11 @@ class MenuInterceptor {
     // Classify so the broadcast can use a friendlier label. Look at both
     // the question and the option labels, since Claude's plan-mode dialog
     // uses a generic "What would you like to do?" question whose options
-    // are the "plan" signal.
+    // are the "plan" signal. Permission signal is most reliably found on
+    // option labels ("Always allow <tool>", "Don't allow", "Yes, run").
     const classBlob = (question + ' ' + options.map((o) => o.label).join(' ')).toLowerCase();
     let kind = 'generic';
-    if (/allow.*\?|permission|approve.*tool|approve.*bash|bypass.*permission/i.test(classBlob)) kind = 'permission';
+    if (/allow.*\?|permission|approve.*tool|approve.*bash|bypass.*permission|always allow|don'?t allow|run this command|allow this command/i.test(classBlob)) kind = 'permission';
     else if (/plan|proceed|continue (with|the) plan|keep planning/i.test(classBlob)) kind = 'plan';
 
     const optsForHash = options.map((o) => ({ n: o.n, label: o.label }));
