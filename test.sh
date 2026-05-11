@@ -117,6 +117,21 @@ test_conv_view_js() {
 test_at_myco_chat_handler() {
   grep -q '@myco' server/src/pty.js && pass "@myco handler" || fail "@myco handler"
   grep -q 'session.write' server/src/pty.js && pass "PTY write for @myco" || fail "PTY write"
+  # Regression: the @myco prompt MUST end with bare \r so Claude Code's input
+  # editor actually submits. We briefly sent '\n\r' to leave a trailing blank
+  # line, but the \n landed in the editor without firing submit on many runs.
+  grep -qF "input + '\\r'" server/src/pty.js \
+    && pass "@myco submits with bare \\r (no leading \\n)" \
+    || fail "@myco submits with bare \\r (no leading \\n)"
+  grep -qF "input + '\\n\\r'" server/src/pty.js \
+    && fail "@myco still uses '\\n\\r' (regression — should be bare \\r)" \
+    || pass "@myco no longer uses '\\n\\r'"
+  # Regression: the @myco capture regex must use [\s\S] so multi-line chat
+  # messages (now reachable via the discussion textarea + Ctrl/⌘+Enter)
+  # don't get truncated to the first line by the `.` shorthand.
+  grep -qF '@myco\s+([\s\S]+)' server/src/pty.js \
+    && pass "@myco regex captures multi-line input" \
+    || fail "@myco regex captures multi-line input"
   # Plain chat (no @myco prefix, no /btw) must NOT trigger the assistant.
   # Regression guard: the old shouldAskAssistant treated any '?'-ending
   # message as an assistant trigger, making every question look like claude

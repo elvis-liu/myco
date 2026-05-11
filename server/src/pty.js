@@ -345,7 +345,9 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
   // @myco → send the message to the running Claude PTY session. Open to all
   // chat participants (owner + read-only viewers), since the chat is the
   // collaborative steering channel for the session.
-  const mycoMatch = text.match(/^@myco\s+(.+)/i);
+  // [\s\S] (not .) so a multi-line @myco message — now reachable via the
+  // discussion panel's textarea — captures all lines, not just the first.
+  const mycoMatch = text.match(/^@myco\s+([\s\S]+)/i);
   if (mycoMatch) {
     if (!session.alive) {
       // Used to silently drop here — viewers' @myco messages would
@@ -400,11 +402,13 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
       //   default → accept-edits → plan → default
       const toggle = autoAcceptToggleBytes(session);
       console.log(`[chat→pty] ${user}: ${input.substring(0, 80)}${toggle ? ' (+auto-toggle)' : ''}`);
-      // Send: <toggle?> <text> <\n = Ctrl+J inserts literal newline> <\r submits>
-      // The \n leaves a trailing newline in Claude Code's input box so the
-      // submitted prompt visually ends with a blank line — matches what
-      // pressing Enter naturally does in a multi-line text editor.
-      session.write(toggle + input + '\n\r');
+      // End with \r (Enter = submit). We previously sent '\n\r' to leave a
+      // trailing blank line in Claude Code's input editor (Ctrl+J first,
+      // then submit), but that ordering often left the prompt sitting in
+      // the input box without submitting. Plain \r submits reliably; any
+      // embedded \n inside `input` itself still flows through as a literal
+      // newline because Claude Code reads it as Ctrl+J.
+      session.write(toggle + input + '\r');
     }
     return;
   }
