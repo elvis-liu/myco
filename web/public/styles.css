@@ -2389,12 +2389,50 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   background: none;
   font-family: inherit;
   font-size: 0.85em;
-  white-space: pre-wrap;
   word-break: break-word;
   color: #8b949e;
   max-height: 400px;
   overflow-y: auto;
   border-left: 2px solid #30363d;
+}
+/* Rendered-markdown layout inside tool output: trim default block margins,
+   give code blocks the same look as the chat-text variant. The body's
+   own indent (padding-left:14px) is preserved by these overrides. */
+.conv-tool-body > p:first-child { margin-top: 0; }
+.conv-tool-body > p:last-child  { margin-bottom: 0; }
+.conv-tool-body p,
+.conv-tool-body ul,
+.conv-tool-body ol { margin: 6px 0; }
+.conv-tool-body ul,
+.conv-tool-body ol { padding-left: 22px; }
+.conv-tool-body code {
+  background: rgba(255, 255, 255, .06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: .92em;
+}
+.conv-tool-body pre {
+  background: rgba(0, 0, 0, .25);
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 6px 0;
+  white-space: pre;
+}
+.conv-tool-body pre code { background: transparent; padding: 0; }
+
+/* "… N earlier messages hidden" banner shown when the transcript exceeds
+   TRANSCRIPT_RENDER_CAP. Sits at the very top of the conv-content, muted
+   so it doesn't compete with real content. */
+.conv-truncation-note {
+  padding: 6px 10px;
+  margin: 4px 0 8px 0;
+  font-size: .78rem;
+  color: var(--muted);
+  text-align: center;
+  font-style: italic;
+  border-bottom: 1px dashed var(--border);
 }
 
 /* ── tool results ── */

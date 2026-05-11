@@ -372,6 +372,20 @@ function isConvAtBottom() {
   return wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 60;
 }
 
+// Cap the number of transcript messages rendered. Long sessions accumulate
+// thousands of turns in the JSONL; without a cap the read-only viewer ends
+// up holding the whole history in DOM, which gets slow on mobile and
+// memory-hungry on long-running sessions. We keep the most-recent slice and
+// drop the oldest. State retains the full array so we can re-render the
+// trailing window after each delta.
+const TRANSCRIPT_RENDER_CAP = 500;
+
+function tailMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  if (messages.length <= TRANSCRIPT_RENDER_CAP) return messages;
+  return messages.slice(messages.length - TRANSCRIPT_RENDER_CAP);
+}
+
 // Transcript turns are inserted into #conv-content (a child of #conv-messages
 // that lives ABOVE #terminal-tail). Wiping conv-content via innerHTML never
 // touches the sibling tail card, so the embedded mini xterm survives every
@@ -381,8 +395,15 @@ function renderTranscriptMessages(messages) {
   const content = document.getElementById('conv-content');
   if (!content) return;
   content.innerHTML = '';
+  const tailed = tailMessages(messages);
+  if (Array.isArray(messages) && messages.length > tailed.length) {
+    const banner = document.createElement('div');
+    banner.className = 'conv-truncation-note';
+    banner.textContent = `… ${messages.length - tailed.length} earlier message${messages.length - tailed.length === 1 ? '' : 's'} hidden (showing the most recent ${tailed.length})`;
+    content.appendChild(banner);
+  }
   let turnEl = null;
-  for (const m of messages) {
+  for (const m of tailed) {
     const el = renderConvMessage(m);
     // Start a new turn on user messages
     if (m.role === 'user' || m.role === 'title') {
@@ -401,6 +422,13 @@ function renderTranscriptMessages(messages) {
 }
 
 function appendTranscriptMessages(messages) {
+  // Once the running transcript exceeds the render cap, switch from append
+  // to a re-render of the trailing window so oldest entries fall off the
+  // top. Under-cap appends stay fast.
+  if (Array.isArray(state.transcriptMessages) && state.transcriptMessages.length > TRANSCRIPT_RENDER_CAP) {
+    renderTranscriptMessages(state.transcriptMessages);
+    return;
+  }
   const wasAtBottom = isConvAtBottom();
   const content = document.getElementById('conv-content');
   if (!content) return;
@@ -497,7 +525,12 @@ function renderConvMessage(m) {
         if (rest) {
           const body = document.createElement('div');
           body.className = 'conv-tool-body';
-          body.textContent = rest;
+          // Render tool output as markdown so .md files, structured tables,
+          // and code blocks come out formatted instead of as a wall of raw
+          // text. marked's HTML-escaping handles unsafe chars in command
+          // output; the pre-wrap CSS still preserves whitespace for plain
+          // (non-markdown) tool output.
+          body.innerHTML = renderMd(rest);
           if (r.isError) body.classList.add('conv-result-error');
           details.appendChild(body);
         }

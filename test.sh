@@ -142,6 +142,16 @@ test_conv_view_js() {
   test "$(grep -c 'if (state.ws !== ws) return;' web/public/app.js)" -ge 2 \
     && pass "stale-WS guard on both message handlers" \
     || fail "stale-WS guard on both message handlers"
+  # Regression: tool_result output renders as markdown (file content with
+  # markdown, code blocks, etc.) instead of one wall of plain text.
+  grep -q "body.innerHTML = renderMd(rest)" web/public/app.js \
+    && pass "tool_result body rendered as markdown" \
+    || fail "tool_result body rendered as markdown"
+  # Regression: transcript is capped to last N messages so very long
+  # sessions don't accumulate thousands of DOM turns.
+  grep -q "TRANSCRIPT_RENDER_CAP" web/public/app.js \
+    && pass "transcript-render cap defined" \
+    || fail "transcript-render cap defined"
   grep -q 'function openSession' web/public/app.js && pass "openSession" || fail "openSession"
   grep -q 'function renderTranscriptMessages' web/public/app.js && pass "renderTranscriptMessages" || fail "renderTranscriptMessages"
 }
