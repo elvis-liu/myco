@@ -636,6 +636,16 @@ test_file_viewer_polish_static() {
   grep -qF "ext === 'md' || ext === 'markdown'" web/public/app.js && pass "js: md branch detected in renderFileViewerWithCards" || fail "js: md branch missing"
   grep -qF 'renderMermaidInContainer(wrap)' web/public/app.js && pass "js: md view runs mermaid pass" || fail "js: md view mermaid pass missing"
   grep -q '\.md-rendered' web/public/styles.css && pass "css: .md-rendered" || fail "css: .md-rendered"
+  # Transcript viewer: assistant prose must be visually heavier than the
+  # tool_use / tool_result blocks around it. The fix is a thicker, brighter
+  # green border-left on .conv-msg-assistant .conv-text plus opacity:0.72
+  # on .conv-tool-call / .conv-msg-result so the eye lands on the answer.
+  grep -qF 'border-left: 4px solid rgba(63, 185, 80, 0.55)' web/public/styles.css \
+    && pass "css: assistant text uses thick green border (transcript visibility)" \
+    || fail "css: assistant text border treatment missing"
+  grep -qF 'opacity: 0.72' web/public/styles.css \
+    && pass "css: tool calls + results dimmed via opacity" \
+    || fail "css: tool dim treatment missing"
 
   # Backend
   grep -q 'function askAboutFile' server/src/btw.js && pass "btw.js: askAboutFile" || fail "btw.js: askAboutFile"

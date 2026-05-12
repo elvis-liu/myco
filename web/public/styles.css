@@ -2450,19 +2450,28 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   letter-spacing: 0.15em;
 }
 
-/* ── assistant messages: green-accented block ── */
+/* ── assistant messages: green-accented block ──
+   The transcript interleaves Claude's prose with tool_use + tool_result
+   blocks (which can dominate the page visually). Stronger styling here
+   makes the actual ANSWER the eye lands on, and the tool blocks
+   (dimmed below) read as footnotes around it. */
 .conv-msg-assistant {
-  margin-top: 2px;
+  margin: 6px 0;
 }
 
 .conv-msg-assistant .conv-text {
-  color: #c9d1d9;
-  background: none;
-  border-left: 2px solid rgba(63, 185, 80, 0.3);
-  border-radius: 0;
-  padding: 4px 8px 4px 14px;
+  color: #e6edf3;
+  background: rgba(63, 185, 80, 0.04);
+  border-left: 4px solid rgba(63, 185, 80, 0.55);
+  border-radius: 0 4px 4px 0;
+  padding: 8px 12px 8px 16px;
   margin-top: 2px;
+  font-size: 1.02em;
+  line-height: 1.6;
 }
+
+.conv-msg-assistant .conv-text strong { color: #f0f6fc; }
+.conv-msg-assistant .conv-text a { font-weight: 500; }
 
 /* ── title divider ── */
 .conv-msg-title {
@@ -2603,21 +2612,28 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   height: auto;
 }
 
-/* ── tool calls: terminal command blocks ── */
+/* ── tool calls: terminal command blocks ──
+   Deliberately quiet so they don't compete with the assistant's prose
+   above. Click to expand the body when you actually need to inspect a
+   call. */
 .conv-tool-call {
   margin: 1px 0;
   position: relative; /* anchor for the tool-name decorator */
+  opacity: 0.72;
+  transition: opacity 0.12s;
 }
+.conv-tool-call:hover,
+.conv-tool-call[open] { opacity: 1; }
 
 .conv-tool-call summary {
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.9em;
-  color: #8b949e;
-  padding: 5px 10px;
-  padding-right: 78px; /* reserve space for top-right tool-name chip */
-  background: rgba(255,255,255,0.04);
-  border-radius: 4px;
+  font-size: 0.82em;
+  color: #6e7681;
+  padding: 3px 10px;
+  padding-right: 68px; /* reserve space for top-right tool-name chip */
+  background: rgba(255,255,255,0.025);
+  border-radius: 3px;
   list-style: none;
   display: flex;
   align-items: center;
@@ -2724,12 +2740,15 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 /* ── tool results ── */
 .conv-msg-result {
   margin: 2px 0;
+  opacity: 0.72;
+  transition: opacity 0.12s;
 }
+.conv-msg-result:hover { opacity: 1; }
 
 .conv-tool-result summary {
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.88em;
+  font-size: 0.82em;
   color: #6e7681;
   list-style: none;
   padding: 3px 0;
