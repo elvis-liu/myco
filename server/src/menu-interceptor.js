@@ -47,7 +47,13 @@ class MenuInterceptor {
 
   reset() { this.currentHash = null; }
 
-  // Scan the bottom ~16 rows of the headless terminal for a menu pattern.
+  // Scan the entire visible viewport of the headless terminal for a menu
+  // pattern. We used to only scan the bottom 16 rows on the theory that
+  // Claude's menus always render at the bottom — but the trust-folder
+  // dialog on first-run renders near the TOP of a fresh alt-screen, and
+  // with a tall terminal (Android phones can have rows ≥ 33) the options
+  // land above the bottom-16 window and the menu is missed entirely.
+  // Scanning all visible rows is cheap (rows ≤ 80) and bulletproof.
   // Returns null if nothing menu-shaped is on screen, else
   // {hash, question, options: [{n, label}], kind, rawText}.
   _scan(headless) {
@@ -57,8 +63,7 @@ class MenuInterceptor {
       const buf = headless.buffer.active;
       const rows = headless.rows;
       lines = [];
-      const startRow = Math.max(0, rows - 16);
-      for (let i = startRow; i < rows; i++) {
+      for (let i = 0; i < rows; i++) {
         const line = buf.getLine(buf.viewportY + i);
         if (line) lines.push(line.translateToString(true).replace(/\s+$/, ''));
         else lines.push('');

@@ -728,6 +728,40 @@ test_chat_window() {
   else
     skip "MenuInterceptor parser (no host node)"
   fi
+  # Regression: Claude Code's trust-folder dialog on first-run renders
+  # near the TOP of a tall alt-screen (~33+ rows on Android phones). The
+  # interceptor used to scan only the bottom 16 rows and miss it entirely,
+  # leaving the user stuck on "Waiting for session to start…" because no
+  # menu broadcast ever fired. _scan now walks the entire visible
+  # viewport.
+  if have_node; then
+    node -e "
+      const { MenuInterceptor } = require('./server/src/menu-interceptor');
+      // Trust dialog at rows 5-19 of a 40-row terminal — options at
+      // rows 17-18, well above the old bottom-16 (rows 24-39) window.
+      const rows = 40;
+      const lines = new Array(rows).fill('');
+      lines[5]  = ' Accessing workspace:';
+      lines[7]  = ' /wks/kkrazy/Demo003';
+      lines[9]  = ' Quick safety check: Is this a project you trust?';
+      lines[12] = ' Claude Code will be able to read, edit, and execute files here.';
+      lines[14] = ' Security guide';
+      lines[16] = ' ❯ 1. Yes, I trust this folder';
+      lines[17] = '   2. No, exit';
+      lines[19] = ' Enter to confirm';
+      const fake = {
+        rows,
+        buffer: { active: { viewportY: 0, getLine: (y) => lines[y] != null ? ({ translateToString: () => lines[y] }) : null }},
+      };
+      const r = (new MenuInterceptor()).detectChange(fake);
+      if (!r || r.kind !== 'newMenu') throw new Error('trust dialog at top: expected newMenu, got ' + JSON.stringify(r));
+      if (r.menu.options.length !== 2) throw new Error('trust dialog options: expected 2, got ' + r.menu.options.length);
+      if (!/trust this folder/i.test(r.menu.options[0].label)) throw new Error('option 1 label wrong: ' + r.menu.options[0].label);
+    " && pass "MenuInterceptor finds trust dialog at top of tall viewport" \
+      || fail "MenuInterceptor finds trust dialog at top of tall viewport"
+  else
+    skip "MenuInterceptor trust-dialog (no host node)"
+  fi
   grep -q "handleChatMessage" server/src/pty.js && pass "handleChatMessage in pty.js" || fail "handleChatMessage in pty.js"
   grep -q "handleChatMessage" server/src/index.js && pass "handleChatMessage imported by /run route" || fail "handleChatMessage imported"
   # Regression: while a TUI menu is pending in the session, an @myco
