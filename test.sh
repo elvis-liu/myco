@@ -239,6 +239,13 @@ test_chat_user_capture() {
 
 test_session_switching_clears_panes() {
   grep -q "conversation-wrap.*hidden.*true" web/public/app.js && pass "pane clear on switch" || fail "pane clear on switch"
+  # openSession is split into focused helpers so each concern (teardown,
+  # state reset, owner xterm init, WS attach URL) can change without
+  # rewriting the others. Regression guard: keep the seams in place.
+  grep -q 'function _teardownPreviousSession' web/public/app.js && pass "openSession: _teardownPreviousSession helper" || fail "openSession: _teardownPreviousSession helper"
+  grep -q 'function _resetUiForNewSession'   web/public/app.js && pass "openSession: _resetUiForNewSession helper"   || fail "openSession: _resetUiForNewSession helper"
+  grep -q 'function _initOwnerXterm'         web/public/app.js && pass "openSession: _initOwnerXterm helper"         || fail "openSession: _initOwnerXterm helper"
+  grep -q 'function _buildAttachQuery'       web/public/app.js && pass "openSession: _buildAttachQuery helper"       || fail "openSession: _buildAttachQuery helper"
 }
 
 test_status_bar_user_and_build_stamps() {

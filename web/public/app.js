@@ -960,14 +960,10 @@ async function deleteSessionWithConfirm(s) {
 
 // ── terminal attach ───────────────────────────────────────────────────────────
 
-function openSession(id) {
-  // Re-tap of the same session: reconnect if WS is dead, otherwise just bring into view.
-  if (state.activeId === id && state.ws && state.ws.readyState === WebSocket.OPEN) {
-    if (window.innerWidth <= 900) setSidebar(true);
-    return;
-  }
-
-  // tear down previous
+// Drop the previous session's WS, xterm, transcript, file pane, and the
+// terminal/conversation wraps. Leaves clearReadOnly to dispose the
+// read-only banner + tail xterm so we don't double-dispose them here.
+function _teardownPreviousSession() {
   if (state.ws) { state.ws.close(); state.ws = null; }
   if (state.term) { state.term.dispose(); state.term = null; }
   state.viewerMode = false;
@@ -977,23 +973,27 @@ function openSession(id) {
   document.getElementById('conversation-wrap').hidden = true;
   // Wipe only the transcript content; leave the sibling #terminal-tail
   // (and its embedded mini xterm) for clearReadOnly to dispose properly.
-  const _conv = document.getElementById('conv-content');
-  if (_conv) _conv.innerHTML = '';
+  const conv = document.getElementById('conv-content');
+  if (conv) conv.innerHTML = '';
   clearReadOnly();                               // resets banner + tail term
   // Reset file pane on session switch — paths and mtimes are session-scoped.
   hideFilesView();
   state.files.currentPath = '.';
   state.files.history = [];
   state.files.viewing = null;
+}
 
+// Reset state + chrome for the new session id (preview toggle, artifact
+// views, sidebar list, chat panes, etc.). Does not start any network I/O.
+function _resetUiForNewSession(id) {
   state.activeId = id;
   state.viewerMode = false;
   state.transcriptMessages = [];
   state.previewAsViewer = false;             // reset preview toggle on session switch
   document.getElementById('btn-preview-readonly')?.classList.remove('active');
-  // Reset and hide the Plan/Arch/Test main-pane views so the previous
-  // session's extracted content doesn't linger. The chrome buttons'
-  // active class is cleared in clearArtifactBodies too.
+  // Hide all Plan/Arch/Test main-pane views so the previous session's
+  // extracted content doesn't linger. Chrome-button active classes are
+  // also cleared in clearArtifactBodies.
   state.artifactView = { active: null, prev: 'terminal' };
   for (const t of ARTIFACT_TYPES) {
     const wrap = document.getElementById(t + '-wrap');
@@ -1005,90 +1005,112 @@ function openSession(id) {
   clearChat();
   clearArtifactBodies();
   updateChatButton();
-
   if (window.innerWidth <= 900) setSidebar(true);
+}
 
-  // Check if this is a shared session (not owned by current user)
-  const session = state.sessions.find((s) => s.id === id);
-  const isShared = session && !session.owned;
+// Owner-only: build the live xterm in #terminal, load addons, hook up
+// touch-scroll + ResizeObserver + virtual keyboard. Viewer sessions skip
+// this and render the structured-transcript pane instead.
+function _initOwnerXterm() {
+  document.getElementById('terminal-wrap').hidden = false;
 
-  document.getElementById('no-session').hidden = true;
+  state.term = new Terminal({
+    scrollback: IS_TOUCH_DEVICE ? 1500 : 5000,
+    fontSize: 13,
+    fontFamily: "'JetBrains Mono Nerd Font', 'JetBrains Mono', Menlo, monospace",
+    cursorBlink: false,
+    smoothScrollDuration: 0,
+  });
+  state.fitAddon = new FitAddon.FitAddon();
+  state.term.loadAddon(state.fitAddon);
+  const el = document.getElementById('terminal');
+  el.innerHTML = '';
+  state.term.open(el);
+  state.fitAddon.fit();
+
+  // See createTerm — Canvas on mobile, WebGL on desktop.
+  if (IS_TOUCH_DEVICE) {
+    try { state.term.loadAddon(new CanvasAddon.CanvasAddon()); } catch {}
+  } else {
+    try {
+      const webgl = new WebglAddon.WebglAddon();
+      webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} });
+      state.term.loadAddon(webgl);
+    } catch {
+      try { state.term.loadAddon(new CanvasAddon.CanvasAddon()); } catch {}
+    }
+  }
+
+  // Custom touch handler on both mobile and desktop. Native viewport scroll
+  // doesn't work on mobile because .xterm-screen sits on top of
+  // .xterm-viewport in the DOM and absorbs touch events; the JS handler is
+  // the only thing that reliably reaches term.scrollLines.
+  setupTouchScroll(state.term);
+  refreshXtermAfterFontLoad(state.term);
+
+  state.xtermTextarea = el.querySelector('.xterm-helper-textarea');
+  if (state.xtermTextarea) state.xtermTextarea.setAttribute('inputmode', 'none');
+
+  const ro = new ResizeObserver(() => {
+    state.fitAddon.fit();
+    if (state.ws?.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify({ t: 'resize', cols: state.term.cols, rows: state.term.rows }));
+    }
+  });
+  ro.observe(el);
+
+  if (!state.keyboard) {
+    state.keyboard = new Keyboard(document.getElementById('keyboard-bar'), sendInput);
+  }
+
+  showConnOverlay('Connecting', null, 'Establishing session…');
+  // updateChatButton was called earlier when both panes were still hidden,
+  // so the toggle was hidden too. Now that terminal-wrap is visible, the
+  // toggle should reappear (mobile only — desktop keeps the chat pane open).
+  updateChatButton();
+}
+
+// Build the WS query string for /attach/:id. token authenticates owner
+// access; s carries the share token for viewer access. Both can be present.
+function _buildAttachQuery(isShared) {
+  const tokParam = state.token ? `token=${encodeURIComponent(state.token)}` : '';
+  const shareParam = isShared && state.shareToken ? `s=${encodeURIComponent(state.shareToken)}` : '';
+  const qs = [tokParam, shareParam].filter(Boolean).join('&');
+  return qs ? `?${qs}` : '';
+}
+
+function openSession(id) {
+  // Re-tap of the same session: reconnect if WS is dead, otherwise just bring into view.
+  if (state.activeId === id && state.ws && state.ws.readyState === WebSocket.OPEN) {
+    if (window.innerWidth <= 900) setSidebar(true);
+    return;
+  }
+
+  _teardownPreviousSession();
+  _resetUiForNewSession(id);
 
   // Owner sessions get an xterm immediately. Viewer sessions wait for the
   // server's viewer-mode message and then show the conversation pane
   // (structured transcript + live terminal-tail).
+  const session = state.sessions.find((s) => s.id === id);
+  const isShared = !!(session && !session.owned);
+
+  document.getElementById('no-session').hidden = true;
+
   if (isShared) {
     showConversationView();
-    const _conv = document.getElementById('conv-content');
-    if (_conv) _conv.innerHTML = '<div class="conv-waiting">Connecting…</div>';
+    const conv = document.getElementById('conv-content');
+    if (conv) conv.innerHTML = '<div class="conv-waiting">Connecting…</div>';
+  } else {
+    _initOwnerXterm();
   }
 
-  if (!isShared) {
-    const wrap = document.getElementById('terminal-wrap');
-    wrap.hidden = false;
-
-    state.term = new Terminal({
-      scrollback: IS_TOUCH_DEVICE ? 1500 : 5000,
-      fontSize: 13,
-      fontFamily: "'JetBrains Mono Nerd Font', 'JetBrains Mono', Menlo, monospace",
-      cursorBlink: false,
-      smoothScrollDuration: 0,
-    });
-    state.fitAddon = new FitAddon.FitAddon();
-    state.term.loadAddon(state.fitAddon);
-    const el = document.getElementById('terminal');
-    el.innerHTML = '';
-    state.term.open(el);
-    state.fitAddon.fit();
-
-    // See createTerm — Canvas on mobile, WebGL on desktop.
-    if (IS_TOUCH_DEVICE) {
-      try { state.term.loadAddon(new CanvasAddon.CanvasAddon()); } catch {}
-    } else {
-      try {
-        const webgl = new WebglAddon.WebglAddon();
-        webgl.onContextLoss(() => { try { webgl.dispose(); } catch {} });
-        state.term.loadAddon(webgl);
-      } catch {
-        try { state.term.loadAddon(new CanvasAddon.CanvasAddon()); } catch {}
-      }
-    }
-
-    // Custom touch handler on both mobile and desktop. Native viewport scroll
-    // doesn't work on mobile because .xterm-screen sits on top of
-    // .xterm-viewport in the DOM and absorbs touch events; the JS handler is
-    // the only thing that reliably reaches term.scrollLines.
-    setupTouchScroll(state.term);
-    refreshXtermAfterFontLoad(state.term);
-
-    state.xtermTextarea = el.querySelector('.xterm-helper-textarea');
-    if (state.xtermTextarea) state.xtermTextarea.setAttribute('inputmode', 'none');
-
-    const ro = new ResizeObserver(() => {
-      state.fitAddon.fit();
-      if (state.ws?.readyState === WebSocket.OPEN) {
-        state.ws.send(JSON.stringify({ t: 'resize', cols: state.term.cols, rows: state.term.rows }));
-      }
-    });
-    ro.observe(el);
-
-    if (!state.keyboard) {
-      state.keyboard = new Keyboard(document.getElementById('keyboard-bar'), sendInput);
-    }
-
-    showConnOverlay('Connecting', null, 'Establishing session…');
-    // updateChatButton was called earlier when both panes were still hidden,
-    // so the toggle was hidden too. Now that terminal-wrap is visible, the
-    // toggle should reappear (mobile only — desktop keeps the chat pane open).
-    updateChatButton();
-  }
-
-  // websocket with auto-reconnect
+  // websocket with auto-reconnect. `connect` is closure-bound to `id` and
+  // `qs` so reconnect-after-close stays on this session; the `state.ws !==
+  // ws` guard inside the message handler also prevents stale-WS messages
+  // from leaking into a freshly-switched session.
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const tokParam = state.token ? `token=${encodeURIComponent(state.token)}` : '';
-  const shareParam = isShared && state.shareToken ? `s=${encodeURIComponent(state.shareToken)}` : '';
-  const queryParams = [tokParam, shareParam].filter(Boolean).join('&');
-  const qs = queryParams ? `?${queryParams}` : '';
+  const qs = _buildAttachQuery(isShared);
   let reconnectDelay = 1000;
   const maxDelay = 15000;
 
@@ -1106,10 +1128,10 @@ function openSession(id) {
     });
 
     ws.addEventListener('message', (ev) => {
-      // Same stale-WS guard as connectShare: ignore messages that arrive
-      // on a WS we've already moved on from (session switch / reconnect).
-      // Without it, a 'chat' broadcast from session A could land in
-      // session B's chat list during the switchover window.
+      // Stale-WS guard: ignore messages that arrive on a WS we've already
+      // moved on from (session switch / reconnect). Without it, a 'chat'
+      // broadcast from session A could land in session B's chat list
+      // during the switchover window.
       if (state.ws !== ws) return;
       const msg = JSON.parse(ev.data);
       if (msg.t === 'viewer-mode') {
@@ -1168,7 +1190,8 @@ function openSession(id) {
   console.log('[myco] openSession', id, 'isShared=', isShared, 'qs=', qs);
   connect();
 
-  // forward xterm keyboard input; auto-collapse sidebar on first keystroke
+  // Forward xterm keyboard input; auto-collapse sidebar on first keystroke.
+  // Only applies on owner sessions — viewers have no live xterm here.
   if (state.term) {
     state.term.onData((data) => {
       setSidebar(true);
