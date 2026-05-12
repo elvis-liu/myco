@@ -498,26 +498,23 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
         });
         // fall through to the normal toggle + send below
       }
-      // Auto-mode: every chat-sent prompt should run without Claude
-      // pausing for permission. Detect the current Claude Code mode from
-      // the headless terminal's bottom rows and prepend the right number
-      // of Shift+Tab presses so we land on "auto-accept edits" before
-      // the actual text is sent. Claude Code cycles modes:
-      //   default → accept-edits → plan → default
-      const toggle = autoAcceptToggleBytes(session);
-      console.log(`[chat→pty] ${user}: ${input.substring(0, 80)}${toggle ? ' (+auto-toggle)' : ''}`);
-      // Wrap the input in bracketed-paste markers (\x1b[200~ … \x1b[201~).
-      // This is the same protocol an IDE uses when pasting code into a
-      // terminal: it tells Claude's TUI "treat this as one paste atom"
-      // so internal newlines aren't interpreted as Enter / mode-switches,
-      // and the input box doesn't speculatively reflow into multi-line
-      // mode (which manifested as the user-reported "every @myco appears
-      // with a leading blank line"). The trailing \r sits OUTSIDE the
-      // close marker so it reads as a keystroke after the paste —
-      // reliably submitting on both desktop and mobile.
+      // Send the @myco text straight to Claude's input with no mode-toggle
+      // preamble. The Shift+Tab auto-toggle we used to send was causing
+      // Claude's TUI to redraw the mode banner above the input box, which
+      // pushed the typed text down one row — the user saw "every @myco
+      // appears on a new line below the > prompt". With the permission
+      // interceptor + per-session allow list already handling tool
+      // approvals, the toggle wasn't actually load-bearing anymore.
+      //
+      // Bracketed-paste wrap (\x1b[200~ … \x1b[201~) keeps the write atomic
+      // and tells Claude's TUI "this is one paste atom" so internal
+      // newlines aren't interpreted as Enter mid-stream. The trailing \r
+      // sits OUTSIDE the close marker so it reads as a keystroke after the
+      // paste — reliably submitting on both desktop and mobile.
+      console.log(`[chat→pty] ${user}: ${input.substring(0, 80)}`);
       const PASTE_START = '\x1b[200~';
       const PASTE_END = '\x1b[201~';
-      session.write(toggle + PASTE_START + input + PASTE_END + '\r');
+      session.write(PASTE_START + input + PASTE_END + '\r');
     }
     return;
   }
