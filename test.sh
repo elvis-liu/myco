@@ -530,11 +530,15 @@ test_chat_window() {
   # Regression: extractor prompts must tell Claude to spot-check the
   # actual codebase via Read/Glob/Grep, not just rely on chat + transcript.
   grep -q "Read, Glob, Grep" server/src/extractor.js && pass "extractor prompts mention code-inspection tools" || fail "extractor prompts mention code-inspection tools"
-  # Regression: any non-@myco, non-slash chat must trigger the auto-accept-
-  # edits toggle so the next @myco / Plan checkbox runs without a prompt.
+  # Regression: Claude is spawned with --permission-mode acceptEdits so we
+  # don't need a fragile runtime Shift+Tab auto-toggle to nudge it into
+  # accept mode (that detection could misread state and toggle INTO plan).
+  grep -q "'--permission-mode', 'acceptEdits'" server/src/pty.js \
+    && pass "claude spawned with --permission-mode acceptEdits" \
+    || fail "claude spawned with --permission-mode acceptEdits"
   grep -q 'auto-toggle on discussion' server/src/pty.js \
-    && pass "pty toggles auto-mode on plain discussion" \
-    || fail "pty toggles auto-mode on plain discussion"
+    && fail "the runtime auto-toggle came back (we removed it for spawn-time mode set)" \
+    || pass "runtime auto-toggle removed (acceptEdits is set at spawn)"
   # Regression: --dangerously-skip-permissions was removed because Claude
   # CLI refuses it when running as root. Tool-permission dialogs now flow
   # through MenuInterceptor → permissions.decide → auto-allow / auto-deny.

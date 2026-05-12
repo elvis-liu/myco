@@ -136,12 +136,17 @@ class PtySession extends EventEmitter {
 const sessions = new Map(); // sessionId -> PtySession
 
 function buildClaudeArgs({ resumeId } = {}) {
-  // We used to pass --dangerously-skip-permissions here, but the Claude CLI
-  // refuses that flag when running as root (which is our container's user).
-  // Instead, permission dialogs flow through MenuInterceptor + permissions.js:
-  // matched-allow → auto-pick "Yes", matched-deny → auto-pick "No", no match
-  // → conservative auto-deny with a chat note (user runs /allow then retries).
-  const args = [];
+  // --permission-mode acceptEdits sets Claude's mode at spawn time so file
+  // edits go through unattended (Bash and other tool permissions still flow
+  // through our menu interceptor / per-session allow list). Doing it at
+  // spawn replaces the old runtime Shift+Tab auto-toggle which relied on
+  // pattern-matching banner text in the headless terminal and could land
+  // in the wrong mode if Claude's UI strings drifted or a frame was
+  // mid-render. State is correct by construction now.
+  //
+  // (--dangerously-skip-permissions is rejected when running as root, which
+  // is our container user. acceptEdits has no such restriction.)
+  const args = ['--permission-mode', 'acceptEdits'];
   if (resumeId) args.push('--resume', resumeId);
   return args;
 }
@@ -357,20 +362,12 @@ function handleChatMessage(sessionId, session, user, text /* opts = {} */) {
   // response happened to end in '?'.
   if (user === ASSISTANT_USER) return;
 
-  // Any human chat in the discussion panel is a signal that someone is
-  // about to drive the session — make sure Claude is in auto-accept-edits
-  // mode so the next @myco (or Plan-tab checkbox dispatch) runs without
-  // a permission prompt. We skip @myco messages because their own send
-  // path (handleChatPostfixes) prepends the toggle bytes atomically with
-  // the prompt, which avoids a stale-detection race. Slash commands also
-  // skip — they don't drive Claude.
-  if (session && session.alive && !text.startsWith('@myco') && !text.startsWith('/')) {
-    const toggle = autoAcceptToggleBytes(session);
-    if (toggle) {
-      console.log(`[chat→pty] auto-toggle on discussion (${toggle.length / SHIFT_TAB.length} cycle)`);
-      session.write(toggle);
-    }
-  }
+  // (Note: the old proactive Shift+Tab auto-toggle that fired on every
+  // human chat is removed. Claude now starts in accept-edits at spawn
+  // via --permission-mode acceptEdits, so we don't need to nudge the
+  // mode at runtime — and the old detection-then-toggle was fragile
+  // because pattern-matching the headless terminal could misread state
+  // and end up toggling INTO plan mode instead of accept-edits.)
 
   // Registered slash commands (/feature, /bug, /help, …) are handled by
   // the slashcmds dispatcher. /btw is intentionally NOT in the registry —
@@ -498,17 +495,22 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
         });
         // fall through to the normal toggle + send below
       }
-      // Bare write: just the text + Enter. No mode-toggle preamble (we
-      // rely on the permission interceptor for tool approvals now), and
-      // no bracketed-paste wrap. Each prior attempt (toggle-then-text,
-      // setTimeout-split-r, paste-wrapped) still left the user reporting
-      // "@myco messages always start on a new line below the > prompt".
-      // The common thread was characters we sent in front of the input —
-      // toggle escape codes or paste-mode markers. With those removed,
-      // Claude's input editor sees the user's text as raw keystrokes
-      // starting at column 0 of the prompt line, exactly like typing.
+      // No mode-toggle preamble — Claude is in accept-edits mode from spawn
+      // (--permission-mode acceptEdits) and tool-approval gaps are handled
+      // by the menu interceptor + per-session allow list.
+      //
+      // Bracketed-paste wrap (\x1b[200~ … \x1b[201~) keeps the write atomic
+      // and tells Claude's TUI "this is one paste atom" so internal newlines
+      // pass through as multi-line input rather than being interpreted as
+      // submit-Enter mid-stream. Trailing \r outside the close marker reads
+      // as a discrete keystroke → reliable submit on both desktop and mobile.
+      // (The leading newline we used to chase via this path turned out to be
+      // Claude Code's own TUI input layout — physical-keyboard typing also
+      // lands a row below the > prompt — not something we cause.)
       console.log(`[chat→pty] ${user}: ${input.substring(0, 80)}`);
-      session.write(input + '\r');
+      const PASTE_START = '\x1b[200~';
+      const PASTE_END = '\x1b[201~';
+      session.write(PASTE_START + input + PASTE_END + '\r');
     }
     return;
   }
