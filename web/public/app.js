@@ -1788,7 +1788,12 @@ function formatChatTs(iso) {
 //     10–30s gaps between text and tool_result frames).
 //
 // We DON'T touch main-pane focus — interaction stays in the chat pane.
-const CLAUDE_IDLE_MS = 8000;            // post-stream silence before we declare claude idle
+const CLAUDE_IDLE_MS = 30000;           // post-stream silence before we declare claude idle
+                                         // (long enough to span 30s+ "thinking" gaps with no
+                                         //  transcript-delta activity; the post-text-to-chat
+                                         //  path no longer depends on this — it always fires
+                                         //  on assistant text — so a few extra seconds of dots
+                                         //  is the only cost of being generous here)
 
 function _markAwaitingClaude() {
   state.awaitingClaude = true;
@@ -1802,20 +1807,26 @@ function _markAwaitingClaude() {
 
 // Called from the transcript-delta WS frame handler whenever new
 // transcript messages arrive. Streams every assistant text into chat
-// as it lands; the idle timer ticks forward on every signal of life.
+// as it lands. Critically, this does NOT gate on state.awaitingClaude —
+// claude can think silently for 30–60s before producing any output, and
+// that quiet period used to retire the typing dots AND make this
+// handler return early via an `if (!awaitingClaude) return` guard, so
+// the eventual "Generated 4 sample files…" reply never reached chat.
+// The dots are managed by a separate timer for visual feedback only;
+// they don't gate posting.
 function _onTranscriptDeltaForChat(messages) {
-  if (!state.awaitingClaude) return;
   let sawSomething = false;
   for (const m of messages) {
     if (!m) continue;
     if (m.role === 'assistant') {
       sawSomething = true;
       const tools = Array.isArray(m.toolCalls) ? m.toolCalls.length : 0;
-      state.pendingClaudeToolCalls += tools;
+      state.pendingClaudeToolCalls = (state.pendingClaudeToolCalls || 0) + tools;
       if (m.text && m.text.trim()) {
         // Dedupe — transcript-delta can re-emit the same uuid after a
         // reconnect (server replays from startByte) and we don't want
         // to double-post in chat.
+        if (!state._claudeSeenText) state._claudeSeenText = new Set();
         const key = m.uuid || (m.ts + '|' + m.text.slice(0, 40));
         if (!state._claudeSeenText.has(key)) {
           state._claudeSeenText.add(key);
@@ -1825,12 +1836,12 @@ function _onTranscriptDeltaForChat(messages) {
       }
     } else if (m.role === 'tool_result' || m.role === 'user') {
       // tool_result = claude got data back; user = our own @myco echo.
-      // Both count as "still alive" for the idle timer but produce no
-      // chat output.
+      // Both count as "still alive" for the idle timer.
       sawSomething = true;
     }
   }
-  if (sawSomething) _scheduleClaudeIdleCheck();
+  // Reset the typing-dots idle timer only when dots are currently up.
+  if (sawSomething && state.awaitingClaude) _scheduleClaudeIdleCheck();
 }
 
 function _scheduleClaudeIdleCheck() {

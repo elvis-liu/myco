@@ -437,6 +437,18 @@ test_new_session_readonly() {
   grep -q '_scheduleClaudeIdleCheck' web/public/app.js \
     && pass "app.js: schedules idle check on transcript activity" \
     || fail "app.js: schedules idle check on transcript activity"
+  # Regression: _onTranscriptDeltaForChat must NOT gate on
+  # state.awaitingClaude. Claude often thinks silently for 30–60s
+  # before producing transcript output. The earlier 8s idle timer
+  # retired awaitingClaude=false and the post-text path was then
+  # dropping the eventual reply entirely (real bug filed against
+  # demo010 "generate sample source code" → claude's "Generated 4
+  # sample files…" never reached chat). _onClaudeIdle still keeps
+  # its own gate (that one is correct — only fires when dots are up).
+  awk '/^function _onTranscriptDeltaForChat\(/,/^\}/' web/public/app.js | \
+    grep -qE 'if \(!state\.awaitingClaude\) return' \
+    && fail "app.js: _onTranscriptDeltaForChat still gates on awaitingClaude (regression)" \
+    || pass "app.js: _onTranscriptDeltaForChat posts text regardless of awaiting state"
   grep -q 'claude-typing-dots' web/public/styles.css \
     && pass "styles.css: typing-dots animation" \
     || fail "styles.css: typing-dots animation"
