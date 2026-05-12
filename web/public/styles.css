@@ -1652,13 +1652,14 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 #btn-files:active { transform: scale(.92); }
 #btn-files.active { background: rgba(80, 120, 200, .35); }
 
-/* Preview-as-viewer toggle for session owners. Same fixed-cluster styling
-   as #btn-files / #btn-chat. */
+/* Preview-as-viewer toggle for session owners. Pinned to the LEFTMOST
+   chrome slot so the always-shown buttons (chat/files/plan/arch/test)
+   cluster together on the right. Only the session owner ever sees it. */
 #btn-preview-readonly {
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 10px);
-  /* slot 2 from the right */
-  right: calc(env(safe-area-inset-right, 0px) + 10px + 2 * (var(--chrome-btn-size) + 8px));
+  /* slot 5 from the right — leftmost in the cluster */
+  right: calc(env(safe-area-inset-right, 0px) + 10px + 5 * (var(--chrome-btn-size) + 8px));
   z-index: 50;
   width: var(--chrome-btn-size); height: var(--chrome-btn-size);
   padding: 0;
@@ -1697,10 +1698,11 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
-/* slot 3 / 4 / 5 from the right (chat=0, files=1, preview=2) */
-#btn-plan { right: calc(env(safe-area-inset-right, 0px) + 10px + 3 * (var(--chrome-btn-size) + 8px)); }
-#btn-arch { right: calc(env(safe-area-inset-right, 0px) + 10px + 4 * (var(--chrome-btn-size) + 8px)); }
-#btn-test { right: calc(env(safe-area-inset-right, 0px) + 10px + 5 * (var(--chrome-btn-size) + 8px)); }
+/* slot 2 / 3 / 4 from the right (chat=0, files=1, then plan/arch/test).
+   Preview moves to slot 5 so the always-shown buttons stay contiguous. */
+#btn-plan { right: calc(env(safe-area-inset-right, 0px) + 10px + 2 * (var(--chrome-btn-size) + 8px)); }
+#btn-arch { right: calc(env(safe-area-inset-right, 0px) + 10px + 3 * (var(--chrome-btn-size) + 8px)); }
+#btn-test { right: calc(env(safe-area-inset-right, 0px) + 10px + 4 * (var(--chrome-btn-size) + 8px)); }
 #btn-plan:active, #btn-arch:active, #btn-test:active { transform: scale(.92); }
 #btn-plan.active, #btn-arch.active, #btn-test.active { background: rgba(80, 120, 200, .35); }
 
