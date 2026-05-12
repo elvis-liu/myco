@@ -7,3 +7,4 @@ node_modules/
 nohup.out
 .tls/
 .tls.bak.*
+.claude/scheduled_tasks.lock
