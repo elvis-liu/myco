@@ -283,9 +283,24 @@ test_new_session_readonly() {
   grep -q 'pending-menu-opt' web/public/app.js \
     && pass "app.js: menu callout renders option buttons" \
     || fail "app.js: menu callout renders option buttons"
-  grep -qF 'sendChatMessage(`/decide ${n}`)' web/public/app.js \
-    && pass "app.js: option click sends /decide" \
-    || fail "app.js: option click sends /decide"
+  # Regression: pending-menu callout clicks go through a dedicated
+  # WS frame, NOT through chat — the user shouldn't see `/decide N`
+  # messages cluttering the discussion when they click [1]/[2] on the
+  # readonly view's trust/plan/permission callout. See handleMenuPick
+  # in pty.js and sendMenuPick in app.js.
+  grep -qF 'sendMenuPick(n)' web/public/app.js \
+    && pass "app.js: option click uses sendMenuPick" \
+    || fail "app.js: option click uses sendMenuPick"
+  grep -q "msg.t === 'menu-pick'" server/src/pty.js \
+    && pass "pty.js: handles menu-pick WS frame" \
+    || fail "pty.js: handles menu-pick WS frame"
+  grep -q 'function handleMenuPick' server/src/pty.js \
+    && pass "pty.js: handleMenuPick helper" \
+    || fail "pty.js: handleMenuPick helper"
+  # Negative guard: the callout must not fall back to a chat /decide send.
+  grep -q 'sendChatMessage(\`/decide' web/public/app.js \
+    && fail "app.js: callout still sends /decide via chat (regression)" \
+    || pass "app.js: callout no longer routes through chat"
   grep -q '\.pending-menu' web/public/styles.css \
     && pass "styles.css: .pending-menu styling" \
     || fail "styles.css: .pending-menu styling"

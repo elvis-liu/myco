@@ -1665,13 +1665,13 @@ function _renderPendingMenuCallout() {
     `<div class="pending-menu-opts">${menu.options.map((o) =>
       `<button type="button" class="pending-menu-opt" data-n="${o.n}">[${o.n}] ${escHtml(o.label)}</button>`
     ).join('')}</div>` +
-    `<div class="pending-menu-hint">Or type <code>/decide &lt;n&gt;</code> in chat.</div>`;
+    `<div class="pending-menu-hint">Picking an option here goes straight to the session — no chat message is posted.</div>`;
   callout.addEventListener('click', (e) => {
     const btn = e.target.closest('.pending-menu-opt');
     if (!btn) return;
-    const n = btn.dataset.n;
-    if (!n) return;
-    sendChatMessage(`/decide ${n}`);
+    const n = Number(btn.dataset.n);
+    if (!Number.isFinite(n) || n < 1) return;
+    sendMenuPick(n);
     state.pendingMenu = null;
     callout.remove();
   });
@@ -1733,6 +1733,18 @@ function formatChatTs(iso) {
     if (isNaN(d.getTime())) return '';
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   } catch { return ''; }
+}
+
+// Send an inline menu pick via the dedicated WS frame. Bypasses chat
+// entirely so the click on a pending-menu callout button doesn't show up
+// as a `/decide N` message in the discussion. Silent-drop if the WS is
+// reconnecting — the next menu broadcast will repopulate the callout.
+function sendMenuPick(n) {
+  if (!Number.isFinite(n) || n < 1) return false;
+  const ws = state.ws;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  try { ws.send(JSON.stringify({ t: 'menu-pick', n })); return true; }
+  catch { return false; }
 }
 
 // Outbound chat queue. If the WebSocket isn't OPEN at submit time (mobile

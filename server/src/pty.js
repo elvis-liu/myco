@@ -204,6 +204,21 @@ function killSession(sessionId) {
   if (s) { s.kill(); sessions.delete(sessionId); }
 }
 
+// Handle a `{t:'menu-pick', n}` frame from the client — the inline-callout
+// alternative to typing `/decide N` in chat. Writes the digit + \r to the
+// PTY and clears pendingMenu, mirroring slashcmds.handleDecide but WITHOUT
+// any chat persistence or broadcast. Validates n against the menu's
+// current options so a stale callout can't poke a different dialog.
+function handleMenuPick(session, n) {
+  if (!session || !session.alive) return;
+  if (!Number.isFinite(n) || n < 1 || n > 9) return;
+  const pending = session.pendingMenu;
+  if (!pending || !Array.isArray(pending.options)) return;
+  if (!pending.options.some((o) => o.n === n)) return;
+  session.write(String(n) + '\r');
+  session.pendingMenu = null;
+}
+
 // Wire transcript messages from a session's JSONL file to a websocket.
 // Handles the new-session race: a freshly spawned Claude takes ~5s to
 // write its first JSONL line, so resolveTranscriptPath returns null on
@@ -311,6 +326,13 @@ function attachWebSocket(session, ws, opts = {}) {
       handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT));
       return;
     }
+    if (msg.t === 'menu-pick' && Number.isFinite(msg.n)) {
+      // Inline reply to a pending TUI menu — bypasses chat entirely so the
+      // user's click on a callout button doesn't pollute the discussion
+      // with `/decide N` messages. See handleMenuPick for the gating.
+      if (user) handleMenuPick(session, msg.n | 0);
+      return;
+    }
     if (readOnly) return; // share-link viewers can watch but not type / resize
     if (msg.t === 'input' && typeof msg.data === 'string') {
       session.write(Buffer.from(msg.data, 'base64').toString('utf8'));
@@ -368,6 +390,11 @@ function attachViewerWebSocket(session, ws, opts = {}) {
       // @myco to address the running Claude session — chat is the
       // collaborative steering channel and viewers can participate.
       if (text) handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT));
+    }
+    if (msg.t === 'menu-pick' && Number.isFinite(msg.n) && user) {
+      // Inline menu pick — same as the owner path; we keep this enabled for
+      // viewers because chat steering is open to them anyway.
+      handleMenuPick(session, msg.n | 0);
     }
   }
 
