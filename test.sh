@@ -136,17 +136,27 @@ test_pty_patterns() {
       // Trust dialog recognizer.
       if (!p.TRUST_DIALOG_RE.test('Quick safety check: Is this a project you created or one you trust?')) throw new Error('TRUST_DIALOG_RE missed safety-check phrasing');
       if (!p.TRUST_DIALOG_RE.test('Do you trust the files in this folder?')) throw new Error('TRUST_DIALOG_RE missed canonical phrasing');
-      // Spinner — DURATION variants. Claude's verb roster is creative
-      // and grows release-to-release (Baked, Brewed, Cooked, Churned,
-      // Moonwalking, Thundering, Crunching, plus the boring built-ins).
-      // Match on STRUCTURE not on a verb whitelist.
-      const durSamples = ['✻ Worked for 12s · esc to interrupt', '✦ Thinking for 3s …',
-                          '✻ Baked for 15s', '✻ Brewed for 51s', '✻ Cooked for 13s',
-                          '✻ Churned for 4s'];
+      // Spinner — DURATION variants (-ing only). Tightened to exclude
+      // past-tense '-ed for Ns' shapes because those linger above the
+      // input prompt AFTER claude is idle and kept the typing dots
+      // alive forever (reported as '✻ Brewed for 1m 25s' stuck on
+      // screen). The -ed shape is captured separately by SPINNER_DONE_RE.
+      const durSamples = ['✻ Working for 12s · esc to interrupt', '✦ Thinking for 3s …',
+                          '✻ Cerebrating for 25s', '· Cerebrating for 1m 5s'];
       for (const s of durSamples) {
         if (!p.SPINNER_DURATION_RE.test(s)) throw new Error('SPINNER_DURATION_RE missed: ' + s);
       }
       if (p.SPINNER_DURATION_RE.test('We worked for 12 hours')) throw new Error('SPINNER_DURATION_RE matched prose');
+      // Done-with-phase samples must match SPINNER_DONE_RE but NOT the
+      // running/duration regexes (that's the whole point of the split).
+      const doneSamples = ['✻ Baked for 15s', '✻ Brewed for 51s', '✻ Cooked for 13s',
+                           '✻ Churned for 4s', '✻ Brewed for 1m 25s'];
+      for (const s of doneSamples) {
+        if (!p.SPINNER_DONE_RE.test(s)) throw new Error('SPINNER_DONE_RE missed: ' + s);
+        if (p.SPINNER_RUNNING_RE.test(s) || p.SPINNER_DURATION_RE.test(s)) {
+          throw new Error('Done-phase line wrongly matched as running: ' + s);
+        }
+      }
       // Spinner — RUNNING variants (no duration yet, claude is currently in that phase).
       const runSamples = ['✽ Moonwalking…', '· Thundering…', '✽ Crunching', '✻ Working'];
       for (const s of runSamples) {
@@ -1183,8 +1193,9 @@ test_chat_window() {
   # push from persistAssistantTextToChat rendered twice in the chat
   # pane (observed on mycobeta demo010 as identical "claude 01:17"
   # rows duplicated back-to-back).
-  awk '/^function appendChatMessage\(/,/^\}/' web/public/app.js | \
-    grep -qF 'existing.meta.transcriptUuid === uuid' \
+  # The dedup line is unique to this function — searching globally
+  # is simpler than awk-ranging which is finicky under pipefail.
+  grep -qF 'existing.meta.transcriptUuid === uuid' web/public/app.js \
     && pass "app.js: appendChatMessage dedups by transcriptUuid" \
     || fail "app.js: appendChatMessage missing transcriptUuid dedup"
   # Regression: the readonly transcript viewer used to freeze when
@@ -1206,6 +1217,34 @@ test_chat_window() {
   grep -qF 'clearInterval(safetyPollTimer)' server/src/transcript.js \
     && pass "transcript.js: safety poll cleared on unsubscribe" \
     || fail "transcript.js: safety poll not cleared on unsubscribe"
+  # Regression: SPINNER_RUNNING_RE used to match both -ing and -ed
+  # verbs, so done-with-phase lines ("✻ Brewed for 1m 25s") kept the
+  # typing indicator alive long after claude went idle. Reported by
+  # the user as the dots refusing to stop. New regexes require -ing
+  # (active) and split out SPINNER_DONE_RE for the past tense shape.
+  if have_node; then
+    if node test/spinner-regex.test.js >/dev/null 2>&1; then
+      pass "test/spinner-regex.test.js (19 cases)"
+    else
+      fail "test/spinner-regex.test.js — re-run with 'node test/spinner-regex.test.js' to see failures"
+    fi
+  else
+    skip "test/spinner-regex.test.js (no host node)"
+  fi
+  grep -qF 'SPINNER_DONE_RE' server/src/pty-patterns.js \
+    && pass "pty-patterns.js: SPINNER_DONE_RE exported for past-tense phase lines" \
+    || fail "pty-patterns.js: SPINNER_DONE_RE not defined"
+  if have_node; then
+    node -e "
+      const { SPINNER_RUNNING_RE, SPINNER_DURATION_RE } = require('./server/src/pty-patterns');
+      const stuck = '✻ Brewed for 1m 25s';
+      if (SPINNER_RUNNING_RE.test(stuck) || SPINNER_DURATION_RE.test(stuck)) {
+        process.exit(1);
+      }
+    " >/dev/null 2>&1 \
+      && pass "pty-patterns: '✻ Brewed for 1m 25s' no longer treated as running" \
+      || fail "pty-patterns: stuck-indicator regex still matches done-phase summary"
+  fi
   # Fix 1: periodic safety scan. The 250ms data-event debounce alone
   # misses rapid back-to-back menus because it keeps resetting during
   # a busy turn — a fixed-cadence scan guarantees no menu lives on

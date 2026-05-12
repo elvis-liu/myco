@@ -179,21 +179,35 @@ const MODE_BYPASS_RE = /bypass permissions/i;
 // Claude renders a per-turn spinner that goes through two visible
 // shapes:
 //
-//   in-progress      "✽ Moonwalking…"  "· Thundering…"  "✽ Crunching…"
-//   done-with-phase  "✻ Brewed for 51s"  "✻ Baked for 15s"  "✻ Cooked for 13s"
-//                    "✻ Churned for 4s"
+//   ACTIVE (present-continuous, -ing):
+//     "✽ Moonwalking…"  "· Thundering…"  "✽ Crunching…"
+//     "✽ Working for 3s"  "· Cerebrating for 12s · ↓ 3.4k tokens"
 //
-// The verb roster is creative and seems to be sampled from a much
-// wider set than the old explicit ("Working"|"Thinking"|…) list
-// implied — observed in production logs alone we have Baked, Brewed,
-// Cooked, Churned, Moonwalking, Thundering, Crunching, plus the
-// boring built-ins. Match on STRUCTURE (glyph + capitalised verb +
-// optional duration tail) instead of enumerating verbs.
+//   DONE-WITH-PHASE (past-tense, -ed):
+//     "✻ Brewed for 51s"  "✻ Baked for 15s"  "✻ Cooked for 13s"
+//     "✻ Thought for 12s"
+//
+// Critically these two shapes are NOT equivalent for the typing
+// indicator. The -ing form means claude is mid-turn and the wall
+// clock is still advancing. The -ed form is a SUMMARY of a phase
+// that just finished — it lingers above the input prompt for a
+// while AFTER claude is fully idle, especially for long phases
+// ("Brewed for 1m 25s"). Treating -ed as "still running" caused
+// the typing dots to stick indefinitely after the turn ended.
+//
+// SPINNER_DURATION_RE / SPINNER_RUNNING_RE now match -ing only.
+// They drive the "claude is busy NOW" signal that gates the typing
+// indicator. The -ed shape is captured separately for future use
+// (e.g., a "last phase took Xs" hint), but it does NOT extend the
+// indicator's lifetime.
+//
+// Duration tail tolerates compound formats: "25s", "1m 25s", "2h 5m".
 //
 // Glyph class: ✻ ✦ ✺ ✽ · • ▮ ⏳ (Unicode block ✻=U+273B, ✽=U+273D,
 // the rest are common bullet/middle-dot/etc.).
-const SPINNER_DURATION_RE = /[✻✦✺✽·•▮⏳]\s*[A-Z][a-z]+\s+for\s+\d+s\b/;
-const SPINNER_RUNNING_RE  = /[✻✦✺✽·•▮⏳]\s*[A-Z][a-z]+(?:ing|ed)\b/;
+const SPINNER_DURATION_RE = /[✻✦✺✽·•▮⏳]\s*[A-Z][a-z]+ing\s+for\s+(?:\d+h\s+)?(?:\d+m\s+)?\d+s\b/;
+const SPINNER_RUNNING_RE  = /[✻✦✺✽·•▮⏳]\s*[A-Z][a-z]+ing\b/;
+const SPINNER_DONE_RE     = /[✻✦✺✽·•▮⏳]\s*[A-Z][a-z]+ed\s+for\s+(?:\d+h\s+)?(?:\d+m\s+)?\d+s\b/;
 
 // Claude's welcome / resume banner (inside a box-drawn frame). We don't
 // rely on this for routing yet, but it's handy when classifying snapshot
@@ -238,6 +252,7 @@ module.exports = {
   MODE_BYPASS_RE,
   SPINNER_DURATION_RE,
   SPINNER_RUNNING_RE,
+  SPINNER_DONE_RE,
   WELCOME_BANNER_RE,
   LIMIT_WARNING_RE,
   TUI_KEY_HINT_RE,
