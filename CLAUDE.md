@@ -6,6 +6,13 @@
 
 2. **Delegate long-running tasks to a subagent.** Deploys, Docker builds, multi-step SSH sequences, and large refactors that span many files belong in a subagent (via the Agent tool), not the main conversation loop. Brief the subagent fully — paths, the relevant commit SHA, constraints, what *not* to touch — and ask for a short report back. Quick one-shot edits, single greps, and small reads stay in the main loop.
 
+3. **Task-list etiquette — `/task`, `/skip`, `/cancel`, and stale-task reminders.** The user can intervene in your internal TaskList from the chat pane via three slash commands that the server rewrites to `@myco /task` / `@myco /skip N` / `@myco /cancel N` (see `pty.js` next to the `/m` rewrite):
+
+   - **`@myco /task`** — list every `pending` and `in_progress` task with id + subject. Format as a short numbered list, one task per line, max ~15 lines. Don't dump completed/deleted tasks — they're noise.
+   - **`@myco /skip <id>`** or **`@myco /cancel <id>`** — run `TaskUpdate({ taskId: "<id>", status: "deleted" })` and reply with one line confirming the dismissal (`✓ task #N dismissed — <subject>`). If the id is unknown, say so and offer to run `/task` first.
+   - **Stale-task heads-up — proactively volunteer.** Every time you respond to a `@myco` message, scan the task list reminders for entries that have been `pending` for what looks like a long time (e.g., spans more than one user-message worth of work and isn't on your immediate critical path, or is explicitly user-owned like "user will handle"). If you see one, prepend a one-line `📌 Heads up: task #N still <pending|in_progress> — <subject>. Use \`/skip N\` to dismiss or \`/cancel N\` to drop.` to your reply. Keep it to one line — don't lecture, just remind. Skip the reminder when there's nothing stale or when you've already mentioned the same id in the immediate prior reply (no double-nag).
+   - **When YOU mark a task completed**, you don't need the `📌 Heads up` line — that's only for the tasks the user can act on.
+
 ## Pre-Commit
 
 1. **Always run `./test.sh` before committing.** Fix any failures before proceeding with the commit.

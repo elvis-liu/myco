@@ -967,6 +967,41 @@ test_chat_window() {
   grep -qF '/^\/m\s+\S/i' web/public/app.js \
     && pass "app.js: typing-dots arm recognizes /m" \
     || fail "app.js: typing-dots arm recognizes /m"
+  # /task /skip /cancel: chat-side commands that the server rewrites
+  # into @myco-forwarded internal-task requests. Lets the user intervene
+  # on the running Claude's TaskList from chat. The CLAUDE.md project
+  # rule (Working in this repo §3) tells Claude how to handle them and
+  # to volunteer stale-task heads-up lines.
+  grep -q "names: \['task', 'tasks'\]" server/src/slashcmds.js && pass "/task command registered" || fail "/task command missing"
+  grep -q "names: \['skip'\]" server/src/slashcmds.js && pass "/skip command registered" || fail "/skip command missing"
+  grep -q "names: \['cancel'\]" server/src/slashcmds.js && pass "/cancel command registered" || fail "/cancel command missing"
+  grep -q 'function handleTaskList' server/src/slashcmds.js && pass "handleTaskList usage reply" || fail "handleTaskList usage reply missing"
+  grep -q 'function handleTaskSkip' server/src/slashcmds.js && pass "handleTaskSkip usage reply" || fail "handleTaskSkip usage reply missing"
+  grep -qF "text.match(/^\/tasks?\s*$/i)" server/src/pty.js \
+    && pass "pty.js: /task rewrites to @myco /task" \
+    || fail "pty.js: /task rewrite missing"
+  grep -qF "text.match(/^\/(skip|cancel)\s+(\d+)\s*$/i)" server/src/pty.js \
+    && pass "pty.js: /skip + /cancel rewrite to @myco" \
+    || fail "pty.js: /skip + /cancel rewrite missing"
+  grep -qF '/^\/tasks?\s*$/i' web/public/app.js \
+    && pass "app.js: typing-dots arm recognizes /task" \
+    || fail "app.js: typing-dots arm /task missing"
+  grep -qF '/^\/(skip|cancel)\s+\d+\s*$/i' web/public/app.js \
+    && pass "app.js: typing-dots arm recognizes /skip + /cancel" \
+    || fail "app.js: typing-dots arm /skip+/cancel missing"
+  # CLAUDE.md must document the @myco-forwarded task-control protocol so
+  # future Claude instances handle the forwarded commands consistently.
+  grep -qF '@myco /task' CLAUDE.md \
+    && pass "CLAUDE.md: documents /task protocol" \
+    || fail "CLAUDE.md: missing /task protocol section"
+  grep -qF 'Stale-task heads-up' CLAUDE.md \
+    && pass "CLAUDE.md: documents stale-task heads-up rule" \
+    || fail "CLAUDE.md: stale-task heads-up rule missing"
+  # Dispatcher must pass the matched command name through so handlers
+  # can render usage hints in the right voice (/skip vs /cancel).
+  grep -qF 'command: parsed.matched' server/src/slashcmds.js \
+    && pass "slashcmds: dispatcher forwards matched command name" \
+    || fail "slashcmds: dispatcher missing matched command forwarding"
   grep -q "function addPlanItem" server/src/slashcmds.js && pass "addPlanItem helper defined" || fail "addPlanItem helper missing"
   # source='user' tagging + refresh-merge so user items survive a Plan refresh.
   grep -qF "source: 'user'" server/src/slashcmds.js \

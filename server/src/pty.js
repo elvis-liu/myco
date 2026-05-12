@@ -543,6 +543,18 @@ function handleChatMessage(sessionId, session, user, text /* opts = {} */) {
   const mAlias = text.match(/^\/m\s+([\s\S]+)/i);
   if (mAlias) text = '@myco ' + mAlias[1];
 
+  // Internal-task control: /task, /skip <id>, /cancel <id> all forward
+  // the literal command into the running claude session as @myco input
+  // so claude can act on its own TaskList/TaskUpdate state and reply in
+  // chat. The CLAUDE.md project rule tells claude how to interpret
+  // these (list pending tasks; delete by id). The forwarding pattern is
+  // the same one /m uses — keep these three together so future task
+  // commands land in one place.
+  const taskList = text.match(/^\/tasks?\s*$/i);
+  if (taskList) text = '@myco /task';
+  const taskAction = text.match(/^\/(skip|cancel)\s+(\d+)\s*$/i);
+  if (taskAction) text = `@myco /${taskAction[1].toLowerCase()} ${taskAction[2]}`;
+
   // (Note: the old proactive Shift+Tab auto-toggle that fired on every
   // human chat is removed. Claude now starts in accept-edits at spawn
   // via --permission-mode acceptEdits, so we don't need to nudge the

@@ -2061,7 +2061,9 @@ function sendChatMessage(text) {
   // for any @<word> prefix; if the server decides it was actually a
   // user mention and didn't route to PTY, the idle timer (30s) will
   // retire the dots harmlessly.
-  if (/^@[A-Za-z][\w-]{0,30}\s+\S/.test(trimmed) || /^\/m\s+\S/i.test(trimmed)) {
+  if (/^@[A-Za-z][\w-]{0,30}\s+\S/.test(trimmed) || /^\/m\s+\S/i.test(trimmed)
+      || /^\/tasks?\s*$/i.test(trimmed)
+      || /^\/(skip|cancel)\s+\d+\s*$/i.test(trimmed)) {
     _markAwaitingClaude();
   }
   return true;

@@ -53,6 +53,28 @@ const COMMANDS = [
     usage: '/m <message>',
     handler: handleMAlias,
   },
+  // Task-list intervention. The actual rewrites happen in
+  // pty.handleChatMessage (right next to /m); these registrations are
+  // here so /help lists them and the alias works as a regular command
+  // when no rewrite path applies (unknown args, etc.).
+  {
+    names: ['task', 'tasks'],
+    summary: 'Ask the running Claude to list its pending + in-progress internal tasks',
+    usage: '/task',
+    handler: handleTaskList,
+  },
+  {
+    names: ['skip'],
+    summary: 'Tell the running Claude to dismiss internal task #N (it will TaskUpdate → deleted)',
+    usage: '/skip <task-id>',
+    handler: handleTaskSkip,
+  },
+  {
+    names: ['cancel'],
+    summary: 'Tell the running Claude to cancel internal task #N (it will TaskUpdate → deleted)',
+    usage: '/cancel <task-id>',
+    handler: handleTaskSkip,
+  },
   {
     names: ['decide', 'pick', 'choose'],
     summary: 'Answer Claude\'s currently-pending dialog (e.g. plan-mode "what next" menu)',
@@ -100,7 +122,7 @@ function parseCommand(text) {
   if (name === 'btw') return null;        // legacy: handled elsewhere
   const cmd = lookup(name);
   if (!cmd) return null;
-  return { cmd, rest: m[2].trim() };
+  return { cmd, matched: name, rest: m[2].trim() };
 }
 
 // Dispatch entry point. Returns true if the message was a known slash
@@ -109,7 +131,7 @@ async function dispatch(ctx, text) {
   const parsed = parseCommand(text);
   if (!parsed) return false;
   try {
-    await parsed.cmd.handler({ ...ctx, args: parsed.rest });
+    await parsed.cmd.handler({ ...ctx, args: parsed.rest, command: parsed.matched });
   } catch (err) {
     ctx.reply(`(${parsed.cmd.names[0]} failed: ${err && err.message ? err.message : 'unknown error'})`);
   }
@@ -175,6 +197,28 @@ function handleFeature(ctx) {
 // We just send a usage reply so they know how to use it.
 function handleMAlias(ctx) {
   ctx.reply('Usage: `/m <message>` — short alias for `@myco <message>`. Whatever follows is sent straight to the running Claude session.');
+}
+
+// /task /tasks — the rewrite in pty.handleChatMessage only fires when the
+// command appears with no extra args ("^/tasks?\s*$"). If anything else
+// followed, fall through here with a usage hint so the user discovers
+// the right shape.
+function handleTaskList(ctx) {
+  ctx.reply(
+    'Usage: `/task` — asks the running Claude to list its current pending and in-progress internal tasks, ' +
+    'so you can see what work is queued and intervene with `/skip <id>` or `/cancel <id>`.',
+  );
+}
+
+// /skip /cancel — same fallthrough. Real action happens via the @myco
+// forwarding rewrite in pty.handleChatMessage; this handler only fires
+// when the args don't parse as a numeric id.
+function handleTaskSkip(ctx) {
+  const name = (ctx && ctx.command) || 'skip';
+  ctx.reply(
+    `Usage: \`/${name} <task-id>\` — tells the running Claude to dismiss the given internal task ` +
+    `(it will run TaskUpdate → status=deleted). Use \`/task\` first to see ids.`,
+  );
 }
 
 async function handleIssue(ctx, { kind, labels }) {
