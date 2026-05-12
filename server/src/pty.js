@@ -506,20 +506,18 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
       //   default → accept-edits → plan → default
       const toggle = autoAcceptToggleBytes(session);
       console.log(`[chat→pty] ${user}: ${input.substring(0, 80)}${toggle ? ' (+auto-toggle)' : ''}`);
-      // Split the write into TWO PTY operations: the text/toggle first, then
-      // the trailing \r after a short delay. When everything ships as one
-      // chunk, Claude Code's TUI input editor sometimes treats text+\r as
-      // multi-line-paste-followed-by-Enter-inside-paste rather than
-      // text-then-submit, leaving the prompt typed in the input but not
-      // submitted. Mobile is hit hardest because WS frames arrive bunched
-      // on slower networks. The 100ms gap gives the input buffer time to
-      // settle (cursor at end, no pending paste state) before submit lands.
-      // session.alive is re-checked at the timeout boundary so a session
-      // that died between the two writes doesn't throw.
-      session.write(toggle + input);
-      setTimeout(() => {
-        if (session && session.alive) session.write('\r');
-      }, 100);
+      // Wrap the input in bracketed-paste markers (\x1b[200~ … \x1b[201~).
+      // This is the same protocol an IDE uses when pasting code into a
+      // terminal: it tells Claude's TUI "treat this as one paste atom"
+      // so internal newlines aren't interpreted as Enter / mode-switches,
+      // and the input box doesn't speculatively reflow into multi-line
+      // mode (which manifested as the user-reported "every @myco appears
+      // with a leading blank line"). The trailing \r sits OUTSIDE the
+      // close marker so it reads as a keystroke after the paste —
+      // reliably submitting on both desktop and mobile.
+      const PASTE_START = '\x1b[200~';
+      const PASTE_END = '\x1b[201~';
+      session.write(toggle + PASTE_START + input + PASTE_END + '\r');
     }
     return;
   }
