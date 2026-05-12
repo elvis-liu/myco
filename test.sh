@@ -276,6 +276,20 @@ test_new_session_readonly() {
   grep -q '\.pending-menu' web/public/styles.css \
     && pass "styles.css: .pending-menu styling" \
     || fail "styles.css: .pending-menu styling"
+  # Safety net: if a brand-new session lands on the readonly view and
+  # neither a menu callout nor any transcript content arrives within
+  # READONLY_FALLBACK_MS, auto-flip back to the live xterm so the user
+  # is never trapped on a "Waiting for session to start…" screen (e.g.
+  # when the spawn cwd is already trusted by Claude, so no menu fires).
+  grep -q 'READONLY_FALLBACK_MS' web/public/app.js \
+    && pass "app.js: readonly-fallback watchdog defined" \
+    || fail "app.js: readonly-fallback watchdog defined"
+  grep -q '_armReadonlyFallback' web/public/app.js \
+    && pass "app.js: armReadonlyFallback wired from openSession" \
+    || fail "app.js: armReadonlyFallback wired from openSession"
+  grep -q '_cancelReadonlyFallback' web/public/app.js \
+    && pass "app.js: cancelReadonlyFallback on menu/transcript/teardown" \
+    || fail "app.js: cancelReadonlyFallback on menu/transcript/teardown"
 }
 
 test_chat_user_capture() {

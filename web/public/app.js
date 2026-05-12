@@ -972,6 +972,7 @@ async function deleteSessionWithConfirm(s) {
 // terminal/conversation wraps. Leaves clearReadOnly to dispose the
 // read-only banner + tail xterm so we don't double-dispose them here.
 function _teardownPreviousSession() {
+  _cancelReadonlyFallback();
   if (state.ws) { state.ws.close(); state.ws = null; }
   if (state.term) { state.term.dispose(); state.term = null; }
   state.viewerMode = false;
@@ -1125,6 +1126,14 @@ function openSession(id, opts = {}) {
         conv.innerHTML = '<div class="conv-waiting">Waiting for Claude to start…</div>';
       }
       applyReadOnly(state.chatUser || 'you');
+      // Watchdog: if nothing useful arrives in the readonly view within
+      // READONLY_FALLBACK_MS (no menu callout, no transcript content),
+      // flip back to the live xterm. Two scenarios hit this:
+      //   (a) Claude is just sitting at its prompt waiting for input
+      //       (no menu, no JSONL yet) — user needs to see the prompt.
+      //   (b) Something went wrong server-side and no frames will come.
+      // Either way the user shouldn't be trapped on the waiting pane.
+      _armReadonlyFallback(id);
     }
   }
 
@@ -1168,9 +1177,11 @@ function openSession(id, opts = {}) {
         applyReadOnly(msg.owner);
       } else if (msg.t === 'transcript-init') {
         state.transcriptMessages = msg.messages || [];
+        if (state.transcriptMessages.length) _cancelReadonlyFallback();
         renderTranscriptMessages(state.transcriptMessages);
       } else if (msg.t === 'transcript-delta') {
         const newMsgs = msg.messages || [];
+        if (newMsgs.length) _cancelReadonlyFallback();
         state.transcriptMessages.push(...newMsgs);
         appendTranscriptMessages(newMsgs);
         if (newMsgs.some((m) => m && m.role === 'assistant')) {
@@ -1595,12 +1606,50 @@ function _rescanPendingMenu() {
   for (const m of state.chatMessages) _updatePendingMenuFromMessage(m);
 }
 
+// Readonly-view safety net for new sessions. If 8 seconds pass without
+// a menu callout or any transcript content, flip back to the live xterm
+// so the user can see whatever Claude is showing (banner + interactive
+// prompt) and respond directly. Cancelled by any signal that the
+// readonly view actually has something useful: pending menu, transcript
+// content, or a manual flip via btn-preview-readonly.
+const READONLY_FALLBACK_MS = 8000;
+
+function _armReadonlyFallback(id) {
+  _cancelReadonlyFallback();
+  state._readonlyFallbackTimer = setTimeout(() => {
+    state._readonlyFallbackTimer = null;
+    // Bail if the user already navigated away, manually flipped out of
+    // readonly, or the readonly view has filled in with real content.
+    if (state.activeId !== id) return;
+    if (!state.previewAsViewer) return;
+    if (state.pendingMenu) return;
+    if (Array.isArray(state.transcriptMessages) && state.transcriptMessages.length) return;
+    console.log('[myco] readonly fallback: no menu/transcript after', READONLY_FALLBACK_MS, 'ms — flipping to xterm');
+    // Same effect as clicking btn-preview-readonly to turn it off.
+    state.previewAsViewer = false;
+    document.getElementById('btn-preview-readonly')?.classList.remove('active');
+    clearReadOnly();
+    showTerminalView();
+    updateChatButton();
+  }, READONLY_FALLBACK_MS);
+}
+
+function _cancelReadonlyFallback() {
+  if (state._readonlyFallbackTimer) {
+    clearTimeout(state._readonlyFallbackTimer);
+    state._readonlyFallbackTimer = null;
+  }
+}
+
 function _renderPendingMenuCallout() {
   const conv = document.getElementById('conv-content');
   if (!conv) return;
   const existing = document.getElementById('pending-menu-callout');
   if (existing) existing.remove();
   if (!state.pendingMenu) return;
+  // The readonly view now has actionable content — cancel the
+  // auto-flip-back-to-xterm watchdog.
+  _cancelReadonlyFallback();
 
   const menu = state.pendingMenu;
   const callout = document.createElement('div');
@@ -1742,6 +1791,9 @@ function sendChatMessage(text) {
 // allows input + chat + everything else; this is a pure presentation swap
 // so the owner can sanity-check what's visible to viewers.
 function toggleOwnerReadonlyPreview() {
+  // Manual toggle: the user has made a deliberate choice, so the
+  // auto-flip-back watchdog should never override it.
+  _cancelReadonlyFallback();
   state.previewAsViewer = !state.previewAsViewer;
   const btn = document.getElementById('btn-preview-readonly');
   if (btn) btn.classList.toggle('active', state.previewAsViewer);
