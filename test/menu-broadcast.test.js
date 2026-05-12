@@ -580,37 +580,39 @@ t('@myco "9" with no option 9 falls through to cancel+send', () => {
   assert.ok(writes.some((w) => w.includes('\x1b')), `expected an Esc write, got ${JSON.stringify(writes)}`);
 });
 
-t('@myco <prose> with pending menu cancels (Esc) then sends', () => {
+t('@myco <prose> with pending menu cancels (Esc) then sends', async () => {
   const { session, writes } = makeFakeSession(SAMPLE_MENU);
   ptyMod.handleChatMessage(session.sessionId, session, 'tester', '@myco do the next task please');
-  // Esc first, then a single bracketed-paste-wrapped write of the text + \r.
+  await sleep(150);  // wait for the deferred \r write
+  // Esc first, then a text write, then a separate \r write.
   assert.strictEqual(writes[0], '\x1b', `first write should be Esc, got ${JSON.stringify(writes[0])}`);
   const tail = writes.slice(1).join('');
   assert.ok(tail.includes('do the next task please'), `expected text body after Esc, got ${JSON.stringify(writes)}`);
-  assert.ok(tail.includes('\x1b[200~') && tail.includes('\x1b[201~'),
-    `expected bracketed-paste markers, got ${JSON.stringify(writes)}`);
-  assert.ok(tail.endsWith('\r'), `expected trailing \\r, got ${JSON.stringify(writes)}`);
+  assert.ok(writes.includes('\r'), `expected separate \\r write, got ${JSON.stringify(writes)}`);
   assert.strictEqual(session.pendingMenu, null);
 });
 
-t('@myco <prose> WITHOUT pending menu does NOT send an Esc', () => {
+t('@myco <prose> WITHOUT pending menu does NOT send an Esc', async () => {
   const { session, writes } = makeFakeSession(null);
   ptyMod.handleChatMessage(session.sessionId, session, 'tester', '@myco hello there');
-  // No Esc, single paste-wrapped write containing "hello there\r".
+  await sleep(150);
   for (const w of writes) {
     assert.notStrictEqual(w, '\x1b', `unexpected Esc write: ${JSON.stringify(writes)}`);
   }
-  assert.ok(writes.some((w) => w === '\x1b[200~hello there\x1b[201~\r'),
-    `expected paste-wrapped "hello there\\r" write, got ${JSON.stringify(writes)}`);
+  // Text + separate deferred \r — no bracketed-paste wrap.
+  assert.ok(writes.some((w) => w === 'hello there'),
+    `expected text write, got ${JSON.stringify(writes)}`);
+  assert.ok(writes.includes('\r'), `\\r not written: ${JSON.stringify(writes)}`);
 });
 
-t('@myco "1" WITHOUT pending menu is plain text (not a digit pick)', () => {
+t('@myco "1" WITHOUT pending menu is plain text (not a digit pick)', async () => {
   const { session, writes } = makeFakeSession(null);
   ptyMod.handleChatMessage(session.sessionId, session, 'tester', '@myco 1');
+  await sleep(150);
   // Without pendingMenu the shortcut shouldn't fire; the message goes
-  // through the paste-wrapped send path → "[200~1[201~\r" as one write.
-  assert.ok(writes.some((w) => w === '\x1b[200~1\x1b[201~\r'),
-    `expected paste-wrapped "1\\r" write, got ${JSON.stringify(writes)}`);
+  // through the split-write path → "1" then separate "\r" after 100ms.
+  assert.ok(writes.some((w) => w === '1'), `expected "1" text write, got ${JSON.stringify(writes)}`);
+  assert.ok(writes.includes('\r'), `\\r not written: ${JSON.stringify(writes)}`);
   for (const w of writes) {
     assert.notStrictEqual(w, '\x1b');
   }

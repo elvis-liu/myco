@@ -499,18 +499,29 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
       // (--permission-mode acceptEdits) and tool-approval gaps are handled
       // by the menu interceptor + per-session allow list.
       //
-      // Bracketed-paste wrap (\x1b[200~ … \x1b[201~) keeps the write atomic
-      // and tells Claude's TUI "this is one paste atom" so internal newlines
-      // pass through as multi-line input rather than being interpreted as
-      // submit-Enter mid-stream. Trailing \r outside the close marker reads
-      // as a discrete keystroke → reliable submit on both desktop and mobile.
-      // (The leading newline we used to chase via this path turned out to be
-      // Claude Code's own TUI input layout — physical-keyboard typing also
-      // lands a row below the > prompt — not something we cause.)
+      // Split the write into TWO PTY operations: the text first, then the
+      // trailing \r after a short delay. When everything ships as one
+      // chunk (or when wrapped in bracketed-paste markers), Claude Code's
+      // TUI input editor sometimes treats the bundle as
+      // multi-line-paste-with-Enter-inside-the-paste, leaving the prompt
+      // typed in the input but never submitted. Mobile is hit hardest
+      // because WS frames arrive bunched on slower networks; viewers
+      // (read-only) hit the same path. The 100ms gap lets the input
+      // buffer settle (cursor at end, no pending paste state) before the
+      // submit keystroke lands. session.alive is re-checked at the
+      // timeout boundary so a session that died between the two writes
+      // doesn't throw.
+      //
+      // The "leading newline" appearance we previously chased via paste-
+      // wrapping turned out to be Claude Code's OWN TUI input layout
+      // (physical-keyboard typing produces the same look), not something
+      // our PTY writes cause. So no leading-newline regression from this
+      // split.
       console.log(`[chat→pty] ${user}: ${input.substring(0, 80)}`);
-      const PASTE_START = '\x1b[200~';
-      const PASTE_END = '\x1b[201~';
-      session.write(PASTE_START + input + PASTE_END + '\r');
+      session.write(input);
+      setTimeout(() => {
+        if (session && session.alive) session.write('\r');
+      }, 100);
     }
     return;
   }
