@@ -150,49 +150,45 @@ async function handleDecide(ctx) {
     ctx.reply('Usage: `/decide <n>` — pick the option number from the most recent dialog. e.g. `/decide 1`.');
     return;
   }
-  const session = ctx.session;
-  if (!session || !session.alive) {
-    ctx.reply('(no live Claude session attached to this discussion — can\'t /decide.)');
-    return;
-  }
-  const pending = session.pendingMenu;
-  if (!pending) {
-    ctx.reply('(no Claude dialog is currently pending. /decide only works when Claude is showing a numbered menu.)');
-    return;
-  }
-  const matched = pending.options.find((o) => o.n === n);
-  if (!matched) {
-    const valid = pending.options.map((o) => o.n).join(', ');
-    ctx.reply(`(option ${n} isn't in the current dialog — valid options: ${valid})`);
-    return;
-  }
-  // Claude Code's menus accept digit + Enter to commit. We send the
-  // option number followed by \r; the menu disappears on the next render
-  // tick, which clears session.pendingMenu via MenuInterceptor's
-  // "cleared" transition.
-  session.write(String(n) + '\r');
-  session.pendingMenu = null;
-  // Mark the most recent menu chat broadcast as answered so the
-  // chat-inline picker stays disabled across page refreshes /
-  // reconnects (same as the menu-pick WS frame path in pty.js).
+  // PERSIST answered state on the latest menu chat message regardless
+  // of whether session.pendingMenu is still live — see handleMenuPick
+  // in pty.js for the rationale (post-restart clicks were no-op'ing
+  // because pendingMenu was in-memory only).
+  let stampedLabel = null;
   try {
     const store = sessionsMod.loadStore();
     const rec = store.sessions[ctx.sessionId];
     if (rec && Array.isArray(rec.chat)) {
       for (let i = rec.chat.length - 1; i >= 0; i--) {
         const m = rec.chat[i];
-        if (m && m.meta && m.meta.kind === 'menu') {
-          if (!m.meta.answered) {
-            m.meta.answered = true;
-            m.meta.pickedN = n;
-            sessionsMod.saveStore();
-          }
-          break;
-        }
+        if (!m || !m.meta || m.meta.kind !== 'menu') continue;
+        if (m.meta.answered) break;
+        const opts = (m.meta.menu && m.meta.menu.options) || [];
+        const match = opts.find((o) => o.n === n);
+        if (!match) break;
+        m.meta.answered = true;
+        m.meta.pickedN = n;
+        sessionsMod.saveStore();
+        stampedLabel = match.label || '';
+        break;
       }
     }
   } catch {}
-  ctx.reply(`✓ picked option ${n}: ${matched.label}`);
+
+  // PTY write only when the live session is actually waiting on this menu.
+  const session = ctx.session;
+  const pending = session && session.alive ? session.pendingMenu : null;
+  if (pending && Array.isArray(pending.options) && pending.options.some((o) => o.n === n)) {
+    // Claude Code's menus accept digit + Enter to commit.
+    session.write(String(n) + '\r');
+    session.pendingMenu = null;
+  } else if (!stampedLabel) {
+    // Nothing to do — no live menu AND no persisted menu carried option n.
+    ctx.reply(`(option ${n} isn't a valid choice on any recent dialog.)`);
+    return;
+  }
+  const label = stampedLabel || (pending && pending.options.find((o) => o.n === n) || {}).label || '';
+  ctx.reply(`✓ picked option ${n}${label ? ': ' + label : ''}`);
 }
 
 function validatePattern(pattern) {

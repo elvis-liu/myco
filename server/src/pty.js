@@ -264,29 +264,40 @@ function killSession(sessionId) {
 }
 
 // Handle a `{t:'menu-pick', n}` frame from the client — the inline-callout
-// alternative to typing `/decide N` in chat. Writes the digit + \r to the
-// PTY and clears pendingMenu, mirroring slashcmds.handleDecide but WITHOUT
-// any chat persistence or broadcast. Validates n against the menu's
-// current options so a stale callout can't poke a different dialog.
+// alternative to typing `/decide N` in chat.
 //
-// Also persists the answered state on the corresponding chat message
-// (the most recent meta.kind === 'menu' broadcast in rec.chat). That
-// way a page refresh / WS reconnect — which replays chat-history from
-// the server's persisted state — still renders the picker disabled
-// with the chosen option highlighted instead of resurrecting it as
-// clickable. Without this the client-only `_answered` flag was lost
-// across reconnects.
+// Two effects, independently gated:
+//
+//   (A) PERSIST the answered state on the corresponding chat message
+//       in rec.chat so a page refresh / WS reconnect / future
+//       container restart all keep the picker disabled. Gated only on
+//       (n in this menu's persisted options), so it works even when
+//       session.pendingMenu has been cleared (in-memory state lost
+//       on restart, or claude already moved past the dialog).
+//
+//   (B) PTY WRITE the digit + \r to send the pick into the live
+//       Claude session. Gated on (session alive AND session.pendingMenu
+//       still matches), to avoid injecting stray "N" keystrokes when
+//       claude is past the menu already (which would surface as
+//       "your message '3' is ambiguous" in a later turn).
+//
+// Previously the entire body of this function was gated on (B), so
+// post-restart clicks silently no-op'd on both surfaces and the user
+// saw the picker as still-clickable after a refresh.
 function handleMenuPick(sessionId, session, n) {
-  if (!session || !session.alive) return;
   if (!Number.isFinite(n) || n < 1 || n > 9) return;
+  _markLatestMenuChatAnswered(sessionId, n);
+  if (!session || !session.alive) return;
   const pending = session.pendingMenu;
   if (!pending || !Array.isArray(pending.options)) return;
   if (!pending.options.some((o) => o.n === n)) return;
   session.write(String(n) + '\r');
   session.pendingMenu = null;
-  _markLatestMenuChatAnswered(sessionId, n);
 }
 
+// Stamp answered + pickedN onto the most recent menu-broadcast chat
+// message. Validates n against the message's own persisted options
+// (defensive against stale clicks).
 function _markLatestMenuChatAnswered(sessionId, n) {
   if (!sessionId) return;
   try {
@@ -295,15 +306,19 @@ function _markLatestMenuChatAnswered(sessionId, n) {
     if (!rec || !Array.isArray(rec.chat)) return;
     for (let i = rec.chat.length - 1; i >= 0; i--) {
       const m = rec.chat[i];
-      if (m && m.meta && m.meta.kind === 'menu') {
-        if (m.meta.answered) return;     // already marked — nothing to do
-        m.meta.answered = true;
-        m.meta.pickedN = n;
-        sessionsMod.saveStore();
-        return;
-      }
+      if (!m || !m.meta || m.meta.kind !== 'menu') continue;
+      if (m.meta.answered) return;     // already marked — nothing to do
+      const opts = (m.meta.menu && m.meta.menu.options) || [];
+      if (!opts.some((o) => o.n === n)) return;   // n not valid for this menu
+      m.meta.answered = true;
+      m.meta.pickedN = n;
+      sessionsMod.saveStore();
+      console.log(`[menu-pick] ${sessionId} stamped answered=true pickedN=${n}`);
+      return;
     }
-  } catch {}
+  } catch (err) {
+    console.error(`[menu-pick] persist failed for ${sessionId}: ${err.message}`);
+  }
 }
 
 // Wire transcript messages from a session's JSONL file to a websocket.
