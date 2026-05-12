@@ -235,10 +235,4 @@ async function writeFile(absRoot, relPath, { content, expectedMtimeMs }) {
   return { mtimeMs: newSt.mtimeMs, size: newSt.size };
 }
 
-module.exports = {
-  safeJoin,
-  listDir,
-  readFile,
-  writeFile,
-  MAX_READ_BYTES,
-};
+module.exports = { safeJoin, listDir, readFile, writeFile };

@@ -100,12 +100,4 @@ async function fetchUser(accessToken) {
   return res.json();
 }
 
-module.exports = {
-  isConfigured,
-  publicOrigin,
-  callbackUrl,
-  startUrl,
-  exchangeCode,
-  fetchUser,
-  SCOPES,
-};
+module.exports = { isConfigured, startUrl, exchangeCode, fetchUser };

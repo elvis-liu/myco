@@ -167,12 +167,14 @@ test_conv_view_js() {
 test_at_myco_chat_handler() {
   grep -q '@myco' server/src/pty.js && pass "@myco handler" || fail "@myco handler"
   grep -q 'session.write' server/src/pty.js && pass "PTY write for @myco" || fail "PTY write"
-  # Regression: the @myco prompt MUST end with bare \r so Claude Code's input
-  # editor actually submits. We briefly sent '\n\r' to leave a trailing blank
-  # line, but the \n landed in the editor without firing submit on many runs.
-  grep -qF "input + '\\r'" server/src/pty.js \
-    && pass "@myco submits with bare \\r (no leading \\n)" \
-    || fail "@myco submits with bare \\r (no leading \\n)"
+  # Regression: the @myco prompt MUST be submitted with a bare \r so Claude
+  # Code's input editor fires submit. We split the text and the \r into two
+  # PTY writes (text first, then a deferred \r) — bundling them caused the
+  # editor to treat it as multi-line-paste-with-Enter-inside and never submit.
+  # See the chat→pty branch around session.write(input) + setTimeout → '\r'.
+  grep -qF "session.write('\\r')" server/src/pty.js \
+    && pass "@myco submits with bare \\r (deferred)" \
+    || fail "@myco submits with bare \\r (deferred)"
   grep -qF "input + '\\n\\r'" server/src/pty.js \
     && fail "@myco still uses '\\n\\r' (regression — should be bare \\r)" \
     || pass "@myco no longer uses '\\n\\r'"
@@ -476,14 +478,16 @@ test_chat_window() {
   grep -q "t: 'chat-history'" server/src/pty.js && pass "chat-history replay" || fail "chat-history replay"
   grep -q "msg.t === 'chat-history'" web/public/app.js && pass "chat-history client handler" || fail "chat-history client handler"
   grep -q 'chatpane-close' web/public/app.js && pass "chatpane close binding" || fail "chatpane close binding"
-  # Chatpane tabs: Discussion / Plan / Arch / Test
-  for tab in discussion plan arch test; do
-    grep -q "data-tab=\"$tab\"" web/public/index.html \
-      && pass "chatpane tab #$tab"                              \
-      || fail "chatpane tab #$tab"
+  # Plan / Arch / Test artifact views (promoted to top-level chrome buttons,
+  # commit 15187ea). Each has its own main-pane container and a chrome button.
+  for view in plan arch test; do
+    grep -q "id=\"${view}-wrap\"" web/public/index.html \
+      && pass "artifact view #${view}-wrap"                              \
+      || fail "artifact view #${view}-wrap"
+    grep -q "id=\"btn-${view}\"" web/public/index.html \
+      && pass "artifact chrome button #btn-${view}"                              \
+      || fail "artifact chrome button #btn-${view}"
   done
-  grep -q 'id="chatpane-tabs"' web/public/index.html && pass "#chatpane-tabs container" || fail "#chatpane-tabs container"
-  grep -q 'function setChatpaneTab'  web/public/app.js && pass "setChatpaneTab()"  || fail "setChatpaneTab()"
   grep -q 'function refreshArtifact' web/public/app.js && pass "refreshArtifact()" || fail "refreshArtifact()"
   grep -q "artifact/refresh"  server/src/index.js && pass "POST /artifact/refresh route" || fail "POST /artifact/refresh route"
   grep -q "artifact/run"      server/src/index.js && pass "POST /artifact/run route"     || fail "POST /artifact/run route"

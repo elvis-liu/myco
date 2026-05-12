@@ -6,12 +6,12 @@
 // on the client). Arch is freeform markdown. Each extractor is one API call
 // to Haiku 4.5 with a transcript tail in the user message.
 
-const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 
 const { callClaudeCli } = require('./claude-cli');
 const { projectsDir, encodeCwdForClaude, getChatHistory } = require('./sessions');
+const { readSimpleTurnsTail } = require('./transcript');
 
 const MAX_TRANSCRIPT_CHARS = 16000;   // ~ recent 40-80 assistant/user turns
 const MAX_CHAT_CHARS = 8000;          // discussion-panel messages (incl. non-@myco)
@@ -82,41 +82,24 @@ function getTranscriptPath(rec) {
   return path.join(projectsDir(), encodeCwdForClaude(rec.absCwd), `${rec.claudeSessionId}.jsonl`);
 }
 
-// Read the JSONL tail and project it down to "user: …" / "assistant: …" lines
-// so the model has a cleaner, smaller input than the raw JSON. We cap at
-// MAX_TRANSCRIPT_CHARS so a long session doesn't blow our token budget.
+// Read the JSONL tail as "user: …" / "assistant: …" lines for the prompt
+// (transcript.readSimpleTurnsTail handles the JSON projection). Per-line
+// text is capped at 800 chars and the total at MAX_TRANSCRIPT_CHARS so a
+// long session doesn't blow our token budget.
 async function readTranscriptTail(rec) {
   const p = getTranscriptPath(rec);
   if (!p) return null;
-  let raw;
-  try { raw = await fsp.readFile(p, 'utf8'); } catch { return null; }
-  const lines = raw.split('\n').filter(Boolean);
-  if (!lines.length) return null;
-
-  const turns = [];
+  const turns = await readSimpleTurnsTail(p, { maxLines: MAX_INPUT_LINES });
+  if (!turns.length) return null;
+  const out = [];
   let chars = 0;
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - MAX_INPUT_LINES); i--) {
-    let obj;
-    try { obj = JSON.parse(lines[i]); } catch { continue; }
-    if (obj.type !== 'user' && obj.type !== 'assistant') continue;
-    const msg = obj.message;
-    if (!msg) continue;
-    const c = msg.content;
-    let text = '';
-    if (typeof c === 'string') text = c;
-    else if (Array.isArray(c)) {
-      const t = c.find((x) => x && x.type === 'text' && x.text && x.text.trim());
-      if (t) text = t.text;
-    }
-    text = text.replace(/\s+/g, ' ').trim();
-    if (!text || text.startsWith('<')) continue;
-    const line = `${obj.type}: ${text.slice(0, 800)}`;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const line = `${turns[i].role}: ${turns[i].text.slice(0, 800)}`;
     if (chars + line.length > MAX_TRANSCRIPT_CHARS) break;
     chars += line.length + 1;
-    turns.push(line);
+    out.push(line);
   }
-  if (!turns.length) return null;
-  return turns.reverse().join('\n');
+  return out.length ? out.reverse().join('\n') : null;
 }
 
 // Read the discussion-panel chat from sessions.json. This is the source the
@@ -252,4 +235,6 @@ async function extractArtifact(rec, type) {
   return { items: buildItems(parsed), updatedAt: new Date().toISOString() };
 }
 
-module.exports = { extractArtifact, PROMPTS, readTranscriptTail, parseStringArray, parsePlanItems };
+// PROMPTS + readTranscriptTail are internal; parseStringArray + parsePlanItems
+// are exported only for the regression tests in test.sh.
+module.exports = { extractArtifact, parseStringArray, parsePlanItems };

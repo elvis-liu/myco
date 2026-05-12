@@ -12,7 +12,12 @@
 //   "Bash(*)"          — any Bash (use sparingly)
 //   "Bash(git:*)"      — alias for "Bash(git)" (Claude Code's "everything after" form)
 
-const { loadStore, saveStore } = require('./sessions');
+// Late-bound: pty.js → permissions.js is part of a require cycle through
+// sessions.js, so destructuring loadStore/saveStore at import time would
+// capture `undefined`. Always reach through `sessionsMod.fn` at call time.
+const sessionsMod = require('./sessions');
+const loadStore = (...a) => sessionsMod.loadStore(...a);
+const saveStore = (...a) => sessionsMod.saveStore(...a);
 
 // Conservative default — the user explicitly chose this baseline. Common
 // safe-by-design tools plus a handful of build / test / git Bash families.

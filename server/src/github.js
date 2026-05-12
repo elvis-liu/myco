@@ -54,19 +54,6 @@ function setToken(user, token) {
   persist();
 }
 
-function clearToken(user) {
-  if (!user) return false;
-  const store = load();
-  if (!(user in store)) return false;
-  delete store[user];
-  persist();
-  return true;
-}
-
-function hasToken(user) {
-  return !!getToken(user);
-}
-
 // Detect the GitHub owner/repo for an absolute cwd by reading its git
 // remote. Uses the git CLI; returns null if cwd isn't a repo or has no
 // github.com remote.
@@ -128,7 +115,4 @@ function createIssue({ token, owner, repo, title, body, labels }) {
   });
 }
 
-module.exports = {
-  getToken, setToken, clearToken, hasToken,
-  detectRepo, createIssue,
-};
+module.exports = { getToken, setToken, detectRepo, createIssue };

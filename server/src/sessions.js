@@ -264,11 +264,6 @@ function captureClaudeSessionId(sessionId, absCwd, spawnedAtMs) {
 
 // ─── public API ──────────────────────────────────────────────────────────────
 
-function ownerOf(id) {
-  const m = String(id || '').match(/^myco-([a-zA-Z0-9_-]+?)-[a-f0-9]+$/);
-  return m ? m[1] : null;
-}
-
 function sessionBelongsToUser(sessionId, user) {
   const rec = getSessionRecord(sessionId);
   if (!rec) return false;
@@ -519,7 +514,6 @@ Object.assign(module.exports, {
   ensureLiveSession,
   sessionBelongsToUser,
   deleteSession,
-  ownerOf,
   importExistingTranscripts,
   getChatHistory,
   appendChatMessage,

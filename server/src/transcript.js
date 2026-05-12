@@ -9,43 +9,24 @@ const sessionsMod = require('./sessions');
 function resolveTranscriptPath(sessionId) {
   const rec = sessionsMod.getSessionRecord(sessionId);
   if (!rec || !rec.absCwd) return null;
-  const absCwd = rec.absCwd;
-  const dir = path.join(sessionsMod.projectsDir(), sessionsMod.encodeCwdForClaude(absCwd));
+  const dir = path.join(sessionsMod.projectsDir(), sessionsMod.encodeCwdForClaude(rec.absCwd));
 
-  // If we have a cached claudeSessionId, find that specific transcript
+  // Prefer the specific resumable session's jsonl; fall back to the newest in
+  // the project dir when there's no cached claudeSessionId yet.
   if (rec.claudeSessionId) {
-    const specific = findTranscriptForSession(dir, rec.claudeSessionId);
+    const specific = findNewestJsonl(path.join(dir, rec.claudeSessionId));
     if (specific) return specific;
   }
-
-  // Fall back to newest
-  return findNewestTranscript(dir);
+  return findNewestJsonl(dir);
 }
 
-function findTranscriptForSession(dir, claudeSessionId) {
-  const sessionDir = path.join(dir, claudeSessionId);
-  if (!fs.existsSync(sessionDir)) return null;
-  let best = null;
-  function walk(d) {
-    let entries;
-    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      const full = path.join(d, e.name);
-      if (e.isDirectory()) { walk(full); continue; }
-      if (!e.name.endsWith('.jsonl')) continue;
-      let st;
-      try { st = fs.statSync(full); } catch { continue; }
-      if (!best || st.mtimeMs > best.mtimeMs) best = full;
-    }
-  }
-  walk(sessionDir);
-  return best;
-}
-
-function findNewestTranscript(dir) {
+// Walk `dir` recursively and return the full path of the .jsonl with the
+// largest mtime, or null if none exist / the dir is missing.
+function findNewestJsonl(dir) {
+  if (!fs.existsSync(dir)) return null;
   let best = null;
   let bestMtime = 0;
-  function walk(d) {
+  (function walk(d) {
     let entries;
     try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
@@ -56,8 +37,7 @@ function findNewestTranscript(dir) {
       try { st = fs.statSync(full); } catch { continue; }
       if (st.mtimeMs > bestMtime) { best = full; bestMtime = st.mtimeMs; }
     }
-  }
-  walk(dir);
+  })(dir);
   return best;
 }
 
@@ -66,15 +46,6 @@ function summarizeToolInput(name, input) {
   if (name === 'Read' || name === 'Edit' || name === 'Write') return input.file_path || '';
   if (name === 'Agent') return input.description || '';
   try { return JSON.stringify(input).substring(0, 150); } catch { return ''; }
-}
-
-function extractText(content) {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  const texts = content
-    .filter((b) => b && b.type === 'text' && b.text)
-    .map((b) => b.text);
-  return texts.join('\n');
 }
 
 function parseLine(line) {
@@ -199,6 +170,37 @@ async function readNewMessages(jsonlPath, fromByte) {
   }
 }
 
+// Lightweight projection of a JSONL file into ordered { role, text } items
+// where role is 'user' or 'assistant' and text is whitespace-collapsed plain
+// text. Returned oldest-first. Skips tool-result / scaffolding entries and
+// caps the lookback at `maxLines` (counted from the tail, not from the head).
+// Used by extractor.js + summarizer.js to feed model prompts; the heavier
+// parseLine above is for the read-only viewer's full message structure.
+async function readSimpleTurnsTail(jsonlPath, { maxLines = 300 } = {}) {
+  let raw;
+  try { raw = await fsp.readFile(jsonlPath, 'utf8'); } catch { return []; }
+  const lines = raw.split('\n').filter(Boolean);
+  const out = [];
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - maxLines); i--) {
+    let obj;
+    try { obj = JSON.parse(lines[i]); } catch { continue; }
+    if (obj.type !== 'user' && obj.type !== 'assistant') continue;
+    const msg = obj.message;
+    if (!msg) continue;
+    const c = msg.content;
+    let text = '';
+    if (typeof c === 'string') text = c;
+    else if (Array.isArray(c)) {
+      const t = c.find((x) => x && x.type === 'text' && x.text && x.text.trim());
+      if (t) text = t.text;
+    }
+    text = text.replace(/\s+/g, ' ').trim();
+    if (!text || text.startsWith('<')) continue;
+    out.push({ role: obj.type, text });
+  }
+  return out.reverse();
+}
+
 function watchTranscript(jsonlPath, onNewMessages) {
   let byteOffset = 0;
   let debounceTimer = null;
@@ -268,9 +270,4 @@ function watchTranscript(jsonlPath, onNewMessages) {
   };
 }
 
-module.exports = {
-  resolveTranscriptPath,
-  parseLine,
-  readNewMessages,
-  watchTranscript,
-};
+module.exports = { resolveTranscriptPath, readNewMessages, watchTranscript, readSimpleTurnsTail };

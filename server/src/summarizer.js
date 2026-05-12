@@ -4,6 +4,7 @@ const path = require('path');
 
 const { loadStore, saveStore, projectsDir, encodeCwdForClaude } = require('./sessions');
 const { callAnthropic } = require('./anthropic');
+const { readSimpleTurnsTail } = require('./transcript');
 
 const DEBOUNCE_MS = 30000;
 const MAX_INPUT_TURNS = 20;
@@ -16,32 +17,12 @@ const SYSTEM_PROMPT =
 // ─── Transcript reader ───────────────────────────────────────────────────────
 
 async function extractRecentTurns(jsonlPath) {
-  let raw;
-  try { raw = await fsp.readFile(jsonlPath, 'utf8'); } catch { return null; }
-  const lines = raw.split('\n').filter(Boolean);
-  if (lines.length < 4) return null;
-
-  const turns = [];
-  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 300); i--) {
-    let obj;
-    try { obj = JSON.parse(lines[i]); } catch { continue; }
-    if (obj.type !== 'user' && obj.type !== 'assistant') continue;
-    const msg = obj.message;
-    if (!msg) continue;
-    const c = msg.content;
-    let text = '';
-    if (typeof c === 'string') text = c;
-    else if (Array.isArray(c)) {
-      const t = c.find((x) => x && x.type === 'text' && x.text && x.text.trim());
-      if (t) text = t.text;
-    }
-    text = text.replace(/\s+/g, ' ').trim();
-    if (!text || text.startsWith('<')) continue;
-    turns.push(`${obj.type}: ${text}`);
-    if (turns.length >= MAX_INPUT_TURNS) break;
-  }
-  if (!turns.length) return null;
-  return turns.reverse().join('\n');
+  // transcript.readSimpleTurnsTail returns oldest→newest. We want at most
+  // MAX_INPUT_TURNS of the *most recent* turns, plus a 4-turn minimum so the
+  // summarizer doesn't fire on a fresh session with only a greeting.
+  const turns = await readSimpleTurnsTail(jsonlPath, { maxLines: 300 });
+  if (turns.length < 4) return null;
+  return turns.slice(-MAX_INPUT_TURNS).map((t) => `${t.role}: ${t.text}`).join('\n');
 }
 
 // ─── Summary watcher ─────────────────────────────────────────────────────────

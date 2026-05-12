@@ -152,76 +152,6 @@ function showShareError(msg) {
     `padding:20px;text-align:center;">${escHtml(msg)}</div>`;
 }
 
-function openShareViewer(id) {
-  state.activeId = id;
-  state.viewerMode = false;
-  state.transcriptMessages = [];
-  document.getElementById('no-session').hidden = true;
-
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  let reconnectDelay = 1000;
-  function connectShare() {
-    const tokParam = state.token ? `&token=${encodeURIComponent(state.token)}` : '';
-    const nameParam = state.shareName ? `&name=${encodeURIComponent(state.shareName)}` : '';
-    const ws = new WebSocket(
-      `${proto}://${location.host}/attach/${encodeURIComponent(id)}?s=${encodeURIComponent(state.shareToken)}${tokParam}${nameParam}`
-    );
-    state.ws = ws;
-    ws.addEventListener('open', () => {
-      reconnectDelay = 1000;
-      _flushOutboundChat();                      // any sends queued during reconnect
-    });
-    ws.addEventListener('message', (ev) => {
-      // Stale-WS guard: when the user switches sessions, the old WS gets
-      // .close()'d but messages already queued can still arrive on it.
-      // Without this check those messages — including 'chat' broadcasts
-      // from menu interceptors — would land in the freshly-cleared
-      // state.chatMessages for the NEW active session, making it look
-      // like questions are bleeding across sessions.
-      if (state.ws !== ws) return;
-      const msg = JSON.parse(ev.data);
-      if (msg.t === 'viewer-mode') {
-        state.viewerMode = true;
-        showConversationView();
-        applyReadOnly(msg.owner);
-      } else if (msg.t === 'transcript-init') {
-        state.transcriptMessages = msg.messages || [];
-        renderTranscriptMessages(state.transcriptMessages);
-      } else if (msg.t === 'transcript-delta') {
-        const newMsgs = msg.messages || [];
-        state.transcriptMessages.push(...newMsgs);
-        appendTranscriptMessages(newMsgs);
-        // Only hide on an actual assistant reply — the first transcript-delta
-        // after @myco is the user message Claude echoes back, which doesn't
-        // count as "response returned".
-        if (newMsgs.some((m) => m && m.role === 'assistant')) hideMycoWaiting();
-      } else if (msg.t === 'transcript-waiting') {
-        showTranscriptWaiting();
-      } else if (msg.t === 'output') {
-        if (!state.viewerMode) ensureXtermForFallback();
-        if (state.term) state.term.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
-      } else if (msg.t === 'pong') {
-        state.lastPongAt = Date.now();
-      } else if (msg.t === 'chat-history') {
-        applyChatHistory(msg.messages);
-      } else if (msg.t === 'chat') {
-        appendChatMessage(msg.message);
-      } else if (msg.t === 'exit') {
-        if (state.term) state.term.writeln('\r\n[session ended]');
-      } else if (msg.t === 'error') {
-        if (state.term) state.term.writeln('\r\n[error: ' + (msg.message || 'unknown') + ']');
-        state.activeId = null; // stop the reconnect loop on stale share
-      }
-    });
-    ws.addEventListener('close', () => {
-      if (state.activeId !== id) return;
-      setTimeout(() => { if (state.activeId === id) connectShare(); }, reconnectDelay);
-      reconnectDelay = Math.min(reconnectDelay * 1.5, 15000);
-    });
-  }
-  connectShare();
-}
-
 function ensureXtermForFallback() {
   if (state.term) return;
   document.getElementById('terminal-wrap').hidden = false;
@@ -271,12 +201,13 @@ const IS_TOUCH_DEVICE = (() => {
   } catch { return false; }
 })();
 
-// The main pane has six mutually-exclusive sub-panes: terminal-wrap,
-// conversation-wrap, files-wrap, plan-wrap, arch-wrap, test-wrap. Always
-// hide the others when switching; otherwise the panes stack and the
-// inactive one disappears behind / beside the active one.
+// The main pane has six mutually-exclusive sub-panes. Always hide the
+// others when switching; otherwise the panes stack and the inactive one
+// disappears behind / beside the active one.
+const MAIN_PANE_IDS = ['terminal-wrap', 'conversation-wrap', 'files-wrap', 'plan-wrap', 'arch-wrap', 'test-wrap'];
+
 function _hideMainPaneSiblings(keep) {
-  for (const id of ['terminal-wrap', 'conversation-wrap', 'files-wrap', 'plan-wrap', 'arch-wrap', 'test-wrap']) {
+  for (const id of MAIN_PANE_IDS) {
     if (id === keep) continue;
     const el = document.getElementById(id);
     if (el) el.hidden = true;
@@ -1275,13 +1206,7 @@ function setChatPane(visible) {
 function updateChatButton() {
   const btn = document.getElementById('btn-chat');
   if (!btn) return;
-  const hasContent =
-    !document.getElementById('terminal-wrap').hidden ||
-    !document.getElementById('conversation-wrap').hidden ||
-    !document.getElementById('files-wrap').hidden ||
-    !document.getElementById('plan-wrap').hidden ||
-    !document.getElementById('arch-wrap').hidden ||
-    !document.getElementById('test-wrap').hidden;
+  const hasContent = MAIN_PANE_IDS.some((id) => !document.getElementById(id)?.hidden);
   btn.hidden = !state.activeId || state.chatPaneVisible || !hasContent;
   // The files toggle is bound to the same active-session condition, but not
   // the chatpane visibility (it toggles within the main pane, independent
@@ -2403,8 +2328,7 @@ function showFilesView() {
   const termWrap = document.getElementById('terminal-wrap');
   const convWrap = document.getElementById('conversation-wrap');
   state.files.prevView = !termWrap.hidden ? 'terminal' : (!convWrap.hidden ? 'conversation' : null);
-  termWrap.hidden = true;
-  convWrap.hidden = true;
+  _hideMainPaneSiblings('files-wrap');
   document.getElementById('files-wrap').hidden = false;
   // Reset the inner panes — on mobile, opening a file hides the tree-pane
   // so the viewer can take the full width. Without this reset the next
