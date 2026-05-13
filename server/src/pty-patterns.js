@@ -52,6 +52,23 @@ const MENU_OPT_MARKER_RE = /(?<=^|\s)(?:\[(\d+)\]|\((\d+)\)|(\d+)[.)])(?!\d)/g;
 const MENU_OPT_LINE_RE =
   /(?<=^|\s)(?:\[(\d+)\]|\((\d+)\)|(\d+)[.)])(?!\d)/;
 
+// Wide-whitespace divider between an option label and unrelated TUI
+// chrome that happens to share the option's row. Claude's renderer pads
+// the right column with many spaces and then paints box-drawing frames
+// or a side panel; without a cut, that chrome gets glued onto the
+// option label after the label extractor's `\s+ → ' '` collapse runs.
+//
+// Example raw row (single line, wide terminal):
+//
+//   "[1] Single container          ┌────────────────────────┐"
+//                       ^^^^^^^^^^^^ — gap, cut here
+//   label after extract: "Single container"
+//
+// Threshold = 6+ consecutive whitespace chars. Real option labels are
+// compact ("Yes, and use auto mode", "Type something"); a 6-space run
+// inside one would be a TUI alignment artifact, not part of the label.
+const MENU_LABEL_GAP_RE = /\s{6,}/;
+
 // Multi-select option marker — claude code renders a checkbox after the
 // numbered prefix when the dialog is a multi-select. Each digit press
 // TOGGLES one checkbox; Enter submits the whole set. Examples observed:
@@ -493,6 +510,7 @@ const EFFORT_CHIP_RE =
 
 module.exports = {
   MENU_OPT_MARKER_RE,
+  MENU_LABEL_GAP_RE,
   MENU_CHECKBOX_RE,
   MENU_CURSOR_RE,
   MENU_MAX_OPTION_GAP_LINES,

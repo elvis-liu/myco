@@ -107,7 +107,7 @@ test_pty_patterns() {
     node -e "
       const p = require('./server/src/pty-patterns');
       const want = [
-        'MENU_OPT_MARKER_RE','MENU_QUESTION_TAIL_RE','MENU_QUESTION_VERB_RE',
+        'MENU_OPT_MARKER_RE','MENU_LABEL_GAP_RE','MENU_QUESTION_TAIL_RE','MENU_QUESTION_VERB_RE',
         'MENU_KIND_PERMISSION_RE','MENU_KIND_PLAN_RE','TRUST_DIALOG_RE',
         'PERMISSION_TOOL_RE','PERMISSION_INPUT_RE',
         'MODE_ACCEPT_RE','MODE_PLAN_RE','MODE_BYPASS_RE',
@@ -185,6 +185,40 @@ test_pty_patterns() {
       const perms = require('./server/src/permissions');
       const tgt = perms.extractPermissionTarget('  Web Search(\"weather\")\n  Claude wants to search the web for:\n  weather');
       if (!tgt || tgt.tool !== 'WebSearch') throw new Error('extractPermissionTarget did not normalise \"Web Search\" → \"WebSearch\": ' + JSON.stringify(tgt));
+      // MENU_LABEL_GAP_RE: 6+ consecutive whitespace chars cuts trailing
+      // TUI chrome (box-drawing frame from a side panel) off option labels.
+      // Regression: chat-pane picker showed labels like
+      //   '[1] Single container ┌────────────────────────────┐'
+      // because the wide alignment gap was collapsed by \\s+ → ' ' and
+      // the frame got glued onto the label.
+      const gap = p.MENU_LABEL_GAP_RE;
+      if (!gap.test('foo      bar')) throw new Error('MENU_LABEL_GAP_RE missed 6 spaces');
+      if (gap.test('foo     bar')) throw new Error('MENU_LABEL_GAP_RE matched only 5 spaces (should require >5)');
+      // End-to-end through MenuInterceptor with a fake headless buffer.
+      const { MenuInterceptor } = require('./server/src/menu-interceptor');
+      const optRows = [
+        'What would you like to do?',
+        '❯ 1. Single container          ┌────────────────────────────┐',
+        '  2. Multi container           │  status: ready             │',
+        '  3. Sidecar pattern           └────────────────────────────┘',
+      ];
+      const fakeHeadless = {
+        rows: optRows.length,
+        buffer: { active: {
+          viewportY: 0,
+          getLine: (y) => ({ translateToString: () => optRows[y] || '' }),
+        }},
+      };
+      const mi = new MenuInterceptor();
+      const ev = mi.detectChange(fakeHeadless);
+      if (!ev || ev.kind !== 'newMenu') throw new Error('MenuInterceptor failed to detect chrome-padded menu: ' + JSON.stringify(ev));
+      const labels = ev.menu.options.map((o) => o.label);
+      const expected = ['Single container', 'Multi container', 'Sidecar pattern'];
+      for (let i = 0; i < expected.length; i++) {
+        if (labels[i] !== expected[i]) {
+          throw new Error('Option ' + (i + 1) + ' label not trimmed at gap. got=' + JSON.stringify(labels[i]) + ' want=' + JSON.stringify(expected[i]));
+        }
+      }
     " && pass "pty-patterns: required constants + enriched matchers" \
       || fail "pty-patterns: required constants + enriched matchers"
   else

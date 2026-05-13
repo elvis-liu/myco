@@ -16,6 +16,7 @@
 // rationale + the exact dialog text that motivated each rule.
 const {
   MENU_OPT_MARKER_RE: OPT_MARKER_RE,
+  MENU_LABEL_GAP_RE,
   MENU_CHECKBOX_RE,
   MENU_CURSOR_RE,
   MENU_MAX_OPTION_GAP_LINES,
@@ -215,7 +216,11 @@ function extractOptionsOnLine(line, lineIdx) {
     const cur = markers[i];
     const next = markers[i + 1];
     const labelEnd = next ? next.start : line.length;
-    const label = line.slice(cur.end, labelEnd).replace(/\s+/g, ' ').trim();
+    // Cut at the first 6+-whitespace gap BEFORE the \s+ → ' ' collapse,
+    // so trailing TUI chrome (box-drawing frame from a neighboring panel
+    // that wide alignment glues onto this row) is dropped from the label.
+    const raw = line.slice(cur.end, labelEnd).split(MENU_LABEL_GAP_RE)[0];
+    const label = raw.replace(/\s+/g, ' ').trim();
     if (label.length < 2) continue;
     opts.push({ n: cur.n, label, lineIdx });
   }
