@@ -1286,6 +1286,12 @@ function openSession(id, opts = {}) {
       } else if (msg.t === 'chat-history') {
         applyChatHistory(msg.messages);
       } else if (msg.t === 'chat') {
+        try {
+          const m = msg.message || {};
+          const meta = m.meta || {};
+          const uuid = meta.transcriptUuid ? String(meta.transcriptUuid).slice(0, 8) : '-';
+          console.log('[ws-chat] user=' + (m.user || '?') + ' uuid=' + uuid + ' kind=' + (meta.kind || '-') + ' textLen=' + (m.text ? m.text.length : 0));
+        } catch {}
         appendChatMessage(msg.message);
       } else if (msg.t === 'claude-status') {
         // Live spinner-line readout from the server's headless terminal.
@@ -1701,7 +1707,26 @@ function appendChatMessage(message) {
       if (existing && existing.meta && existing.meta.transcriptUuid === uuid) {
         // Upgrade the _localOnly row to the persisted one in place so
         // subsequent renders use the canonical server-side metadata.
-        if (existing._localOnly && !message._localOnly) state.chatMessages[i] = message;
+        // Crucially, also RE-RENDER the DOM node — the existing row
+        // might have been an empty / truncated placeholder rendered
+        // before claude finished streaming (e.g. a partial
+        // transcript-delta or a synthetic "post-text-to-chat" row
+        // whose text was '' at first). Without the re-render the
+        // chat sidebar sticks at the stale placeholder text and the
+        // user only sees the full message after a refresh (which
+        // rebuilds via renderChatPane). Observed on mycobeta demo010
+        // 2026-05-13.
+        const upgraded = existing._localOnly && !message._localOnly;
+        const textChanged = (existing.text || '') !== (message.text || '');
+        if (upgraded || textChanged) {
+          state.chatMessages[i] = message;
+          const list = document.getElementById('chat-messages');
+          if (list && list.children[i]) {
+            const newEl = _htmlToNode(renderChatMessage(message, /*isActiveMenu*/ false));
+            if (newEl) list.children[i].replaceWith(newEl);
+          }
+        }
+        try { console.log('[chat-dedup] uuid=' + String(uuid).slice(0, 8) + ' upgraded=' + upgraded + ' textChanged=' + textChanged); } catch {}
         return;
       }
     }

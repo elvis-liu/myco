@@ -1036,6 +1036,19 @@ test_chat_window() {
   grep -qF '_bumpChatUnreadIfHidden' web/public/app.js \
     && pass "app.js: chat-unread badge bumps when pane is collapsed" \
     || fail "app.js: chat-unread badge missing — silent claude replies"
+  # Regression: appendChatMessage's transcriptUuid dedup used to just
+  # upgrade state and return — NEVER touching the DOM. If the existing
+  # row was a stale _localOnly placeholder with empty / truncated text,
+  # the chat sidebar stuck at the placeholder until a page refresh
+  # rebuilt via renderChatPane. Live re-render keeps state and DOM in
+  # sync. Observed mycobeta demo010 (2026-05-13): "Got your selections:
+  # Flask + MongoDB + …" never showed in the chat pane live.
+  grep -qF 'list.children[i].replaceWith(newEl)' web/public/app.js \
+    && pass "app.js: appendChatMessage re-renders DOM on uuid-dedup upgrade" \
+    || fail "app.js: uuid-dedup upgrade no longer re-renders — stale chat rows will persist until refresh"
+  grep -qF "[persist-chat-emit]" server/src/pty.js \
+    && pass "pty.js: persistAssistantTextToChat logs WS listener count" \
+    || fail "pty.js: [persist-chat-emit] diagnostic missing — can't diagnose silent-broadcast"
   grep -qF '_resetChatUnread' web/public/app.js \
     && pass "app.js: chat-unread badge resets on setChatPane(true)" \
     || fail "app.js: chat-unread reset missing"

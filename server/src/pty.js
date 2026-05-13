@@ -681,7 +681,18 @@ function persistAssistantTextToChat(sessionId, newMsgs) {
       meta: { transcriptUuid: m.uuid, fromTranscript: true },
     };
     sessionsMod.appendChatMessage(sessionId, reply);
-    if (session) session.emit('chat', reply);
+    let listenerCount = 0;
+    if (session) {
+      // EventEmitter.listenerCount tells us how many WS-attach handlers
+      // are currently subscribed. If this is 0, no client receives the
+      // live update — they'll only see the row after a chat-history
+      // replay on next attach. Surfaces the silent-broadcast case the
+      // user reported on mycobeta demo010 (2026-05-13): plan response
+      // showed in the transcript view but not the chat sidebar.
+      listenerCount = session.listenerCount('chat');
+      session.emit('chat', reply);
+    }
+    console.log(`[persist-chat-emit] ${sessionId} uuid=${String(m.uuid).slice(0, 8)} listeners=${listenerCount} textLen=${reply.text.length}`);
     mirrored++;
   }
   // Diagnostic — counts how many assistant-text messages were mirrored
