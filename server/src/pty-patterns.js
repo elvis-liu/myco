@@ -307,6 +307,46 @@ const TUI_KEY_HINT_RE =
 const WIZARD_TAB_BAR_RE =
   /←[^←→]*[☐☒✔✓◯●xX][^←→]*[☐☒✔✓◯●xX][^←→]*→/;
 
+// ───────────────────────────────────────────────────────────────────────
+// pty.handleMenuSubmit — arrow-navigating to the Submit row of a
+// multi-select dialog. We must count the cursor → Submit row distance
+// EXACTLY; an overshoot wraps in claude's TUI (cursor lands back on
+// option 1) and the trailing Enter resolves the wrong row.
+// ───────────────────────────────────────────────────────────────────────
+
+// Cursor row in a multi-select dialog. The cursor glyph `❯` alone is
+// not specific enough — under some redraw scenarios (e.g. plan-mode
+// wizard breadcrumb with its own `❯` step pointer, or claude's TUI
+// re-painting over a previous dialog without fully clearing the alt-
+// screen) more than one `❯` is on the visible viewport, and the
+// "first occurrence" heuristic latches onto whichever is highest, NOT
+// onto the active option row. That inflates the cursor→Submit distance
+// and the paced down-arrow burst overshoots.
+//
+// Anchor on what's distinctive about a multi-select OPTION row: it
+// carries a `[ ]`/`[x]` checkbox after the cursor. The checkbox glyph
+// class mirrors MENU_CHECKBOX_RE so a themed/CJK build that swaps in
+// `[✔]` or `[●]` still matches.
+const MULTI_SELECT_CURSOR_RE =
+  /❯[^[\]]*\[\s*[xX✓✔●▪◉█* ]?\s*\]/;
+
+// Submit row in a multi-select dialog. Tight anchor: the LINE must
+// contain ONLY the submit-action label (with whitespace padding on
+// either side). The old `\b(submit|done|…)\b\s*$/` shape also matched
+// footer hint text like "Tab/Arrow keys to navigate · Enter to submit"
+// — which ends in "submit" and gets the "last match wins" prize,
+// pushing submitRow PAST the real Submit row by several lines. The
+// nav burst then overshoots and the cursor wraps.
+//
+// `done`/`continue`/`finish`/`ok` kept for variants we haven't seen
+// claude render yet but that Ink's SelectInput patterns sometimes
+// produce. If a future build packs Submit next to a separator
+// ("Submit │ Cancel"), this regex will NEED to be widened —
+// intentionally not preemptively done so we don't reintroduce the
+// footer-text false-positive.
+const SUBMIT_ROW_RE =
+  /^\s*(?:submit|done|continue|finish|ok)\s*$/i;
+
 module.exports = {
   MENU_OPT_MARKER_RE,
   MENU_CHECKBOX_RE,
@@ -329,4 +369,6 @@ module.exports = {
   LIMIT_WARNING_RE,
   TUI_KEY_HINT_RE,
   WIZARD_TAB_BAR_RE,
+  MULTI_SELECT_CURSOR_RE,
+  SUBMIT_ROW_RE,
 };

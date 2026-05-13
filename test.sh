@@ -1366,9 +1366,24 @@ test_chat_window() {
   else
     fail "pty.js: handleMenuSubmit sends arrows as a burst — TUI may debounce them into one event"
   fi
-  grep -qF 'SUBMIT_LABEL_RE' server/src/pty.js \
-    && pass "pty.js: SUBMIT_LABEL_RE locates the Submit/Done row" \
-    || fail "pty.js: SUBMIT_LABEL_RE missing"
+  # Regex now lives in pty-patterns.js (per CLAUDE.md: all TUI-output
+  # regexes belong in one place). Pre-fix the cursor scan latched onto
+  # the FIRST `❯` in the viewport — which could be the wizard
+  # breadcrumb's step pointer, NOT the option cursor. Inflated
+  # cursor→Submit by 10+ rows and the paced down-arrow burst wrapped
+  # the cursor in claude's TUI.
+  grep -qF 'MULTI_SELECT_CURSOR_RE' server/src/pty-patterns.js \
+    && pass "pty-patterns.js: MULTI_SELECT_CURSOR_RE defined" \
+    || fail "pty-patterns.js: MULTI_SELECT_CURSOR_RE missing — Submit nav may latch onto stray ❯"
+  grep -qF 'MULTI_SELECT_CURSOR_RE' server/src/pty.js \
+    && pass "pty.js: handleMenuSubmit anchors cursor on a checkbox-bearing line" \
+    || fail "pty.js: handleMenuSubmit not using MULTI_SELECT_CURSOR_RE — stray ❯ will overshoot Submit"
+  grep -qF 'SUBMIT_ROW_RE' server/src/pty-patterns.js \
+    && pass "pty-patterns.js: SUBMIT_ROW_RE defined" \
+    || fail "pty-patterns.js: SUBMIT_ROW_RE missing"
+  grep -qF 'SUBMIT_ROW_RE' server/src/pty.js \
+    && pass "pty.js: SUBMIT_ROW_RE locates the Submit/Done row" \
+    || fail "pty.js: SUBMIT_ROW_RE missing — footer hint text may be mistaken for Submit"
   grep -qF 'function sendMenuToggle' web/public/app.js \
     && pass "app.js: sendMenuToggle defined" \
     || fail "app.js: sendMenuToggle missing"

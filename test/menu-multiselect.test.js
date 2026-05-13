@@ -16,6 +16,7 @@
 
 const assert = require('assert');
 const { MenuInterceptor, hashMenu } = require('../server/src/menu-interceptor');
+const { MULTI_SELECT_CURSOR_RE, SUBMIT_ROW_RE } = require('../server/src/pty-patterns');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -163,6 +164,54 @@ t('detectChange returns sameMenu when only checked state changes', () => {
     '  2. [x] Allowlist',
   ].join('\n')));
   assert.strictEqual(after.kind, 'sameMenu');
+});
+
+// ─── Submit nav patterns — _findSubmitNavCount inputs ─────────────────
+// The arrow-burst that drives "click Submit" is only safe when the
+// cursor finder lands on the active option row (not a stray ❯ in the
+// breadcrumb/redraw residue) and the Submit finder lands on the actual
+// Submit row (not a footer hint that happens to end in "submit"). Both
+// failures inflate the cursor→Submit row delta and overshoot, wrapping
+// the cursor in claude's TUI and resolving the wrong row.
+
+t('MULTI_SELECT_CURSOR_RE matches ❯ on a checkbox option line', () => {
+  assert.ok(MULTI_SELECT_CURSOR_RE.test('❯ 1. [✔] Security'));
+  assert.ok(MULTI_SELECT_CURSOR_RE.test('❯ 1. [ ] Observability'));
+  assert.ok(MULTI_SELECT_CURSOR_RE.test('❯ 3. [x] CI/CD'));
+});
+
+t('MULTI_SELECT_CURSOR_RE rejects a stray ❯ without a checkbox on the same line', () => {
+  // Plan-mode wizard breadcrumb places ❯ on the active step — the
+  // pre-fix code latched onto this and inflated cursor→Submit by 10+
+  // rows.
+  assert.ok(!MULTI_SELECT_CURSOR_RE.test('←  ☒ Feature ❯ ☐ Stack  →'));
+  // Single-select cursor row has ❯ but no [ ]/[x] checkbox.
+  assert.ok(!MULTI_SELECT_CURSOR_RE.test('❯ 1. Submit answers'));
+  // Help hint at the bottom of a dialog occasionally uses ❯ as a
+  // pointer; should not be mistaken for an option cursor.
+  assert.ok(!MULTI_SELECT_CURSOR_RE.test('❯ Use the arrow keys to navigate'));
+});
+
+t('SUBMIT_ROW_RE matches a bare Submit-row label only', () => {
+  assert.ok(SUBMIT_ROW_RE.test('Submit'));
+  assert.ok(SUBMIT_ROW_RE.test('     Submit'));
+  assert.ok(SUBMIT_ROW_RE.test('Submit   '));
+  // Alt labels claude has been observed cycling through for the
+  // final-action row across releases.
+  assert.ok(SUBMIT_ROW_RE.test('Done'));
+  assert.ok(SUBMIT_ROW_RE.test('  Continue  '));
+});
+
+t('SUBMIT_ROW_RE rejects footer hints that end in "submit"', () => {
+  // This was the LAST-match-wins bug: a footer hint sits BELOW the
+  // real Submit row, so the loose pattern stole submitRow and the nav
+  // burst overshot by however many lines separated them.
+  assert.ok(!SUBMIT_ROW_RE.test('Tab/Arrow keys to navigate · Enter to submit'));
+  assert.ok(!SUBMIT_ROW_RE.test('Press Enter to Submit'));
+  // The wizard's final-step option "Submit answers" must not be
+  // mistaken for the multi-select Submit row.
+  assert.ok(!SUBMIT_ROW_RE.test('1. Submit answers'));
+  assert.ok(!SUBMIT_ROW_RE.test(' ● Submit and continue'));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

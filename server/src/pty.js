@@ -9,7 +9,7 @@ const sessionsMod = require('./sessions');
 const { askAssistant, shouldAskAssistant, ASSISTANT_USER } = require('./btw');
 const { stripAnsi, tailLines } = require('./text-utils');
 const menuMod = require('./menu');
-const { MODE_ACCEPT_RE, MODE_PLAN_RE, SPINNER_RUNNING_RE, SPINNER_DURATION_RE } = require('./pty-patterns');
+const { MODE_ACCEPT_RE, MODE_PLAN_RE, SPINNER_RUNNING_RE, SPINNER_DURATION_RE, MULTI_SELECT_CURSOR_RE, SUBMIT_ROW_RE } = require('./pty-patterns');
 const slashcmds = require('./slashcmds');
 const transcriptMod = require('./transcript');
 const authMod = require('./auth');
@@ -383,21 +383,43 @@ function handleMenuToggle(sessionId, session, n, hash) {
 // If the headless lookup can't find either row, fall back to a small
 // fixed count (6) — much safer than the original 12, and still enough
 // for a dialog with 4-5 numbered options + Submit.
+//
+// Cursor + Submit recognition lives in pty-patterns.js
+// (MULTI_SELECT_CURSOR_RE / SUBMIT_ROW_RE) so claude code's TUI
+// shifts only need patching in one place. Both regexes are STRICT
+// on purpose:
+//
+//   - MULTI_SELECT_CURSOR_RE requires `❯` on a line that ALSO carries
+//     a `[ ]`/`[x]` checkbox. Earlier we just looked for the first
+//     `❯` anywhere in the viewport, which latched onto the breadcrumb
+//     tab bar's selection cursor when the wizard's step pointer was
+//     painted (e.g. "←  ☒ Feature ❯ ☐ Stack  →") — inflating cursor→
+//     Submit by 10+ rows and overshooting the burst.
+//
+//   - SUBMIT_ROW_RE requires the line to be ONLY "Submit" (with
+//     whitespace), so a footer hint like "Enter to submit" doesn't
+//     win the "last match" race and push submitRow past the real one.
+//
+// Falls back to the FIRST `❯` (legacy behavior) if no checkbox-cursor
+// line is found — covers exotic layouts where the cursor lands on a
+// non-checkbox row (e.g. on Submit itself, in which case navCount = 0
+// and we just hit Enter).
 const ARROW_DOWN = '\x1b[B';
-const SUBMIT_LABEL_RE = /\b(?:submit|done|continue|finish|ok)\b\s*$/i;
 function _findSubmitNavCount(session) {
   if (!session.headless || !session.headless.buffer) return 6;
   try {
     const buf = session.headless.buffer.active;
     const rows = session.headless.rows;
-    let cursorRow = -1, submitRow = -1;
+    let cursorRow = -1, fallbackCursorRow = -1, submitRow = -1;
     for (let i = 0; i < rows; i++) {
       const line = buf.getLine(buf.viewportY + i);
       if (!line) continue;
       const txt = line.translateToString(true);
-      if (cursorRow < 0 && txt.includes('❯')) cursorRow = i;
-      if (SUBMIT_LABEL_RE.test(txt)) submitRow = i;       // last-match wins
+      if (cursorRow < 0 && MULTI_SELECT_CURSOR_RE.test(txt)) cursorRow = i;
+      if (fallbackCursorRow < 0 && txt.includes('❯')) fallbackCursorRow = i;
+      if (SUBMIT_ROW_RE.test(txt)) submitRow = i;       // last-match wins
     }
+    if (cursorRow < 0) cursorRow = fallbackCursorRow;
     if (cursorRow < 0 || submitRow <= cursorRow) return 6;
     return Math.min(20, submitRow - cursorRow);
   } catch { return 6; }
