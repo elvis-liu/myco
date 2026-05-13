@@ -1314,7 +1314,7 @@ test_chat_window() {
   # row; stale picks drop the PTY write.
   if have_node; then
     if node test/menu-pick-race.test.js >/dev/null 2>&1; then
-      pass "test/menu-pick-race.test.js (8 cases)"
+      pass "test/menu-pick-race.test.js (11 cases)"
     else
       fail "test/menu-pick-race.test.js — re-run with 'node test/menu-pick-race.test.js' to see failures"
     fi
@@ -1426,6 +1426,32 @@ test_chat_window() {
   else
     pass "pty.js: handleMenuToggle has no CR (matches multi-select toggle semantics)"
   fi
+  # handleMenuPick must SKIP the trailing CR when the plan-mode
+  # interview wizard tab bar is visible — the wizard auto-commits on
+  # digit alone and the CR leaks to the next screen, landing on Cancel
+  # or skipping a question. Verified live on mycobeta demo010
+  # (2026-05-13): a 4-question wizard had its Q2 (Database) silently
+  # skipped because Q1's "\r" advanced past it, and the final
+  # question's "\r" landed on the Submit tab's Cancel → wizard
+  # returned "user rejected". Sentinel the gate function so a future
+  # refactor doesn't reintroduce the always-CR shape.
+  grep -qF '_isWizardActive(session)' server/src/pty.js \
+    && pass "pty.js: handleMenuPick gates trailing CR on _isWizardActive" \
+    || fail "pty.js: handleMenuPick no longer wizard-aware — extra CR will leak"
+  grep -qF 'function _isWizardActive' server/src/pty.js \
+    && pass "pty.js: _isWizardActive helper defined" \
+    || fail "pty.js: _isWizardActive missing — wizard gate broken"
+  # INTERACTION_RULES.md is the single-source-of-truth for claude code
+  # TUI ⇄ myco contract — every rule maps to a regex/handler + a test +
+  # a sentinel in this file. When you discover a new failure mode on
+  # mycobeta, add a numbered rule there so future-you (and the next
+  # AI working in this repo) doesn't repeat the diagnostic from scratch.
+  [ -f server/src/INTERACTION_RULES.md ] \
+    && pass "INTERACTION_RULES.md present (single source of truth for TUI rules)" \
+    || fail "server/src/INTERACTION_RULES.md missing — future rule changes risk regressing R-01..R-12 silently"
+  grep -qF 'R-01' server/src/INTERACTION_RULES.md 2>/dev/null \
+    && pass "INTERACTION_RULES.md uses stable R-NN numbering" \
+    || fail "INTERACTION_RULES.md: rule numbering scheme broken"
   # handleMenuToggle must flip opt.checked exactly ONCE per click.
   # _toggleMenuChatCheckbox mutates the persisted record (which shares
   # the same object reference as pending.options[i] because

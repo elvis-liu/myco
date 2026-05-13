@@ -213,6 +213,85 @@ t('toggle: two clicks on the same option return to initial state', () => {
   assert.deepStrictEqual(session.writes, ['1', '1'], 'PTY received two bare "1"s');
 });
 
+// ─── wizard-aware pick: drop trailing CR when tab bar is on screen ─────
+// Single-select picks add `\r` after the digit so a normal SelectInput
+// dialog (trust prompt, permission prompt, plan-confirm) gets the
+// commit keystroke. The plan-mode interview wizard auto-commits +
+// auto-advances on digit alone, so the trailing CR leaks to the next
+// screen and triggers whatever sits under the default cursor —
+// observed live on mycobeta demo010 (2026-05-13): Q1 `"2\r"` skipped
+// Q2 entirely, and the final question's `"3\r"` landed on the Submit
+// tab's Cancel and rejected the wizard. Fix: detect WIZARD_TAB_BAR_RE
+// in the headless and send digit only when it's present.
+
+function fakeHeadlessWithLines(lines) {
+  return {
+    rows: lines.length,
+    buffer: {
+      active: {
+        viewportY: 0,
+        getLine: (y) => ({ translateToString: () => lines[y] || '' }),
+      },
+    },
+  };
+}
+
+t('pick: NO trailing CR when the wizard tab bar is visible', () => {
+  const sid = 'sess-wizard-pick-1';
+  const opts = [{ n: 1, label: 'FastAPI' }, { n: 2, label: 'Flask' }, { n: 3, label: 'Django' }];
+  const menu = { hash: 'h_fw', question: 'Which web framework?', options: opts, kind: 'plan' };
+  seedStore(sid, [menu]);
+  const session = makeMockSession();
+  session.pendingMenu = menu;
+  // Plan-mode wizard tab bar somewhere in the viewport — the gate.
+  session.headless = fakeHeadlessWithLines([
+    '───────────────────────────────────────',
+    '←  ☐ Framework  ☐ Database  ☐ Auth  ☐ Deployment  ✔ Submit  →',
+    '',
+    'Which web framework should we use for the new API?',
+    '',
+    '❯ 1. FastAPI',
+    '  2. Flask',
+    '  3. Django',
+  ]);
+  ptyMod.handleMenuPick(sid, session, 2, 'h_fw');
+  assert.deepStrictEqual(session.writes, ['2'], 'wizard pick should be bare digit, no CR');
+});
+
+t('pick: WITH trailing CR when no wizard tab bar (trust/permission dialogs)', () => {
+  const sid = 'sess-wizard-pick-2';
+  const opts = [{ n: 1, label: 'Yes' }, { n: 2, label: 'No' }];
+  const menu = { hash: 'h_perm', question: 'Allow Bash command?', options: opts, kind: 'permission' };
+  seedStore(sid, [menu]);
+  const session = makeMockSession();
+  session.pendingMenu = menu;
+  // No tab-bar line — Ink's stock SelectInput needs Enter to commit.
+  session.headless = fakeHeadlessWithLines([
+    'Allow Bash command?',
+    '> npm test',
+    '❯ 1. Yes',
+    '  2. No, suggest a different approach',
+  ]);
+  ptyMod.handleMenuPick(sid, session, 1, 'h_perm');
+  assert.deepStrictEqual(session.writes, ['1\r'], 'non-wizard pick keeps the commit CR');
+});
+
+t('pick: missing headless safely falls back to digit + CR', () => {
+  // Defensive: if _isWizardActive can't read the headless (no session.
+  // headless, throw, etc.), we should treat it as not-wizard so the
+  // pick still commits via CR. Regression guard against a future
+  // refactor that propagates a "wizard detection threw" exception.
+  const sid = 'sess-wizard-pick-3';
+  const opts = [{ n: 1, label: 'A' }];
+  const menu = { hash: 'h_def', question: 'Q?', options: opts, kind: 'plan' };
+  seedStore(sid, [menu]);
+  const session = makeMockSession();
+  session.pendingMenu = menu;
+  // No headless attached.
+  ptyMod.handleMenuPick(sid, session, 1, 'h_def');
+  assert.deepStrictEqual(session.writes, ['1\r']);
+});
+
 t('toggle: pending.options and the persisted row share the same object reference', () => {
   // Invariant the double-flip bug relied on (and which the fix relies
   // on too — only one of pending vs persisted does the flip). If a

@@ -14,6 +14,7 @@ const {
   SPINNER_RUNNING_RE, SPINNER_DURATION_RE,
   MULTI_SELECT_CURSOR_RE, SUBMIT_ROW_RE, MENU_OPT_LINE_RE,
   STATUS_TOKEN_TRAILER_RE, STATUS_INTERRUPT_RE, EFFORT_CHIP_RE,
+  WIZARD_TAB_BAR_RE,
 } = require('./pty-patterns');
 const slashcmds = require('./slashcmds');
 const transcriptMod = require('./transcript');
@@ -409,8 +410,48 @@ function handleMenuPick(sessionId, session, n, hash) {
     return;
   }
   if (!pending.options.some((o) => o.n === n)) return;
-  session.write(String(n) + '\r');
+  // Plan-mode interview wizard auto-advances on a bare digit — the
+  // digit selects + commits + moves to the next question in one event.
+  // Sending `digit + "\r"` was harmless on the FIRST screen (the CR
+  // was consumed as the commit), but the WIZARD ALREADY ADVANCED on
+  // the digit alone, so the trailing CR landed on the NEXT screen and
+  // pressed whatever sat under the default cursor. Symptoms observed
+  // on mycobeta demo010 (2026-05-13):
+  //
+  //   • Q1 (Framework) "2\r" → "2" picks Flask + advances to Q2.
+  //     "\r" then advanced past Q2 (Database) entirely — Q2 was never
+  //     broadcast to chat, breadcrumb showed it as ☐ unanswered.
+  //   • Q4 (Deployment) "3\r" → "3" picks Serverless + advances to
+  //     the Submit tab. "\r" landed on the Submit tab's default cursor
+  //     position (Cancel) → wizard returned "user rejected".
+  //
+  // Detection by WIZARD_TAB_BAR_RE in the viewport. Non-wizard dialogs
+  // (trust prompt, permission prompt, plan-confirm) all still need the
+  // CR — those don't auto-advance on digit alone.
+  const wizard = _isWizardActive(session);
+  const bytes = wizard ? String(n) : String(n) + '\r';
+  session.write(bytes);
+  console.log(`[menu-pick] ${sessionId} wrote ${JSON.stringify(bytes)} wizard=${wizard}`);
   session.pendingMenu = null;
+}
+
+// True if the plan-mode interview wizard's tab bar
+// (← ☒ Step ☐ Step … →) is somewhere in the visible viewport. Used to
+// gate the trailing-CR-on-pick fix: with the wizard, digit alone
+// auto-commits and advances; CR after lands on the next screen.
+function _isWizardActive(session) {
+  if (!session || !session.headless || !session.headless.buffer) return false;
+  try {
+    const buf = session.headless.buffer.active;
+    const rows = session.headless.rows;
+    for (let i = 0; i < rows; i++) {
+      const line = buf.getLine(buf.viewportY + i);
+      if (!line) continue;
+      const txt = line.translateToString(true);
+      if (WIZARD_TAB_BAR_RE.test(txt)) return true;
+    }
+  } catch {}
+  return false;
 }
 
 // Multi-select half of menu-pick: TOGGLE one checkbox without submitting.
