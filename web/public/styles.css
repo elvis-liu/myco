@@ -1912,12 +1912,39 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   -webkit-backdrop-filter: blur(10px);
 }
 /* slot 2 / 3 / 4 from the right (chat=0, files=1, then plan/arch/test).
-   Preview moves to slot 5 so the always-shown buttons stay contiguous. */
+   Preview moves to slot 5 so the always-shown buttons stay contiguous.
+   Transcript moves to slot 6 (leftmost) — it's a quick-jump to the
+   readonly viewer alongside the artifact tabs. */
 #btn-plan { right: calc(env(safe-area-inset-right, 0px) + 10px + 2 * (var(--chrome-btn-size) + 8px)); }
 #btn-arch { right: calc(env(safe-area-inset-right, 0px) + 10px + 3 * (var(--chrome-btn-size) + 8px)); }
 #btn-test { right: calc(env(safe-area-inset-right, 0px) + 10px + 4 * (var(--chrome-btn-size) + 8px)); }
 #btn-plan:active, #btn-arch:active, #btn-test:active { transform: scale(.92); }
 #btn-plan.active, #btn-arch.active, #btn-test.active { background: rgba(80, 120, 200, .35); }
+
+/* 📜 transcript — leftmost chrome slot (slot 6). Without `position:
+   fixed`, the bare <button> rendered as a block-level element on its
+   own row inside #terminal-pane, blowing out the layout. Same fixed
+   shape as the other chrome buttons. */
+#btn-transcript {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  right: calc(env(safe-area-inset-right, 0px) + 10px + 6 * (var(--chrome-btn-size) + 8px));
+  z-index: 50;
+  width: var(--chrome-btn-size); height: var(--chrome-btn-size);
+  padding: 0;
+  border-radius: 8px;
+  background: rgba(40, 40, 40, .85);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, .08);
+  font-size: .95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+#btn-transcript:active { transform: scale(.92); }
+#btn-transcript.active { background: rgba(80, 120, 200, .35); }
 
 /* Main-pane artifact view container. Fills the terminal-pane like
    #terminal-wrap / #conversation-wrap / #files-wrap do, with a small
