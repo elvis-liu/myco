@@ -1031,7 +1031,10 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   gap: 8px;
   padding: 6px 14px;
   border-top: 1px solid var(--border);
-  background: var(--surface-2);
+  /* Transparent so the strip blends with whatever surface it docks
+     to (sidebar = --surface) instead of forming a lighter band via
+     --surface-2. The border-top above is the only visual separator. */
+  background: transparent;
   font-size: .7rem;
   color: var(--muted);
   cursor: pointer;
@@ -2992,7 +2995,11 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   color: #8b949e;
   font-size: 0.85rem;
   border-top: 1px dashed #21262d;
-  background: rgba(22, 27, 34, 0.4);
+  /* Transparent so the strip inherits the chatpane surface instead
+     of painting a slightly-bluer dark band on top of it (the previous
+     rgba(22,27,34,.4) read as a distinct lighter band against the
+     #1a1a1a chatpane bg). The dashed top border is the only divider. */
+  background: transparent;
   overflow: hidden;
   white-space: nowrap;
   /* Tell the browser this strip is layout/paint-independent — glyph
