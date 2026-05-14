@@ -1684,7 +1684,7 @@ test_chat_window() {
   # _localOnly chat rows on the client never reached disk.
   if have_node; then
     if node test/persist-assistant-chat.test.js >/dev/null 2>&1; then
-      pass "test/persist-assistant-chat.test.js (6 cases)"
+      pass "test/persist-assistant-chat.test.js (7 cases)"
     else
       fail "test/persist-assistant-chat.test.js — re-run with 'node test/persist-assistant-chat.test.js' to see failures"
     fi

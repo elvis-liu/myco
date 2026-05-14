@@ -143,6 +143,46 @@ t('handles unknown sessionId gracefully (no throw, returns 0)', () => {
   assert.strictEqual(before, undefined);
 });
 
+// End-to-end: raw JSONL ExitPlanMode line → parseLine → persist → chat.
+// Regression: demo010 plan generated 2026-05-14T00:04 never showed up
+// in the chat pane because the plan markdown was inside an
+// ExitPlanMode tool_use, not a text block. The parser now lifts
+// .input.plan into assistant.text; this test pins the whole pipeline
+// so a future revert (in either parser or persist) red-flips here.
+t('ExitPlanMode jsonl line lands in chat via parseLine → persist', () => {
+  const { parseLine } = require('../server/src/transcript');
+  const sid = 'sess-pac-plan';
+  seed(sid);
+  const rawLine = JSON.stringify({
+    type: 'assistant',
+    uuid: 'plan-end-to-end-uuid',
+    timestamp: '2026-05-14T00:04:51.985Z',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_plan_e2e',
+          name: 'ExitPlanMode',
+          input: {
+            plan: '# /v2/orders — Cursor Pagination\n\n## Context\n\nKeyset query.',
+            planFilePath: '/root/.claude/plans/foo.md',
+          },
+        },
+      ],
+    },
+  });
+  const parsed = parseLine(rawLine);
+  assert.ok(parsed, 'parseLine returned null for ExitPlanMode line');
+  const added = persistAssistantTextToChat(sid, [parsed]);
+  assert.strictEqual(added, 1, 'plan-only assistant turn must mirror to chat');
+  const chat = chatOf(sid);
+  assert.strictEqual(chat.length, 1);
+  assert.ok(chat[0].text.includes('# /v2/orders — Cursor Pagination'),
+    'chat row missing plan markdown — got: ' + JSON.stringify(chat[0].text.slice(0, 200)));
+  assert.strictEqual(chat[0].meta.transcriptUuid, 'plan-end-to-end-uuid');
+});
+
 // The live pty.js implementation IS the contract — verify the source
 // file actually contains the helper and it's wired into the watcher
 // callback. If a future refactor removes either, this test red-flips.
