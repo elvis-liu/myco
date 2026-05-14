@@ -1391,18 +1391,23 @@ test_chat_window() {
   grep -qF "architecture.md" server/src/artifacts.js \
     && pass "artifacts: arch mirrors to architecture.md" \
     || fail "artifacts: arch mirrors to architecture.md"
-  grep -q "function readArchFromFile" server/src/artifacts.js \
-    && pass "artifacts: readArchFromFile helper" \
-    || fail "artifacts: readArchFromFile helper"
-  grep -q "function writeArchToFile" server/src/artifacts.js \
-    && pass "artifacts: writeArchToFile helper" \
-    || fail "artifacts: writeArchToFile helper"
-  grep -q "readArchFromFile(ctx.rec)" server/src/artifacts.js \
-    && pass "artifacts: GET arch reads from file first" \
-    || fail "artifacts: GET arch reads from file first"
-  grep -q "writeArchToFile(ctx.rec, artifact.markdown)" server/src/artifacts.js \
-    && pass "artifacts: refresh arch writes file" \
-    || fail "artifacts: refresh arch writes file"
+  # The arch-specific read/write helpers were generalised into
+  # readArtifactFromFile / writeArtifactToFile when plan + test gained
+  # the same _myco_/ mirror. Same regression intent (a code path that
+  # round-trips arch through disk) lives in those names now, plus the
+  # legacy fallback for the pre-_myco_ root-level architecture.md.
+  grep -q "function readArtifactFromFile" server/src/artifacts.js \
+    && pass "artifacts: readArtifactFromFile helper (covers arch)" \
+    || fail "artifacts: readArtifactFromFile helper missing"
+  grep -q "function writeArtifactToFile" server/src/artifacts.js \
+    && pass "artifacts: writeArtifactToFile helper (covers arch)" \
+    || fail "artifacts: writeArtifactToFile helper missing"
+  grep -q "readArtifactFromFile(ctx.rec, type)" server/src/artifacts.js \
+    && pass "artifacts: GET reads from _myco_/ file first" \
+    || fail "artifacts: GET does not consult _myco_/ on disk"
+  grep -q "function readLegacyArchFromFile" server/src/artifacts.js \
+    && pass "artifacts: legacy root-level architecture.md fallback preserved" \
+    || fail "artifacts: legacy arch fallback missing — old sessions will lose their arch on read"
   if have_node; then
     node -e "
       const s = require('./server/src/slashcmds');
