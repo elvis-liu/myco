@@ -44,6 +44,26 @@
   --safe-right: env(safe-area-inset-right, 0px);
 }
 
+/* Project-wide scrollbar style. One source of truth so every scrollable
+   surface (chat, transcript, xterm viewport, file tree, code viewer,
+   plan/test/arch artifact body, autocomplete dropdown, modal scrollers
+   — anything that grows past its container) renders the same thin 8px
+   semi-transparent thumb against a transparent track. Per-element
+   overrides are no longer needed; keep them harmless if present.
+   Firefox / Edge use `scrollbar-*` properties; Chromium / WebKit reads
+   the `::-webkit-scrollbar*` pseudos. Both branches present together. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 130, 145, .35) transparent;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(120, 130, 145, .35);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(150, 160, 175, .55); }
+
 html, body {
   height: 100%;
   background: var(--bg);
