@@ -180,6 +180,35 @@ function addPlanItem(ctx, layer) {
     rec.artifacts.plan.items.push(item);
     rec.artifacts.plan.updatedAt = item.addedAt;
     sessionsMod.saveStore();
+    // Two more things sessionsMod.saveStore alone misses:
+    //   1. Mirror to <project>/_myco_/plan.json — the GET /artifact
+    //      handler reads from this file FIRST and falls back to
+    //      rec.artifacts only when the file is absent. Without this
+    //      mirror, the next plan-tab open re-reads the file, ignores
+    //      the in-memory new item, and "the /todo silently does
+    //      nothing" from the user's perspective.
+    //   2. Emit state-update so any open Plan tab on any attached
+    //      client re-renders with the new item live — same pattern
+    //      the artifact mutation routes already use.
+    try {
+      const artifactsMod = require('./artifacts');
+      if (artifactsMod && artifactsMod.__test && typeof artifactsMod.__test.writeArtifactToFile === 'function') {
+        artifactsMod.__test.writeArtifactToFile(rec, 'plan', rec.artifacts.plan);
+      }
+    } catch (err) {
+      console.error(`[plan-item] write _myco_/plan.json failed: ${err.message}`);
+    }
+    try {
+      const ptyMod = require('./pty');
+      const session = ptyMod.getSession && ptyMod.getSession(sessionId);
+      if (session) {
+        session.emit('state-update', {
+          kind: 'artifact',
+          artifactType: 'plan',
+          artifact: rec.artifacts.plan,
+        });
+      }
+    } catch {}
   } catch (err) {
     ctx.reply(`(plan item failed to save: ${err.message})`);
     return;

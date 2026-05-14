@@ -357,6 +357,18 @@ test_best_practices_template() {
   else
     skip "test/best-practices-inject.test.js (no host node)"
   fi
+  # /td /fr /bug must mirror new plan items to _myco_/plan.json — the
+  # GET /artifact handler reads the on-disk file first and would
+  # otherwise silently drop the in-memory-only addition on next open.
+  if have_node; then
+    if node test/slash-todo-inject.test.js >/dev/null 2>&1; then
+      pass "test/slash-todo-inject.test.js (5 cases)"
+    else
+      fail "test/slash-todo-inject.test.js — re-run with 'node test/slash-todo-inject.test.js' to see failures"
+    fi
+  else
+    skip "test/slash-todo-inject.test.js (no host node)"
+  fi
 }
 
 test_conv_view_css() {
