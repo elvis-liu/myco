@@ -1163,6 +1163,10 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
      but below the floating chrome cluster (z:50) so files/plan/arch/test
      toggles remain clickable while chat is open. */
   z-index: 30;
+  /* Clip any descendant that spills horizontally — only #chat-messages
+     should ever produce a (vertical) scrollbar, and only when the chat
+     history actually exceeds the viewport. */
+  overflow: hidden;
 }
 @media (max-width: 900px) {
   /* On mobile screens the sidebar fills the pane — desktop's "see the
@@ -1465,7 +1469,7 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 #chatpane-close:active { transform: scale(.92); }
 
 .chat-empty {
-  padding: 18px 16px;
+  padding: 1px 0;
   font-size: .85rem;
   color: var(--muted);
   text-align: center;
@@ -1615,10 +1619,11 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 #chat-form {
   display: flex;
   align-items: flex-end;         /* keep Send pinned to bottom as textarea grows */
-  gap: 8px;
-  padding: 8px 10px calc(10px + var(--safe-bottom));
+  gap: 4px;
+  padding: 1px 0 calc(1px + var(--safe-bottom));
   border-top: 1px solid var(--border);
   position: relative;            /* anchor for #chat-autocomplete */
+  flex: 0 0 auto;                /* don't grow/shrink; natural height */
 }
 
 /* Slash-command + @-mention dropdown anchored above the chat input. */
@@ -1678,18 +1683,25 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   background: var(--surface-2);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
+  border-radius: 6px;
+  padding: 4px 8px;
   font: inherit;
   line-height: 1.4;
   min-width: 0;
-  /* multi-line: always show ~3 lines (min-height), grow with content via JS
-     up to max-height, then scroll. */
+  /* Single-line minimum; the JS auto-resize (autoResize() in app.js)
+     grows the height with content up to max-height, then a thin
+     scrollbar takes over for very long pastes. The earlier 5.2em
+     minimum baked in 3 empty lines of unused space. */
   resize: none;
   overflow-y: auto;
-  min-height: 5.2em;     /* ~3 lines at line-height:1.4 plus the 8px padding */
-  max-height: 200px;
+  min-height: 2em;       /* ~1 line at line-height:1.4 plus padding */
+  max-height: 160px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 130, 145, .35) transparent;
 }
+#chat-input::-webkit-scrollbar { width: 6px; }
+#chat-input::-webkit-scrollbar-track { background: transparent; }
+#chat-input::-webkit-scrollbar-thumb { background: rgba(120, 130, 145, .35); border-radius: 4px; }
 #chat-input:focus { outline: none; border-color: var(--accent); }
 #chat-input:disabled { opacity: .5; cursor: not-allowed; }
 #chat-send {
@@ -3022,11 +3034,11 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
      was an absolute overlay floating above #chat-form which still
      left enough visual ambiguity (overlapping chat content, rapid
      glyph repaints) for users to perceive movement. */
-  flex: 0 0 30px;
+  flex: 0 0 24px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 12px;
+  gap: 6px;
+  padding: 0;
   color: #8b949e;
   font-size: 0.85rem;
   border-top: 1px dashed #21262d;
