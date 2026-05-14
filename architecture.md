@@ -306,9 +306,16 @@ client at boot and cached on `state.bpTemplate`.
   `web/public/` dir, or edit the file directly. There's no
   per-session override yet — it's a single shared template across all
   sessions on a given myco deployment.
-- **Why not in CLAUDE.md**: CLAUDE.md is for project-specific
-  instructions claude auto-reads. The best-practices template is
-  generic + browseable UI surface, not an LLM-prompt directive.
+- **Also injected into each project's CLAUDE.md**: on every
+  `spawnSession` and `ensureLiveSession` (in `server/src/sessions.js`),
+  myco appends the template body into `<absCwd>/CLAUDE.md` wrapped in
+  sentinel comments — `<!-- myco-best-practices-start -->` … `<!--
+  myco-best-practices-end -->`. Idempotent (sentinel detection skips
+  repeat injection), preserves pre-existing CLAUDE.md content, and
+  preserves any hand-edits inside the block on re-spawn. This is what
+  makes claude actually follow the practices — claude auto-reads
+  CLAUDE.md at the project root on every (re)spawn, so the block lands
+  in the LLM context without the user having to reference it.
 
 ## Operational Notes
 

@@ -329,6 +329,34 @@ test_best_practices_template() {
   grep -qF 'bp-banner' web/public/styles.css \
     && pass "styles.css: .bp-banner styled (left accent + tinted background)" \
     || fail "styles.css: .bp-banner CSS missing — injected template won't render distinctly"
+  # Server-side: best-practices block is injected into every managed
+  # project's CLAUDE.md on spawn + on ensureLiveSession. Idempotent
+  # via sentinel pair.
+  grep -qF 'injectBestPracticesIntoClaudeMd' server/src/sessions.js \
+    && pass "sessions.js: injectBestPracticesIntoClaudeMd defined" \
+    || fail "sessions.js: helper missing"
+  if awk '/^async function spawnSession/,/^}$/' server/src/sessions.js | grep -q 'injectBestPracticesIntoClaudeMd'; then
+    pass "sessions.js: spawnSession injects best-practices into CLAUDE.md"
+  else
+    fail "sessions.js: spawnSession does NOT inject — new projects won't get the block"
+  fi
+  if awk '/^async function ensureLiveSession/,/^}$/' server/src/sessions.js | grep -q 'injectBestPracticesIntoClaudeMd'; then
+    pass "sessions.js: ensureLiveSession tops up CLAUDE.md on resume"
+  else
+    fail "sessions.js: ensureLiveSession does NOT top up — resumed sessions miss back-fill"
+  fi
+  grep -qF "BP_SENTINEL_START = '<!-- myco-best-practices-start -->'" server/src/sessions.js \
+    && pass "sessions.js: sentinel constant pinned (idempotent injection key)" \
+    || fail "sessions.js: sentinel constant changed — old blocks won't be detected"
+  if have_node; then
+    if node test/best-practices-inject.test.js >/dev/null 2>&1; then
+      pass "test/best-practices-inject.test.js (6 cases)"
+    else
+      fail "test/best-practices-inject.test.js — re-run with 'node test/best-practices-inject.test.js' to see failures"
+    fi
+  else
+    skip "test/best-practices-inject.test.js (no host node)"
+  fi
 }
 
 test_conv_view_css() {

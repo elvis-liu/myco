@@ -383,10 +383,69 @@ async function spawnSession(rawCwd, user = 'default', opts = {}) {
   const record = { id, user, cwd: toRel(absCwd, user), absCwd, claudeSessionId: null, createdAt };
   putSession(record);
 
+  // Inject the myco best-practices template into the project's CLAUDE.md
+  // BEFORE spawning claude so the new session reads them as part of its
+  // project instructions. Idempotent — uses a sentinel pair so repeat
+  // spawns don't duplicate, and a hand-edited section keeps the user's
+  // local changes (we never rewrite an existing sentinel block).
+  injectBestPracticesIntoClaudeMd(absCwd);
+
   const spawnedAt = Date.now();
   ptyMod.spawnClaude(id, { cwd: absCwd, cols, rows });
   captureClaudeSessionId(id, absCwd, spawnedAt);
   return { id, cwd: record.cwd };
+}
+
+// Best-practices block written into a project's CLAUDE.md. Wrapped in
+// sentinel comments so subsequent spawns (or `ensureLiveSession`) can
+// detect "already present" and no-op. The template body itself is read
+// from web/public/best-practices-template.md so the docs the UI banner
+// shows are byte-identical to what claude reads from CLAUDE.md.
+const BP_SENTINEL_START = '<!-- myco-best-practices-start -->';
+const BP_SENTINEL_END = '<!-- myco-best-practices-end -->';
+const BP_TEMPLATE_PATH = path.join(__dirname, '..', '..', 'web', 'public', 'best-practices-template.md');
+
+function _readBestPracticesTemplate() {
+  try {
+    const md = fs.readFileSync(BP_TEMPLATE_PATH, 'utf8').trim();
+    return md || null;
+  } catch (err) {
+    console.error(`[best-practices] template read failed (${BP_TEMPLATE_PATH}): ${err.message}`);
+    return null;
+  }
+}
+
+function injectBestPracticesIntoClaudeMd(absCwd) {
+  if (!absCwd) return;
+  const template = _readBestPracticesTemplate();
+  if (!template) return;
+
+  const claudeMdPath = path.join(absCwd, 'CLAUDE.md');
+  let existing = '';
+  try { existing = fs.readFileSync(claudeMdPath, 'utf8'); }
+  catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error(`[best-practices] read ${claudeMdPath} failed: ${err.message}`);
+      return;
+    }
+  }
+
+  // Idempotent: if the sentinel is already in the file, leave it alone
+  // — we don't want to overwrite a user-edited block, and re-adding
+  // an identical block on every spawn would be noise in git history.
+  if (existing.includes(BP_SENTINEL_START)) return;
+
+  const block = `${BP_SENTINEL_START}\n${template}\n${BP_SENTINEL_END}\n`;
+  const newContent = existing
+    ? existing.replace(/\s+$/, '') + '\n\n' + block
+    : block;
+
+  try {
+    fs.writeFileSync(claudeMdPath, newContent);
+    console.log(`[best-practices] injected into ${claudeMdPath}`);
+  } catch (err) {
+    console.error(`[best-practices] write ${claudeMdPath} failed: ${err.message}`);
+  }
 }
 
 async function ensureLiveSession(sessionId) {
@@ -418,6 +477,13 @@ async function ensureLiveSession(sessionId) {
 
   // Resume the last Claude session if we have an ID
   const resumeId = rec.claudeSessionId || null;
+
+  // Top up the project's CLAUDE.md before resume. Idempotent (no-op
+  // if the sentinel already exists). Catches the case where the
+  // project was set up before this feature shipped, or someone hand-
+  // deleted the block — claude reads CLAUDE.md on every (re)spawn so
+  // the resumed session picks up the fresh content.
+  injectBestPracticesIntoClaudeMd(rec.absCwd);
 
   console.log(`[ensureLive] spawning claude for ${sessionId} cwd=${rec.absCwd} resume=${resumeId || 'none'}`);
   return ptyMod.spawnClaude(sessionId, {
@@ -611,4 +677,7 @@ Object.assign(module.exports, {
   getRecentFileChatMessages,
   appendFileChatMessage,
   deleteFileChatMessage,
+  // best-practices injection — exposed for tests + manual back-fill
+  // tools. Idempotent via the sentinel block in the target CLAUDE.md.
+  injectBestPracticesIntoClaudeMd,
 });
