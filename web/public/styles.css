@@ -1171,7 +1171,14 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 
 /* ── chat pane (collaborator discussion + claude assistant) ────── */
 
-:root { --chatpane-w: 320px; }
+/* Default chat-pane width: half of the available main-pane area (i.e.
+   half of viewport minus the session-list sidebar), so the readonly
+   transcript on the left and the chat pane on the right open in a
+   50/50 split by default. The drag-handle (#chatpane-resize) overrides
+   this with a px value persisted in localStorage when the user resizes;
+   without a stored value, the calc() applies on each load and
+   auto-adjusts to viewport size. */
+:root { --chatpane-w: calc((100vw - var(--sidebar-w)) / 2); }
 
 /* Chat layout:
      desktop — a RIGHT sidebar (var(--chatpane-w) wide, resizable via

@@ -39,12 +39,12 @@ const state = {
   // Discussion state, scoped per active session. Cleared on switch.
   chatMessages: [],
   chatUser: null,
-  // Default false on all viewports — chat is a toggle-on view now, not
-  // a default-on sidebar. Earlier `window.innerWidth > 900` left the
-  // bit set to true on desktop boot, so the very first click on the
-  // 💬 icon computed `setChatPane(!true)` → setChatPane(false), which
-  // routes to showTerminalView() and the chat appears never to open.
-  chatPaneVisible: false,
+  // Default true on desktop — the chat pane is the primary interaction
+  // surface and the readonly transcript on the left needs to be visible
+  // alongside it (50/50 split via --chatpane-w on desktop). Mobile keeps
+  // it false because the chat pane fills the main pane on narrow widths
+  // and a default-on would cover the session list on first paint.
+  chatPaneVisible: typeof window !== 'undefined' && window.innerWidth > 900,
   shareMode: false, // kept for compat — no longer gates UI
   // Per-session file explorer state. Cleared when session changes.
   files: {
@@ -1250,16 +1250,20 @@ function openSession(id, opts = {}) {
     const conv = document.getElementById('conv-content');
     if (conv) conv.innerHTML = '<div class="conv-waiting">Connecting…</div>';
   } else {
+    // Build the xterm so the 👁 toggle has a target to flip back to,
+    // but land on the readonly transcript view by default. Combined
+    // with the default-on chat pane (state.chatPaneVisible = true on
+    // desktop boot), the user sees the structured transcript on the
+    // left and the chat on the right in a 50/50 split — both surfaces
+    // they actually drive interaction from.
     _initOwnerXterm();
-    // Newly-spawned sessions: prefer the structured-transcript pane over
-    // an empty xterm while Claude is initialising. The xterm is built
-    // anyway (so the readonly-preview toggle has somewhere to flip back
-    // to once Claude is ready), but it's hidden behind the conv pane.
-    // The old `startInReadonly` auto-switch to the conv pane was removed
-    // — interaction now happens in the chat pane (typing-dots indicator
-    // + debounced assistant-reply posting). The xterm stays mounted so
-    // the 👁 toggle has somewhere to flip back to.
+    showConversationView();
+    state.previewAsViewer = true;
+    document.getElementById('btn-preview-readonly')?.classList.add('active');
   }
+  // Open the chat pane alongside on desktop. setChatPane(true) is a
+  // no-op if it's already open.
+  if (window.innerWidth > 900) setChatPane(true);
 
   // websocket with auto-reconnect. `connect` is closure-bound to `id` and
   // `qs` so reconnect-after-close stays on this session; the `state.ws !==
