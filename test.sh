@@ -517,9 +517,9 @@ test_new_session_readonly() {
   else
     pass "app.js: _renderClaudeTyping is layout-neutral (no scroll-anchor needed)"
   fi
-  grep -Pzoq '\.claude-typing\s*\{[^}]*flex:\s*0\s+0\s+30px' web/public/styles.css \
-    && pass "css: .claude-typing reserves a permanent 30px flex slot" \
-    || fail "css: .claude-typing slot isn't a fixed 30px flex item — chat content will move on spinner toggles"
+  grep -Pzoq '\.claude-typing\s*\{[^}]*flex:\s*0\s+0\s+\d+px' web/public/styles.css \
+    && pass "css: .claude-typing reserves a fixed-px flex slot" \
+    || fail "css: .claude-typing slot isn't a fixed-px flex item — chat content will move on spinner toggles"
   grep -Pzoq '\.claude-typing\[hidden\]\s*\{[^}]*visibility:\s*hidden' web/public/styles.css \
     && pass "css: .claude-typing[hidden] uses visibility (slot stays reserved)" \
     || fail "css: .claude-typing[hidden] no longer uses visibility:hidden — slot will collapse and reflow chat"
@@ -678,10 +678,12 @@ test_new_session_readonly() {
     && fail "app.js: _renderClaudeTyping still calls scrollIntoView (yanks chat viewport on every tick)" \
     || pass "app.js: _renderClaudeTyping no longer auto-scrolls on tick"
   # Fixed slot height. Was `height: 30px` historically; the permanent-
-  # flex-slot design uses `flex: 0 0 30px` (same visual outcome, gives
-  # the flex parent an explicit basis that won't grow/shrink). Either
-  # spelling counts as "fixed".
-  if grep -qE 'flex:\s*0\s+0\s+30px|height:\s*30px' web/public/styles.css; then
+  # flex-slot design uses `flex: 0 0 <N>px` (same visual outcome, gives
+  # the flex parent an explicit basis that won't grow/shrink). The exact
+  # pixel value can drift (24, 28, 30 are all valid) — what matters is
+  # that the slot has a FIXED size so status updates don't reflow the
+  # chat. Loose regex accepts any integer-px value.
+  if grep -qE 'flex:\s*0\s+0\s+[0-9]+px|height:\s*[0-9]+px' web/public/styles.css; then
     pass "css: claude-typing has fixed slot dimensions (no reflow on status update)"
   else
     fail "css: claude-typing missing fixed height — status updates will reflow chat"
