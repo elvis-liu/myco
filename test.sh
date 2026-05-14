@@ -1208,7 +1208,7 @@ test_chat_window() {
   # through writeArtifactToFile.
   if have_node; then
     if node test/artifact-myco-dir.test.js >/dev/null 2>&1; then
-      pass "test/artifact-myco-dir.test.js (10 cases)"
+      pass "test/artifact-myco-dir.test.js (11 cases)"
     else
       fail "test/artifact-myco-dir.test.js — re-run with 'node test/artifact-myco-dir.test.js' to see failures"
     fi

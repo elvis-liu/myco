@@ -211,6 +211,17 @@ function emptyArtifact(type) {
   return { items: [], updatedAt: null };
 }
 
+// "Does this artifact carry real content worth mirroring to disk?"
+// Gates the backfill-on-first-read path so we don't litter a project
+// with empty _myco_/plan.json files just because a viewer flipped to
+// the Plan tab on a session that's never had any items.
+function _artifactHasContent(artifact) {
+  if (!artifact) return false;
+  if (Array.isArray(artifact.items) && artifact.items.length > 0) return true;
+  if (typeof artifact.markdown === 'string' && artifact.markdown.trim()) return true;
+  return false;
+}
+
 function persistArtifact(rec, type, artifact) {
   if (!rec.artifacts) rec.artifacts = {};
   rec.artifacts[type] = artifact;
@@ -272,7 +283,17 @@ function register(app, deps) {
         return res.json({ artifact: fromLegacy });
       }
     }
+    // Backfill path: file is absent but rec.artifacts already has
+    // content from a pre-_myco_ session (or a session that never
+    // mutated since the _myco_ deploy). Eagerly write it to
+    // <cwd>/_myco_/<type>.<ext> so the user sees the directory in
+    // the file explorer immediately AND can `git add _myco_/` to
+    // share with teammates. Without this, the dir only appears on
+    // the next mutation (refresh/check/vote/comment).
     const stored = ctx.rec.artifacts && ctx.rec.artifacts[type];
+    if (stored && _artifactHasContent(stored)) {
+      persistArtifact(ctx.rec, type, stored);
+    }
     res.json({ artifact: stored || emptyArtifact(type) });
   });
 

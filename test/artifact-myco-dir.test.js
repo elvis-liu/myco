@@ -123,6 +123,17 @@ t('writeMycoReadmeIfMissing writes once and never overwrites', () => {
   assert.strictEqual(second, 'CUSTOM README\n', 'must NOT overwrite user-customised README');
 });
 
+t('readArtifactFromFile returns null when _myco_/ dir does not exist', () => {
+  // Sanity: the dir-absent case is the precondition for the backfill path
+  // exercised by the GET handler. With the dir gone, the read returns null
+  // and the handler is expected to write `stored` to disk eagerly.
+  const rec = makeRec('j');
+  assert.strictEqual(__test.readArtifactFromFile(rec, 'plan'), null);
+  // After a write, the dir exists.
+  __test.writeArtifactToFile(rec, 'plan', { items: [{ id: 'x', text: 't' }], updatedAt: '2026-05-14T00:00:00Z' });
+  assert.ok(fs.existsSync(path.join(rec.absCwd, '_myco_', 'plan.json')));
+});
+
 t('rec without absCwd is a no-op (no crash)', () => {
   const rec = { id: 'no-cwd' };
   assert.strictEqual(__test.mycoDirPath(rec), null);
