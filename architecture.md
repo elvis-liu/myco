@@ -286,6 +286,30 @@ sequenceDiagram
 
 ---
 
+## Best-practices template
+
+The Arch tab in the web UI auto-injects a markdown banner of generic
+engineering best practices at the top of the pane. Four conventions
+are captured (refactor opportunistically, generate runnable tests
+with each change, scripts must be human-executable without an LLM,
+reuse existing test/build/deploy scripts). The full template lives at
+`web/public/best-practices-template.md` and is fetched once by the
+client at boot and cached on `state.bpTemplate`.
+
+- **Default**: ON. The banner is prepended whenever the Arch tab
+  renders.
+- **Toggle**: a checkbox labeled "Best practices" in the Arch
+  artifact header. Persisted per-browser in
+  `localStorage.myco_bp_enabled` (`'1'` = on, `'0'` = off).
+- **Customise per project**: replace the template by serving a
+  different `/best-practices-template.md` from the static
+  `web/public/` dir, or edit the file directly. There's no
+  per-session override yet — it's a single shared template across all
+  sessions on a given myco deployment.
+- **Why not in CLAUDE.md**: CLAUDE.md is for project-specific
+  instructions claude auto-reads. The best-practices template is
+  generic + browseable UI surface, not an LLM-prompt directive.
+
 ## Operational Notes
 
 - **Auth disabled by default.** When neither `MYCO_TOKEN` nor `MYCO_TOKENS` is set, every request is user `default`. Don't expose unauthenticated mycod to the public internet.

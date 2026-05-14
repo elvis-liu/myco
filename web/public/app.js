@@ -3172,12 +3172,24 @@ function renderArtifact(type, artifact) {
   if (!body) return;
   if (type === 'arch') {
     const md = artifact && artifact.markdown ? artifact.markdown.trim() : '';
-    if (!md) {
+    // Best-practices banner is prepended when the Arch-tab toggle is on
+    // (default ON, persisted in localStorage as 'myco_bp_enabled').
+    // Template text loaded once from /best-practices-template.md and
+    // cached on state.bpTemplate; the banner shows whatever was loaded.
+    const bpEnabled = (localStorage.getItem('myco_bp_enabled') || '1') === '1';
+    const bpMd = bpEnabled && state.bpTemplate ? state.bpTemplate : '';
+    const bpHtml = bpMd ? `<div class="bp-banner artifact-md">${renderMd ? renderMd(bpMd) : escHtml(bpMd)}</div>` : '';
+    if (!md && !bpHtml) {
       body.innerHTML = '<div class="artifact-empty">Nothing to show yet. The session may not have any architectural decisions in its recent activity.</div>';
       return;
     }
-    body.innerHTML = `<div class="artifact-md">${renderMd ? renderMd(md) : escHtml(md)}</div>` +
-      (artifact.updatedAt ? `<div class="artifact-updated">Updated ${escHtml(formatChatTs(artifact.updatedAt) || artifact.updatedAt)}</div>` : '');
+    const userMd = md
+      ? `<div class="artifact-md">${renderMd ? renderMd(md) : escHtml(md)}</div>`
+      : '<div class="artifact-empty">No per-project architecture notes yet. Click <strong>Refresh</strong> to extract them from the session.</div>';
+    const updated = artifact && artifact.updatedAt
+      ? `<div class="artifact-updated">Updated ${escHtml(formatChatTs(artifact.updatedAt) || artifact.updatedAt)}</div>`
+      : '';
+    body.innerHTML = bpHtml + userMd + updated;
     return;
   }
   // plan / test → checkbox list. Plan items also get vote button + comment thread.
@@ -4715,4 +4727,37 @@ document.addEventListener('DOMContentLoaded', () => {
   // wiring; the PAT side does.
   bindLoginUi();
   bootstrap();
+  bindBestPracticesToggle();
 });
+
+// Inject-best-practices toggle on the Arch tab. Default on; persisted
+// per-browser in localStorage (key: myco_bp_enabled). Template body is
+// fetched once from /best-practices-template.md and cached on
+// state.bpTemplate; subsequent Arch renders read from cache.
+function bindBestPracticesToggle() {
+  const toggle = document.getElementById('bp-toggle');
+  if (!toggle) return;
+  const enabled = (localStorage.getItem('myco_bp_enabled') || '1') === '1';
+  toggle.checked = enabled;
+  toggle.addEventListener('change', () => {
+    localStorage.setItem('myco_bp_enabled', toggle.checked ? '1' : '0');
+    // Re-render the Arch tab if it's the active artifact view.
+    if (state.artifactView && state.artifactView.active === 'arch') {
+      loadArtifact('arch').catch(() => {});
+    }
+  });
+  // Lazy-load the template once. Falls back silently on failure —
+  // toggle still works, banner just won't render. The fetch result is
+  // cached on state so subsequent Arch renders are synchronous.
+  if (!state.bpTemplate) {
+    fetch('/best-practices-template.md')
+      .then((r) => (r && r.ok ? r.text() : null))
+      .then((txt) => {
+        state.bpTemplate = txt || '';
+        if (state.artifactView && state.artifactView.active === 'arch') {
+          loadArtifact('arch').catch(() => {});
+        }
+      })
+      .catch(() => { state.bpTemplate = ''; });
+  }
+}

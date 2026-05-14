@@ -306,6 +306,31 @@ test_pwa_icon() {
   fi
 }
 
+test_best_practices_template() {
+  # Best-practices markdown template is auto-injected at the top of the
+  # Arch artifact pane (default ON, toggleable via the "Best practices"
+  # checkbox in the Arch tab header). Persisted per-browser in
+  # localStorage.myco_bp_enabled.
+  test -f web/public/best-practices-template.md \
+    && pass "web/public/best-practices-template.md exists" \
+    || fail "best-practices-template.md missing — Arch tab will render without the banner"
+  grep -qF 'id="bp-toggle"' web/public/index.html \
+    && pass "index.html: bp-toggle checkbox in arch-wrap header" \
+    || fail "index.html: bp-toggle checkbox missing — no UI to enable/disable injection"
+  grep -qF 'bindBestPracticesToggle' web/public/app.js \
+    && pass "app.js: bindBestPracticesToggle wires the checkbox + fetches template" \
+    || fail "app.js: bindBestPracticesToggle not wired"
+  grep -qF 'state.bpTemplate' web/public/app.js \
+    && pass "app.js: state.bpTemplate cache populated from /best-practices-template.md" \
+    || fail "app.js: template cache key state.bpTemplate missing"
+  grep -qF "localStorage.getItem('myco_bp_enabled')" web/public/app.js \
+    && pass "app.js: bp toggle persists in localStorage.myco_bp_enabled" \
+    || fail "app.js: bp toggle does not persist — refresh would reset to default"
+  grep -qF 'bp-banner' web/public/styles.css \
+    && pass "styles.css: .bp-banner styled (left accent + tinted background)" \
+    || fail "styles.css: .bp-banner CSS missing — injected template won't render distinctly"
+}
+
 test_conv_view_css() {
   grep -q 'conversation-wrap' web/public/styles.css && pass "conversation-wrap CSS" || fail "conversation-wrap CSS"
   grep -q 'conv-msg-user' web/public/styles.css && pass "user message CSS" || fail "user message CSS"
@@ -998,6 +1023,7 @@ run_static_checks() {
   test_pty_patterns
   test_cache_busters
   test_pwa_icon
+  test_best_practices_template
   test_conv_view_css
   test_conv_view_js
   test_at_myco_chat_handler

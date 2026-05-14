@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="/hetu.jpg?v=1" />
   <title>myco</title>
   <link rel="stylesheet" href="/vendor/xterm-css/xterm.css" />
-  <link rel="stylesheet" href="styles.css?v=128" />
+  <link rel="stylesheet" href="styles.css?v=129" />
   <link rel="stylesheet" href="/vendor/github-dark.min.css" />
 </head>
 <body>
@@ -106,6 +106,10 @@
       <div id="arch-wrap" class="artifact-main-view" hidden>
         <div class="artifact-header">
           <span class="artifact-title">Arch — guidelines and decisions</span>
+          <label class="artifact-toggle-bp" title="Inject the myco best-practices template at the top of this pane">
+            <input type="checkbox" id="bp-toggle" checked />
+            <span>Best practices</span>
+          </label>
           <button class="artifact-refresh" data-type="arch" title="Re-extract from the latest session activity">↻ Refresh</button>
         </div>
         <div class="artifact-body" id="artifact-body-arch">
@@ -212,6 +216,6 @@
   <script src="/vendor/mermaid.min.js"></script>
   <script>if (typeof mermaid !== 'undefined') mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
   <script src="keyboard.js?v=7"></script>
-  <script src="app.js?v=176"></script>
+  <script src="app.js?v=177"></script>
 </body>
 </html>

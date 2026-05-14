@@ -1323,6 +1323,32 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .artifact-refresh:hover { background: rgba(80, 120, 200, .35); }
 .artifact-refresh:active { transform: scale(.95); }
 .artifact-refresh:disabled { opacity: .5; cursor: progress; }
+/* Inline checkbox for toggling the best-practices template injection
+   in the Arch tab. Sits between the title (flex:1) and the refresh
+   button, matches the same dark-on-dark mini-control aesthetic. */
+.artifact-toggle-bp {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: .76rem;
+  color: var(--muted);
+  user-select: none;
+}
+.artifact-toggle-bp input { accent-color: var(--accent); cursor: pointer; }
+.artifact-toggle-bp:hover { color: var(--text); }
+/* Best-practices banner injected at the top of the Arch body when the
+   toggle is on. Distinct background to signal it's a template, not
+   per-project content. */
+.bp-banner {
+  background: rgba(76, 175, 130, .06);
+  border-left: 3px solid rgba(76, 175, 130, .35);
+  padding: 8px 14px;
+  margin: 0 0 12px 0;
+  border-radius: 4px;
+}
+.bp-banner > :first-child { margin-top: 0; }
+.bp-banner > :last-child { margin-bottom: 0; }
 
 /* Scrollable body for the extracted artifact content. */
 .artifact-body {
