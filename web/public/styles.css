@@ -1691,6 +1691,34 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   max-width: 85%;
 }
 
+/* @<user> chat-only mentions. The card is always badged so the sender +
+   other viewers see who the mention was addressed to; .chat-msg-mention-me
+   adds an attention-grabbing accent for the recipient specifically. */
+.chat-msg.chat-msg-mention .chat-text {
+  border-left: 2px solid rgba(220, 180, 90, .6);
+  background: rgba(220, 180, 90, .05);
+  padding: 6px 10px;
+  border-radius: 4px;
+}
+.chat-msg.chat-msg-mention-me .chat-text {
+  border-left: 3px solid rgba(255, 200, 90, .95);
+  background: rgba(255, 200, 90, .14);
+  box-shadow: 0 0 0 1px rgba(255, 200, 90, .35), 0 0 12px rgba(255, 200, 90, .25);
+  animation: chat-mention-me-pulse 1.6s ease-out 2;
+}
+@keyframes chat-mention-me-pulse {
+  0%   { box-shadow: 0 0 0 1px rgba(255, 200, 90, .65), 0 0 24px rgba(255, 200, 90, .55); }
+  100% { box-shadow: 0 0 0 1px rgba(255, 200, 90, .35), 0 0 12px rgba(255, 200, 90, .25); }
+}
+
+/* When the chat pane is collapsed and a mention-to-me has bumped the
+   unread counter, swap the #btn-chat badge accent so the user can tell
+   "someone addressed me" apart from generic activity. */
+#btn-chat.has-mention[data-unread]::after {
+  background: rgba(255, 200, 90, .95);
+  color: #2a1f00;
+}
+
 #chat-form {
   display: flex;
   align-items: flex-end;         /* keep Send pinned to bottom as textarea grows */

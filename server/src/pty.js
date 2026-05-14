@@ -60,6 +60,20 @@ function _isKnownChatUser(word) {
   return false;
 }
 
+// Return the canonical username if `text` starts with `@<known-user>`
+// (optionally followed by a body). Used by handleChatMessage to short-
+// circuit chat-only mentions so they're stamped + persisted without
+// being sent to the PTY.
+//
+// Matches `@kkrazy`, `@kkrazy hi there`, `@kkrazy, …` (trailing punct OK).
+// Does NOT match `@myco` / `@claude` / any other non-username @<word> —
+// those keep routing to the PTY for backwards-compat power-user habits.
+function _detectMentionTarget(text) {
+  const m = String(text || '').match(/^@([A-Za-z][\w-]{0,30})\b/);
+  if (!m) return null;
+  return _isKnownChatUser(m[1]) ? m[1] : null;
+}
+
 const MAX_BUFFER = 1024 * 1024;
 const CHAT_TEXT_LIMIT = 4000;
 const ASSISTANT_SCROLLBACK_LINES = 40;
@@ -1364,11 +1378,29 @@ function attachViewerWebSocket(session, ws, opts = {}) {
 }
 
 function handleChatMessage(sessionId, session, user, text /* opts = {} */) {
+  // ────────────────────────────────────────────────────────────────────────
+  // Routing model (since 2026-05-14):
+  //   - `@<known-user> <body>` is a chat-only mention. We stamp meta on
+  //     the message so the recipient's client can highlight it, then
+  //     stop — no PTY write.
+  //   - `/<slash-cmd>` is dispatched (or falls through if unknown).
+  //   - EVERYTHING ELSE (plain text, `@<unknown-word> body`, special
+  //     keys, digit picks) routes to the running Claude PTY by default.
+  //
+  // The user message is persisted FIRST (so chat history shows what they
+  // typed verbatim, regardless of routing outcome). Mention meta is
+  // added BEFORE persist so the row goes to disk with `meta.kind='mention'`
+  // and clients render the highlight on initial replay too.
+  // ────────────────────────────────────────────────────────────────────────
   const message = {
     user,
     text,
     ts: new Date().toISOString(),
   };
+  const mentionTarget = _detectMentionTarget(text);
+  if (mentionTarget && user !== ASSISTANT_USER) {
+    message.meta = { kind: 'mention', mentionUser: mentionTarget };
+  }
   sessionsMod.appendChatMessage(sessionId, message);
   session.emit('chat', message);
 
@@ -1376,21 +1408,16 @@ function handleChatMessage(sessionId, session, user, text /* opts = {} */) {
   // response happened to end in '?'.
   if (user === ASSISTANT_USER) return;
 
-  // `/m <body>` is a short alias for `@myco <body>`. Rewrite BEFORE the
-  // slash/@myco branching below so the entire @myco pipeline (special
-  // keys, menu-pick shortcuts, prose handling, alive check, …) is the
-  // single source of truth. The CHAT HISTORY entry above preserves what
-  // the user actually typed ("/m hi") so viewers see the original intent.
-  const mAlias = text.match(/^\/m\s+([\s\S]+)/i);
-  if (mAlias) text = '@myco ' + mAlias[1];
+  // Chat-only mention: persisted above with meta, recipient highlights
+  // client-side. No PTY write.
+  if (mentionTarget) return;
 
   // Internal-task control: /task, /skip <id>, /cancel <id> all forward
-  // the literal command into the running claude session as @myco input
+  // the literal command into the running claude session as PTY input
   // so claude can act on its own TaskList/TaskUpdate state and reply in
   // chat. The CLAUDE.md project rule tells claude how to interpret
-  // these (list pending tasks; delete by id). The forwarding pattern is
-  // the same one /m uses — keep these three together so future task
-  // commands land in one place.
+  // these (list pending tasks; delete by id). Pre-rewrite so they reach
+  // the @myco-style routing path below.
   const taskList = text.match(/^\/tasks?\s*$/i);
   if (taskList) text = '@myco /task';
   const taskAction = text.match(/^\/(skip|cancel)\s+(\d+)\s*$/i);
@@ -1441,38 +1468,52 @@ function handleChatMessage(sessionId, session, user, text /* opts = {} */) {
 
 // The non-slash routing — kept as a separate function so the slash path
 // can fall through after dispatch().
+//
+// Routing (since 2026-05-14): EVERYTHING that's not a `@<known-user>`
+// mention (handled earlier in handleChatMessage and stamped with
+// meta.kind='mention') and not a dispatched slash command lands here
+// and goes to the Claude PTY by default. `@myco <body>` and `@claude
+// <body>` style prefixes are stripped for backward-compat power users
+// who still type them; plain text is sent as-is.
+//
+// One exception still lives in this function: `/btw <text>` runs the
+// chat-side askAssistant (claude -p in a side process, no PTY input).
+// btw.js owns that detector. Check it FIRST so the new
+// "everything-routes-to-PTY" default doesn't swallow it.
 function handleChatPostfixes(sessionId, session, user, text, message) {
-  // @<word> → send the message body to the running Claude PTY session.
-  // Historically only @myco matched; we now accept any @<word> prefix
-  // (so @claude / @generate / @anything works) UNLESS <word> is a
-  // known username from the chat allowlist (so @kkrazy stays a real
-  // user mention). Open to owner + viewers — chat is the collaborative
-  // steering channel.
-  const prefixMatch = text.match(CHAT_TO_PTY_PREFIX_RE);
-  const ptyChat = prefixMatch && !_isKnownChatUser(prefixMatch[1])
-    ? { prefix: prefixMatch[1], body: prefixMatch[2] }
-    : null;
-  if (ptyChat) {
-    if (!session.alive) {
-      // Used to silently drop here — viewers' @myco messages would
-      // disappear into the void with no feedback. Echo a warning so the
-      // sender knows the PTY is gone and to reattach.
-      session.emit('chat', {
-        user: ASSISTANT_USER,
-        text: '(this Claude session has exited — reopen the session to continue)',
-        ts: new Date().toISOString(),
-      });
-      return;
-    }
-    const input = ptyChat.body.trim();
-    if (input) {
-      // Reject Claude's interactive slash-commands. They aren't meaningful
-      // when delivered via chat — Claude responds "Unknown command: /<x>"
-      // which then sticks in the transcript and confuses every viewer.
+  if (shouldAskAssistant(text)) {
+    runAssistant(sessionId, session, message).catch((err) => {
+      console.error(`[chat-assistant] ${err.message}`);
+    });
+    return;
+  }
+  // Strip a leading @<non-user-word> prefix so legacy "@myco hi" / "@claude
+  // hi" still works exactly the same. _detectMentionTarget already ruled
+  // out real-user mentions before we got here, so any @<word> here is
+  // an alias for "talk to claude."
+  const aliasPrefix = text.match(CHAT_TO_PTY_PREFIX_RE);
+  const body = aliasPrefix ? aliasPrefix[2] : text;
+  if (!session.alive) {
+    // Echo a warning so the sender knows the PTY is gone and to
+    // reattach instead of silently dropping. Applies to plain text
+    // too now that everything routes here by default.
+    session.emit('chat', {
+      user: ASSISTANT_USER,
+      text: '(this Claude session has exited — reopen the session to continue)',
+      ts: new Date().toISOString(),
+    });
+    return;
+  }
+  const input = String(body || '').trim();
+  if (input) {
+      // Unknown slash-commands. They reached here because slashcmds.dispatch
+      // didn't claim them — and forwarding the literal "/foo" into the PTY
+      // would just make Claude reply "Unknown command: /foo" and stick that
+      // in the transcript. Reject in chat instead.
       if (input.startsWith('/')) {
         session.emit('chat', {
           user: ASSISTANT_USER,
-          text: '(slash commands like `/' + input.split(/\s+/)[0].slice(1) + '` only work in the interactive Claude CLI, not via @myco in chat)',
+          text: '(unknown chat command `/' + input.split(/\s+/)[0].slice(1) + '` — `/help` lists what\'s available)',
           ts: new Date().toISOString(),
         });
         return;
@@ -1500,19 +1541,19 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
       }
       // If a TUI menu is open in Claude (plan-mode "what next" or a
       // permission ask that fell through to /decide), short-circuit two
-      // common shapes of @myco message so the user doesn't get stuck:
+      // common shapes of chat input so the user doesn't get stuck:
       //
-      //   * @myco <digit>  → treat as a direct option pick (same effect
-      //     as /decide N). Most users type "1" / "2" naturally and don't
-      //     discover /decide.
-      //   * @myco <anything else> → cancel the menu first with Esc, then
-      //     send the new instruction. The user's intent is "do this new
+      //   * "1" / "2" → direct option pick (same effect as /decide N).
+      //     Most users type a bare digit naturally and don't discover
+      //     /decide.
+      //   * <anything else> → cancel the menu first with Esc, then send
+      //     the new instruction. The user's intent is "do this new
       //     thing"; leaving the stale menu around just wedges Claude.
       const pendingMenu = session.pendingMenu;
       if (pendingMenu) {
         const asDigit = /^[1-9]$/.test(input) ? parseInt(input, 10) : NaN;
         if (Number.isFinite(asDigit) && pendingMenu.options.find((o) => o.n === asDigit)) {
-          console.log(`[chat→pty] ${user}: menu pick ${asDigit} (via @myco shorthand)`);
+          console.log(`[chat→pty] ${user}: menu pick ${asDigit} (via chat shorthand)`);
           session.write(String(asDigit) + '\r');
           session.pendingMenu = null;
           return;
@@ -1560,15 +1601,10 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
       setTimeout(() => {
         if (session && session.alive) session.write('\r');
       }, 100);
-    }
-    return;
   }
-
-  if (shouldAskAssistant(text)) {
-    runAssistant(sessionId, session, message).catch((err) => {
-      console.error(`[chat-assistant] ${err.message}`);
-    });
-  }
+  // (No further branches — all non-mention, non-slash content has now
+  // either been written to the PTY, classified as a special key, or
+  // bounced back with an explanatory chat message above.)
 }
 
 async function runAssistant(sessionId, session, lastMessage) {
@@ -1645,6 +1681,8 @@ module.exports = {
   handleMenuPick,
   handleMenuToggle,
   handleMenuSubmit,
+  // Exposed for chat-routing regression tests.
+  _detectMentionTarget,
   // Re-exported for menu-broadcast.test.js — the live implementations now
   // live in menu.js; this surface stays so the test contract (and any
   // outside caller that pulls the menu helpers off ptyMod) keeps working.

@@ -405,6 +405,35 @@ test_best_practices_template() {
   else
     skip "test/slash-clear.test.js (no host node)"
   fi
+  # Chat-routing rewrite (2026-05-14): plain text → PTY by default;
+  # @<known-user> → chat-only mention with highlight. The static greps
+  # below + the regression test guard the invariants of that routing.
+  grep -q "_detectMentionTarget" server/src/pty.js \
+    && pass "pty.js: _detectMentionTarget helper present" \
+    || fail "pty.js: _detectMentionTarget helper present"
+  grep -q "meta = { kind: 'mention'" server/src/pty.js \
+    && pass "pty.js: mention messages stamped with meta.kind=mention" \
+    || fail "pty.js: mention messages stamped with meta.kind=mention"
+  if grep -q "names: \['m'\]" server/src/slashcmds.js; then
+    fail "slashcmds: /m should have been removed but is still registered"
+  else
+    pass "slashcmds: /m removed (plain text now reaches Claude by default)"
+  fi
+  grep -q "chat-msg-mention-me" web/public/app.js \
+    && pass "app.js: mention-to-me highlight class wired" \
+    || fail "app.js: mention-to-me highlight class wired"
+  grep -q "chat-msg-mention-me" web/public/styles.css \
+    && pass "styles.css: chat-msg-mention-me styles present" \
+    || fail "styles.css: chat-msg-mention-me styles present"
+  if have_node; then
+    if node test/chat-routing.test.js >/dev/null 2>&1; then
+      pass "test/chat-routing.test.js (7 cases)"
+    else
+      fail "test/chat-routing.test.js — re-run with 'node test/chat-routing.test.js' to see failures"
+    fi
+  else
+    skip "test/chat-routing.test.js (no host node)"
+  fi
 }
 
 test_conv_view_css() {

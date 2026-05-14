@@ -47,12 +47,6 @@ const COMMANDS = [
     usage: '/bug <description>',
     handler: (ctx) => addPlanItem(ctx, 'Bug'),
   },
-  {
-    names: ['m'],
-    summary: 'Short alias for @myco — send the rest of the line straight to the running Claude session',
-    usage: '/m <message>',
-    handler: handleMAlias,
-  },
   // Task-list intervention. The actual rewrites happen in
   // pty.handleChatMessage (right next to /m); these registrations are
   // here so /help lists them and the alias works as a regular command
@@ -224,14 +218,6 @@ function addPlanItem(ctx, layer) {
 
 function handleFeature(ctx) {
   return handleIssue(ctx, { kind: 'feature', labels: ['enhancement'] });
-}
-
-// /m is a short alias for @myco. The actual rewrite happens earlier in
-// pty.handleChatMessage (BEFORE the slash dispatch), so by the time
-// THIS handler fires we know the user typed bare "/m" with no body.
-// We just send a usage reply so they know how to use it.
-function handleMAlias(ctx) {
-  ctx.reply('Usage: `/m <message>` — short alias for `@myco <message>`. Whatever follows is sent straight to the running Claude session.');
 }
 
 // /task /tasks — the rewrite in pty.handleChatMessage only fires when the
@@ -430,9 +416,10 @@ function handleHelp(ctx) {
     lines.push(`  • \`${c.usage}\`${aliases} — ${c.summary}`);
   }
   lines.push('');
-  lines.push('Other prefixes:');
-  lines.push('  • `@myco <text>` — inject text into the running Claude session');
-  lines.push('  • `/btw <text>` — ask Claude in the chat (no PTY write)');
+  lines.push('Routing:');
+  lines.push('  • plain text → sent to the running Claude session');
+  lines.push('  • `@<username> <text>` → chat-only mention (highlighted for the recipient)');
+  lines.push('  • `/btw <text>` → ask Claude in the chat (no PTY write)');
   ctx.reply(lines.join('\n'));
 }
 

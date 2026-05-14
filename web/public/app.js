@@ -1981,6 +1981,15 @@ function _bumpChatUnreadIfHidden(message) {
   if (!message || message.user === state.chatUser) return;
   if (state.chatPaneVisible) return;
   state.chatUnread = (state.chatUnread || 0) + 1;
+  // Promote the badge styling when the bump is an @<me> mention so the
+  // user can tell "someone addressed me" apart from generic activity.
+  // Cleared when the chat pane opens (resets state.chatUnread + the
+  // mention flag).
+  if (message.meta && message.meta.kind === 'mention'
+      && state.chatUser
+      && String(message.meta.mentionUser || '').toLowerCase() === String(state.chatUser).toLowerCase()) {
+    state.chatUnreadMention = true;
+  }
   _renderChatUnreadBadge();
 }
 
@@ -1990,13 +1999,16 @@ function _renderChatUnreadBadge() {
   const n = state.chatUnread || 0;
   if (n > 0) {
     btn.dataset.unread = String(Math.min(n, 99));
+    btn.classList.toggle('has-mention', !!state.chatUnreadMention);
   } else {
     delete btn.dataset.unread;
+    btn.classList.remove('has-mention');
   }
 }
 
 function _resetChatUnread() {
   state.chatUnread = 0;
+  state.chatUnreadMention = false;
   _renderChatUnreadBadge();
 }
 
@@ -2319,6 +2331,15 @@ function renderChatMessage(m, isActiveMenu) {
   let cls = 'chat-msg';
   if (fromClaude) cls += ' from-claude';
   if (fromSelf) cls += ' from-self';
+  // @<known-user> chat-only mentions (stamped server-side with
+  // meta.kind='mention'). Highlight EVERY mention as a card so the
+  // sender and other viewers can see who it was addressed to; add an
+  // extra accent when the current user IS the recipient.
+  const isMention = m.meta && m.meta.kind === 'mention' && m.meta.mentionUser;
+  const isMentionToMe = isMention && state.chatUser
+    && String(m.meta.mentionUser).toLowerCase() === String(state.chatUser).toLowerCase();
+  if (isMention) cls += ' chat-msg-mention';
+  if (isMentionToMe) cls += ' chat-msg-mention-me';
   // For menu broadcasts, the inline buttons below ARE the picker; the
   // chat body just sets the scene with the question. Override the text
   // body to a minimal "lead + question" form regardless of what the
@@ -2903,19 +2924,19 @@ function sendChatMessage(text) {
       state.outboundChat.push({ text: trimmed, ts: Date.now() });
     }
   }
-  // @<word> messages go into the running Claude session (server-side
-  // rule: any prefix that isn't a known username). `/m <body>` is the
-  // short alias that the server rewrites to @myco. Keep the user in
-  // the chat pane — that's where the typing-dots indicator and claude's
-  // reply will land. The transcript view stays available via the 👁
-  // toggle for users who want the raw stream. The client doesn't know
-  // the username list at type-time, so we optimistically arm the dots
-  // for any @<word> prefix; if the server decides it was actually a
-  // user mention and didn't route to PTY, the idle timer (30s) will
-  // retire the dots harmlessly.
-  if (/^@[A-Za-z][\w-]{0,30}\s+\S/.test(trimmed) || /^\/m\s+\S/i.test(trimmed)
-      || /^\/tasks?\s*$/i.test(trimmed)
-      || /^\/(skip|cancel)\s+\d+\s*$/i.test(trimmed)) {
+  // Since the chat-routing rewrite (2026-05-14), plain text goes to the
+  // running Claude session by default; only `@<known-user> …` mentions
+  // and slash commands stay in chat. The client doesn't know the
+  // server's username allowlist at type-time, so we over-arm the
+  // typing-dots indicator for anything that isn't obviously a slash
+  // command. If the server decides the message was a chat-only mention
+  // and didn't reach Claude, the idle timer (30s) retires the dots
+  // harmlessly.
+  if (!/^\//.test(trimmed)) {
+    _markAwaitingClaude();
+  } else if (/^\/tasks?\s*$/i.test(trimmed) || /^\/(skip|cancel)\s+\d+\s*$/i.test(trimmed)) {
+    // /task / /skip / /cancel rewrite to PTY-input on the server, so
+    // they still warrant the dots.
     _markAwaitingClaude();
   }
   return true;
