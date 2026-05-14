@@ -1191,6 +1191,12 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
    In both cases it sits inside #terminal-pane (position:relative) via
    absolute positioning, so the chrome buttons (z:50) stay above and
    are reachable while chat is open. */
+/* `hidden` attribute must beat the author display:flex below — without
+   this, setChatPane(false) flips the attribute but the CSS rule keeps
+   the pane rendered (covering whichever main view is supposedly active,
+   especially on mobile where chatpane width is 100% and z-index:30). */
+#chatpane[hidden] { display: none !important; }
+
 #chatpane.chat-main-view {
   position: absolute;
   top: 0;
