@@ -1626,10 +1626,42 @@ function forcePtyRedraw() {
 
 // ── spawn modal ───────────────────────────────────────────────────────────────
 
+// Non-printable-ASCII detector: matches any char outside U+0020..U+007E.
+// We use it both as a live-filter on the spawn-cwd input AND as a final
+// gate in doSpawn — the live filter is best-effort (paste/IME can sneak
+// non-ASCII past keystroke handlers) and the submit check is the
+// authoritative guard. Excluded ranges intentionally drop: control chars
+// (0x00-0x1F + 0x7F), CJK, emoji, RTL marks, NBSP, smart quotes.
+const NON_ASCII_RE = /[^\x20-\x7E]/g;
+
 function openSpawnModal() {
-  document.getElementById('spawn-cwd').value = '';
+  const input = document.getElementById('spawn-cwd');
+  input.value = '';
   document.getElementById('spawn-modal').hidden = false;
-  document.getElementById('spawn-cwd').focus();
+  // Wire the live filter once per modal-open is fine — the same listener
+  // hooks up each time, but the input was reset to '' above so prior
+  // state is gone. addEventListener dedups on identical listener refs,
+  // so the named function below registers only once across opens.
+  input.addEventListener('input', _stripNonAsciiOnInput);
+  input.focus();
+}
+
+// Live input filter: strip any non-ASCII char the user types or pastes.
+// Preserves caret position by measuring how many chars were removed
+// before the caret and re-applying the shifted selection. Without this
+// the caret jumps to the end of the input after every stripped paste.
+function _stripNonAsciiOnInput(ev) {
+  const el = ev.target;
+  const original = el.value;
+  if (!NON_ASCII_RE.test(original)) return;       // fast path — nothing to strip
+  NON_ASCII_RE.lastIndex = 0;                      // global regex state reset
+  const caret = el.selectionStart || 0;
+  const before = original.slice(0, caret);
+  const cleanedBefore = before.replace(NON_ASCII_RE, '');
+  const cleaned = original.replace(NON_ASCII_RE, '');
+  el.value = cleaned;
+  const newCaret = cleanedBefore.length;
+  try { el.setSelectionRange(newCaret, newCaret); } catch {}
 }
 
 function closeSpawnModal() {
@@ -1637,10 +1669,21 @@ function closeSpawnModal() {
 }
 
 async function doSpawn() {
-  const cwd = document.getElementById('spawn-cwd').value.trim() || undefined;
+  const rawCwd = document.getElementById('spawn-cwd').value.trim();
   const errEl = document.getElementById('spawn-error');
   errEl.hidden = true;
   errEl.textContent = '';
+  // Submit-time ASCII gate. Belt-and-braces against the live filter —
+  // some IMEs / clipboard managers can land non-ASCII chars without
+  // triggering an `input` event. Show an inline error rather than
+  // silently mangling the cwd the user typed.
+  if (rawCwd && NON_ASCII_RE.test(rawCwd)) {
+    NON_ASCII_RE.lastIndex = 0;
+    errEl.textContent = 'Session name must be ASCII only (a-z, 0-9, -, _, /, .) — no CJK, emoji, or other non-ASCII characters.';
+    errEl.hidden = false;
+    return;
+  }
+  const cwd = rawCwd || undefined;
   // Estimate the terminal size for the new tmux session so claude renders
   // its welcome banner at the right width (otherwise it draws at 80×24
   // and the banner wraps awkwardly when we resize on attach).

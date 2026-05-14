@@ -183,7 +183,7 @@
       <h2>New session</h2>
       <div id="spawn-workspace">Workspace: <code id="spawn-ws-path">…</code></div>
       <label>Subdirectory (relative to workspace, blank = root)
-        <input id="spawn-cwd" type="text" placeholder="" autocomplete="off" />
+        <input id="spawn-cwd" type="text" placeholder="ASCII only (a-z, 0-9, -, _, /)" autocomplete="off" pattern="[\x20-\x7E]*" title="ASCII characters only — no CJK, emoji, or other non-ASCII" />
       </label>
       <div id="spawn-suggestions"></div>
       <div id="spawn-error" hidden></div>
@@ -212,6 +212,6 @@
   <script src="/vendor/mermaid.min.js"></script>
   <script>if (typeof mermaid !== 'undefined') mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
   <script src="keyboard.js?v=7"></script>
-  <script src="app.js?v=166"></script>
+  <script src="app.js?v=167"></script>
 </body>
 </html>

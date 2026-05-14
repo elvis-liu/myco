@@ -775,6 +775,26 @@ test_new_session_readonly() {
   grep -qF 'openSession(body.session_id, { startInReadonly: true })' web/public/app.js \
     && fail "doSpawn auto-switched new sessions to readonly (regression)" \
     || pass "doSpawn no longer auto-switches new sessions to readonly"
+  # Spawn-modal ASCII gate. Two complementary guards: a live input-event
+  # filter strips non-ASCII as the user types/pastes (best-effort, since
+  # IMEs / clipboard managers can land bytes without firing 'input'),
+  # plus a submit-time NON_ASCII_RE.test() gate that returns an inline
+  # error rather than silently mangling the cwd. The pattern attribute
+  # on the input element backs both with HTML5-level form validation.
+  grep -qF 'NON_ASCII_RE' web/public/app.js \
+    && pass "app.js: NON_ASCII_RE defined for spawn-modal validation" \
+    || fail "app.js: NON_ASCII_RE missing — non-ASCII cwd would reach the server"
+  grep -qF '_stripNonAsciiOnInput' web/public/app.js \
+    && pass "app.js: live input filter wired on spawn-cwd" \
+    || fail "app.js: _stripNonAsciiOnInput missing — non-ASCII chars stay in the field"
+  if awk '/^async function doSpawn\(/,/^}$/' web/public/app.js | grep -q 'NON_ASCII_RE.test(rawCwd)'; then
+    pass "app.js: doSpawn rejects non-ASCII cwd at submit time"
+  else
+    fail "app.js: doSpawn does not validate cwd as ASCII before POST /sessions"
+  fi
+  grep -qF 'pattern="[\x20-\x7E]*"' web/public/index.html \
+    && pass "index.html: spawn-cwd input has ASCII pattern attribute" \
+    || fail "index.html: spawn-cwd pattern attribute missing — browser won't visually flag invalid input"
   # Safety net: if a brand-new session lands on the readonly view and
   # neither a menu callout nor any transcript content arrives within
   # READONLY_FALLBACK_MS, auto-flip back to the live xterm so the user
