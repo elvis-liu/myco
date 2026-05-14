@@ -8,3 +8,4 @@ nohup.out
 .tls/
 .tls.bak.*
 .claude/scheduled_tasks.lock
+_myco_/logs/
