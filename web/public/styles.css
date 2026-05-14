@@ -96,7 +96,10 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border);
-  background: var(--surface);
+  /* Match the body background (--bg) so the sidebar reads as part of
+     the page chrome rather than a lifted surface — the surface tier
+     was rendering as a visibly lighter band on some displays. */
+  background: var(--bg);
 }
 
 #sidebar header {
@@ -108,7 +111,7 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   min-height: calc(var(--pane-header-h) + var(--safe-top));
   box-sizing: border-box;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--bg);
   position: sticky;
   top: 0;
   backdrop-filter: blur(20px);
@@ -1481,7 +1484,19 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Thin scrollbar — the browser default (~16px) eats a chunk of the
+     narrow chat pane. Half-width (8px webkit, "thin" for Firefox) keeps
+     the affordance visible but reclaims horizontal space for content. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 130, 145, .35) transparent;
 }
+#chat-messages::-webkit-scrollbar { width: 8px; }
+#chat-messages::-webkit-scrollbar-track { background: transparent; }
+#chat-messages::-webkit-scrollbar-thumb {
+  background: rgba(120, 130, 145, .35);
+  border-radius: 4px;
+}
+#chat-messages::-webkit-scrollbar-thumb:hover { background: rgba(150, 160, 175, .55); }
 
 .chat-msg .chat-meta {
   font-size: .72rem;
@@ -2512,7 +2527,30 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   max-width: none;
   margin: 0;
   user-select: text;
+  /* Thin scrollbar to match the chat pane — see #chat-messages above. */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 130, 145, .35) transparent;
   -webkit-user-select: text;
+}
+#conv-messages::-webkit-scrollbar { width: 8px; }
+#conv-messages::-webkit-scrollbar-track { background: transparent; }
+#conv-messages::-webkit-scrollbar-thumb {
+  background: rgba(120, 130, 145, .35);
+  border-radius: 4px;
+}
+#conv-messages::-webkit-scrollbar-thumb:hover { background: rgba(150, 160, 175, .55); }
+
+/* Cap the readable column in the readonly viewer so long lines don't
+   sprawl across an ultra-wide pane. The OUTER scroller (#conv-messages)
+   stays full-width — only the inner content stack is centered and
+   capped. Mobile keeps the full width (the breakpoint matches the rest
+   of the site's mobile rules). */
+#conv-content {
+  max-width: 50vw;
+  margin: 0 auto;
+}
+@media (max-width: 900px) {
+  #conv-content { max-width: none; margin: 0; }
 }
 
 /* ── turn divider ── */
