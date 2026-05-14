@@ -3158,6 +3158,22 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   color: #3fb950;       /* green, matches the picked-row highlight */
 }
 
+/* Collapsed menu card — applied to .chat-msg.chat-msg-menu once the
+   menu has been answered or superseded. The lead text + question are
+   dropped from the bubble (question is preserved as a tooltip on hover),
+   so the whole entry shrinks to "user · timestamp · ✓ Picked [N] label".
+   This keeps the chat history from being dominated by tall picker cards
+   long after the decision was made. */
+.chat-msg.chat-msg-menu.chat-msg-menu-collapsed {
+  border-left-color: #30363d;   /* drop the yellow attention accent */
+  padding: 6px 10px;
+}
+.chat-msg.chat-msg-menu.chat-msg-menu-collapsed .chat-menu-resolved {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
 /* ── waiting spinner ── */
 .conv-waiting {
   text-align: center;

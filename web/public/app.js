@@ -2160,10 +2160,14 @@ function renderChatMessage(m, isActiveMenu) {
     : null;
   const isMulti = !!(menuOpts && m.meta && m.meta.menu && m.meta.menu.multi);
   const wasSubmitted = !!(m.meta && (m.meta.submitted || m._submitted));
-  // Once answered, the buttons row collapses into a single "✓ Picked …"
-  // line. Leaving N disabled buttons around clutters the chat — the
-  // pick is captured in the summary line and that's all the user
-  // needs to see in the history.
+  // Once answered (or once superseded by a newer menu), the whole card
+  // collapses to a single resolved line — no lead, no question, no
+  // option buttons. The full question is preserved as a tooltip on the
+  // bubble so context is one hover away without consuming scroll space.
+  // Active menus stay full-height so the question is visible while
+  // picking.
+  const isResolvedMenu = !!(menuOpts && (wasSubmitted || pickedN != null || !isActiveMenu));
+  if (isResolvedMenu) cls += ' chat-msg-menu-collapsed';
   let optsHtml = '';
   if (menuOpts && wasSubmitted) {
     // Multi-select submitted: summarize the checked set.
@@ -2217,9 +2221,17 @@ function renderChatMessage(m, isActiveMenu) {
     // instead of silently rendering only the lead + question.
     optsHtml = '<div class="chat-menu-resolved">(buttons unavailable — try a hard-refresh of this page)</div>';
   }
-  return `<div class="${cls}">
+  // Collapsed menu card: skip the lead+question body, surface the
+  // question on hover instead. Keeps history scrollable without losing
+  // recoverability.
+  const tooltip = isResolvedMenu && m.meta && m.meta.menu && m.meta.menu.question
+    ? ` title="${escHtml(m.meta.menu.question)}"` : '';
+  const textHtml = isResolvedMenu
+    ? ''
+    : `<div class="chat-text">${renderMd(body)}</div>`;
+  return `<div class="${cls}"${tooltip}>
     <div class="chat-meta"><span class="chat-user">${escHtml(m.user || '?')}</span><span class="chat-ts">${escHtml(ts)}</span></div>
-    <div class="chat-text">${renderMd(body)}</div>
+    ${textHtml}
     ${optsHtml}
   </div>`;
 }
