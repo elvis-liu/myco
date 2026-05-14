@@ -83,6 +83,18 @@ class PtySession extends EventEmitter {
     this.menuInterceptor = new MenuInterceptor();
     this.pendingMenu = null;
     this._menuDebounce = null;
+    // Separate throttle for status emits. Decoupled from menu detection
+    // because status frames don't need the 250ms alt-screen quiet period
+    // (the spinner line lives in main scrollback, not the alt-screen
+    // dialog buffer) and pre-decouple the status emit was riding on the
+    // same debounce — which during a busy turn KEPT RESETTING and never
+    // fired, so only the 750ms periodic scan got status out. On a
+    // far-region link (Singapore from non-APAC viewer = ~220ms RTT) that
+    // turned every status step into ~1s of perceived lag. Throttle is
+    // trailing-edge at 100ms: one timer covers a burst of data, fires
+    // once per window. Cheap: each fire is one regex scan of the
+    // spinner line.
+    this._statusThrottle = null;
 
     this.pty.onData((data) => {
       this._push(data);
@@ -91,6 +103,16 @@ class PtySession extends EventEmitter {
       // before reading it, otherwise we'd scan partially-painted dialogs.
       if (this._menuDebounce) clearTimeout(this._menuDebounce);
       this._menuDebounce = setTimeout(() => this._checkMenu(), 250);
+      // Schedule a status emit on the 100ms throttle (if not already
+      // pending). A trailing-edge throttle is the right shape here: the
+      // first byte of a burst arms a 100ms timer, all subsequent bytes
+      // in that window are coalesced into one emit at the end.
+      if (!this._statusThrottle) {
+        this._statusThrottle = setTimeout(() => {
+          this._statusThrottle = null;
+          try { this._emitStatusIfChanged(); } catch {}
+        }, 100);
+      }
       this.emit('data', data);
     });
     // Periodic safety scan — the data-event debounce only fires when
@@ -107,6 +129,7 @@ class PtySession extends EventEmitter {
       this.alive = false;
       if (this._periodicMenuScan) { clearInterval(this._periodicMenuScan); this._periodicMenuScan = null; }
       if (this._menuDebounce) { clearTimeout(this._menuDebounce); this._menuDebounce = null; }
+      if (this._statusThrottle) { clearTimeout(this._statusThrottle); this._statusThrottle = null; }
       this.emit('exit', exitCode);
     });
   }
@@ -207,13 +230,14 @@ class PtySession extends EventEmitter {
     return 'default';
   }
 
-  _checkMenu() {
-    this._menuDebounce = null;
+  // Read the headless terminal for the current spinner status and emit
+  // a `claude-status` event ONLY when the structured status changes.
+  // Pulled out of _checkMenu so onData can drive its own (much shorter)
+  // throttle without dragging menu detection along — see _statusThrottle.
+  // Pass the structured object; the WS forwarder still surfaces the
+  // legacy `text` field for older clients.
+  _emitStatusIfChanged() {
     if (!this.headless) return;
-    // Spinner-status check rides on the same debounce — emit only on
-    // change so we don't flood clients with identical frames. Pass
-    // the structured object; the WS forwarder still surfaces the
-    // legacy `text` field for older clients.
     const status = this._extractStatus();
     const statusKey = status ? JSON.stringify(status) : null;
     if (statusKey !== this._lastStatusKey) {
@@ -221,6 +245,15 @@ class PtySession extends EventEmitter {
       this._lastStatus = status;          // back-compat for attach-time replay
       this.emit('claude-status', status);
     }
+  }
+
+  _checkMenu() {
+    this._menuDebounce = null;
+    if (!this.headless) return;
+    // Safety net: the periodic 750ms scan still drives a status check
+    // for the case where no data is flowing (claude paused, status line
+    // updated by a tick somewhere we can't observe directly).
+    this._emitStatusIfChanged();
     // Mode-transition detection — owner-facing autoAcceptToggleBytes
     // logic still drives the Shift+Tab cycle elsewhere; this is an
     // additive observation channel so viewers see the same mode-pill

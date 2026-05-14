@@ -1821,6 +1821,26 @@ test_chat_window() {
   grep -qF 'clearInterval(this._periodicMenuScan)' server/src/pty.js \
     && pass "pty.js: periodic-scan timer cleared on pty exit" \
     || fail "pty.js: periodic-scan timer not cleared on exit"
+  # Status emit is decoupled from menu-detect debounce (250ms) so that
+  # spinner/mode/token updates land on a tight 100ms trailing throttle.
+  # Pre-decouple, claude-status emits rode on _checkMenu's debounce —
+  # which during a busy turn kept resetting and never fired, so only
+  # the 750ms periodic scan got status out. On a 220ms-RTT mycobeta
+  # link that compounded to ~1s perceived lag per status step.
+  grep -qF '_emitStatusIfChanged' server/src/pty.js \
+    && pass "pty.js: status emit extracted into _emitStatusIfChanged helper" \
+    || fail "pty.js: _emitStatusIfChanged helper missing — status still coupled to menu debounce"
+  grep -qF '_statusThrottle' server/src/pty.js \
+    && pass "pty.js: separate _statusThrottle timer field" \
+    || fail "pty.js: _statusThrottle field missing — onData not driving its own status emit"
+  if awk '/this\.pty\.onData/,/^    \}\);/' server/src/pty.js | grep -qF '_statusThrottle = setTimeout'; then
+    pass "pty.js: onData schedules status emit on _statusThrottle"
+  else
+    fail "pty.js: onData not driving _statusThrottle — far-region status will still lag the menu debounce"
+  fi
+  grep -qF 'clearTimeout(this._statusThrottle)' server/src/pty.js \
+    && pass "pty.js: _statusThrottle cleared on pty exit (no leaked timer)" \
+    || fail "pty.js: _statusThrottle not cleared on exit"
   # Quick wire-level checks for the hash field carrying end-to-end.
   grep -qF 'data-hash="${escHtml(menuHash)}"' web/public/app.js \
     && pass "app.js: menu buttons stamp data-hash" \
