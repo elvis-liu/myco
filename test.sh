@@ -381,6 +381,21 @@ test_best_practices_template() {
   grep -q "msg.kind === 'chat-clear'" web/public/app.js \
     && pass "app.js: state-update handles chat-clear kind" \
     || fail "app.js: state-update handles chat-clear kind"
+  # Diagnostic logs for the user-filed plan item "app inactive → new
+  # output missed on resume". Static greps guard against an accidental
+  # refactor removing them before we've collected enough data.
+  grep -q '\[ws-attach\]' server/src/pty.js \
+    && pass "pty.js: [ws-attach] diagnostic log present" \
+    || fail "pty.js: [ws-attach] diagnostic log present"
+  grep -q '\[diag-resume\]' web/public/app.js \
+    && pass "app.js: [diag-resume] visibility log present" \
+    || fail "app.js: [diag-resume] visibility log present"
+  grep -q '\[ws-open\]' web/public/app.js \
+    && pass "app.js: [ws-open] lifecycle log present" \
+    || fail "app.js: [ws-open] lifecycle log present"
+  grep -q '\[ws-close\]' web/public/app.js \
+    && pass "app.js: [ws-close] lifecycle log present" \
+    || fail "app.js: [ws-close] lifecycle log present"
   if have_node; then
     if node test/slash-clear.test.js >/dev/null 2>&1; then
       pass "test/slash-clear.test.js (4 cases)"

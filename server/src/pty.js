@@ -1082,6 +1082,15 @@ function attachWebSocket(session, ws, opts = {}) {
   if (replay.length) {
     ws.send(JSON.stringify({ t: 'output', data: replay.toString('base64') }));
   }
+  // [ws-attach] diagnostic — temporary, paired with the client-side
+  // visibility-change log in app.js. Helps us see whether reconnects
+  // after a background-pause replay everything the client missed, vs.
+  // the ring buffer running short (gap > MAX_BUFFER) or the replay
+  // never being sent. Investigating user-filed plan item: "when the app
+  // is inactive but the claude session might be still running in the
+  // background, when the app become active again, it wont pick up the
+  // new output from pty while the app is inactive."
+  console.log(`[ws-attach] ${sessionId} user=${user || 'unknown'} replay-bytes=${replay.length} ring-frames=${session.buffer.length} buffer-cap=${MAX_BUFFER}`);
 
   // Replay chat history so a returning client sees the discussion.
   const history = sessionsMod.getChatHistory(sessionId);

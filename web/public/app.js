@@ -72,6 +72,21 @@ const state = {
   // indicator when this has entries so long-running tools (Agent,
   // Monitor, etc.) don't look like the session has hung.
   openToolCalls: [],
+  // [diag-resume] diagnostic counters — temporary, paired with the
+  // server-side [ws-attach] log in pty.js. Investigating user-filed
+  // plan item: "when the app is inactive but the claude session might
+  // be still running in the background, when the app become active
+  // again, it wont pick up the new output from pty while the app is
+  // inactive." Counts every `t:'output'` frame so we can see, on
+  // visibilitychange→visible, whether bytes actually arrived while
+  // the tab was hidden (TCP/WS keepalive scenario) vs. zero bytes
+  // (WS was suspended and the resume should be coming via reconnect).
+  diagOutputBytes: 0,
+  diagOutputFrames: 0,
+  diagHiddenAt: null,
+  diagBytesAtHidden: 0,
+  diagFramesAtHidden: 0,
+  diagWsClosedAt: 0,
 };
 
 // ── auth ──────────────────────────────────────────────────────────────────────
@@ -1318,6 +1333,8 @@ function openSession(id, opts = {}) {
       if (state.term) {
         ws.send(JSON.stringify({ t: 'resize', cols: state.term.cols, rows: state.term.rows }));
       }
+      const gap = state.diagWsClosedAt ? Date.now() - state.diagWsClosedAt : 0;
+      console.log('[ws-open] sessionId=' + id + ' gap-since-close=' + gap + 'ms');
     });
 
     ws.addEventListener('message', (ev) => {
@@ -1357,6 +1374,13 @@ function openSession(id, opts = {}) {
       } else if (msg.t === 'transcript-waiting') {
         showTranscriptWaiting();
       } else if (msg.t === 'output') {
+        // [diag-resume] count every output frame so the
+        // visibilitychange→visible log can report how much arrived
+        // while the tab was hidden. Approximation: base64 expands by
+        // ~4/3, so decoded bytes ≈ b64.length * 3/4.
+        const b64 = msg.data || '';
+        state.diagOutputBytes += Math.floor(b64.length * 3 / 4);
+        state.diagOutputFrames += 1;
         state.term?.write(Uint8Array.from(atob(msg.data), c => c.charCodeAt(0)));
         // Pin to the latest output. xterm's default behavior only
         // auto-scrolls when the viewport was already at the bottom;
@@ -1428,6 +1452,8 @@ function openSession(id, opts = {}) {
     });
 
     ws.addEventListener('close', () => {
+      state.diagWsClosedAt = Date.now();
+      console.log('[ws-close] sessionId=' + id);
       if (state.activeId !== id) return; // switched session OR error cleared activeId
       showConnOverlay('Reconnecting', null, 'Restoring session…');
       setTimeout(() => {
@@ -4746,9 +4772,26 @@ function stopVisibilityProbing() {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
+    // [diag-resume] — emit the gap report BEFORE probeWsLiveness so the
+    // log captures the WS state as we observed it on resume, not after
+    // the probe might have already torn the WS down.
+    if (state.diagHiddenAt) {
+      const gap = Date.now() - state.diagHiddenAt;
+      const bytes = state.diagOutputBytes - state.diagBytesAtHidden;
+      const frames = state.diagOutputFrames - state.diagFramesAtHidden;
+      const ws = state.ws;
+      const wsState = ws ? ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'][ws.readyState] : 'NONE';
+      console.log('[diag-resume] hidden-for=' + gap + 'ms ws=' + wsState
+        + ' output-frames-while-hidden=' + frames
+        + ' output-bytes-while-hidden=' + bytes);
+      state.diagHiddenAt = null;
+    }
     probeWsLiveness();
     startVisibilityProbing();
   } else {
+    state.diagHiddenAt = Date.now();
+    state.diagBytesAtHidden = state.diagOutputBytes;
+    state.diagFramesAtHidden = state.diagOutputFrames;
     stopVisibilityProbing();
   }
 });
