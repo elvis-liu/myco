@@ -473,6 +473,20 @@ test_best_practices_template() {
   grep -q "runClaudeP" server/src/btw.js \
     && pass "btw.js: runClaudeP exported for /dedupe" \
     || fail "btw.js: runClaudeP exported for /dedupe"
+  # One-shot migration: rewrites pre-ca9bcf1 hex-id plan items to
+  # fr-N/td-N/bug-N (addedAt order). Idempotent.
+  [ -x migrate-plan-ids.js ] \
+    && pass "migrate-plan-ids.js present + executable" \
+    || fail "migrate-plan-ids.js present + executable"
+  if have_node; then
+    if node test/migrate-plan-ids.test.js >/dev/null 2>&1; then
+      pass "test/migrate-plan-ids.test.js (4 cases)"
+    else
+      fail "test/migrate-plan-ids.test.js — re-run with 'node test/migrate-plan-ids.test.js' to see failures"
+    fi
+  else
+    skip "test/migrate-plan-ids.test.js (no host node)"
+  fi
   if have_node; then
     if node test/chat-routing.test.js >/dev/null 2>&1; then
       pass "test/chat-routing.test.js (7 cases)"
