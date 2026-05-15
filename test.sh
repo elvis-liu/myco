@@ -714,11 +714,13 @@ test_best_practices_template() {
   grep -q "session.mode === 'agent'" server/src/slashcmds.js \
     && pass "slashcmds.js: handleDecide routes to resolveMenuPick for agent" \
     || fail "slashcmds.js: handleDecide routes to resolveMenuPick for agent"
-  # Phase 5: session resume on respawn. ensureLiveSession spawns a fresh
-  # AgentSession seeded with rec.sdkSessionId so the SDK conversation
-  # continues from where the prior process died.
-  grep -q "rec.mode === 'agent'" server/src/sessions.js \
-    && pass "sessions.js: ensureLiveSession agent-mode branch present" \
+  # Phase 5 + Phase 9: ensureLiveSession respawns a fresh AgentSession
+  # seeded with rec.sdkSessionId. Phase 9 widened the gate from
+  # `rec.mode === 'agent'` to `rec.mode !== 'pty'` so legacy unset-mode
+  # records auto-migrate (covered by the Phase-9 assertions further
+  # down).
+  grep -q "rec.mode !== 'pty'" server/src/sessions.js \
+    && pass "sessions.js: ensureLiveSession agent-mode branch present (Phase 9 gate)" \
     || fail "sessions.js: ensureLiveSession agent-mode branch present"
   grep -q "resumeSdkSessionId" server/src/agent-session.js \
     && pass "agent-session.js: resumeSdkSessionId seed accepted" \
@@ -759,14 +761,15 @@ test_best_practices_template() {
   grep -q "_matchingInputFor" server/src/agent-session.js \
     && pass "agent-session.js: tool_input → match-string adapter present" \
     || fail "agent-session.js: tool_input → match-string adapter present"
-  # Phase 8: 'agent' is now the default spawn mode. Legacy PTY is opt-in
-  # via the spawn-modal checkbox OR MYCO_DEFAULT_MODE=pty env var.
-  grep -q "envDefault = process.env.MYCO_DEFAULT_MODE" server/src/sessions.js \
-    && pass "sessions.js: env-var escape hatch for default mode present" \
-    || fail "sessions.js: env-var escape hatch for default mode present"
-  grep -q "spawn-mode-pty" web/public/index.html \
-    && pass "index.html: spawn-modal flipped to 'opt into PTY' (default = agent)" \
-    || fail "index.html: spawn-modal flipped to 'opt into PTY' (default = agent)"
+  # Phase 9 retired the MYCO_DEFAULT_MODE env-var escape hatch +
+  # collapsed the spawnSession default to agent. The negative assertion
+  # locks that in — re-introducing the env var would be a regression.
+  ! grep -q "MYCO_DEFAULT_MODE" server/src/sessions.js \
+    && pass "sessions.js: MYCO_DEFAULT_MODE env-var escape hatch retired (Phase 9)" \
+    || fail "sessions.js: MYCO_DEFAULT_MODE still present"
+  grep -q 'id="spawn-mode-pty"' web/public/index.html \
+    && pass "index.html: hidden #spawn-mode-pty kept for cached-page back-compat" \
+    || fail "index.html: hidden #spawn-mode-pty missing"
   # dedupePlanItems prompt enrichment: project CLAUDE.md + auto-memory
   # are inlined ahead of the item list so the LLM has project-specific
   # context when judging "same underlying concern".
