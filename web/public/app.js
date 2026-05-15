@@ -2423,7 +2423,33 @@ const AGENT_CHROME_TYPES = new Set([
   'permission_resolved',
   'rate_limit',
   'unknown_event',
+  // tool_result is chrome too — the actual output rarely needs
+  // surfacing inline; expanding the batch shows each result.
+  'tool_result',
 ]);
+
+// tool_use events for these specific tools are meta — they don't
+// progress the work surface (Exit/EnterPlanMode is a mode flip;
+// AskUserQuestion's content lives in the modal popup), so they fold
+// into chrome too. Other tool_use events (Read, Edit, Write, Bash,
+// Glob, Grep, WebFetch, WebSearch, Task, TodoWrite) stay as their
+// own rows.
+const AGENT_CHROME_TOOL_USES = new Set([
+  'ExitPlanMode',
+  'EnterPlanMode',
+  'AskUserQuestion',
+  // Write is bulk-create — claude tends to fire several Writes in a
+  // row when scaffolding new files. Fold them; the per-file diff is
+  // available when the batch row is expanded.
+  'Write',
+]);
+
+function _isChromeEvent(ev) {
+  if (!ev || !ev.type) return false;
+  if (AGENT_CHROME_TYPES.has(ev.type)) return true;
+  if (ev.type === 'tool_use' && AGENT_CHROME_TOOL_USES.has(ev.name)) return true;
+  return false;
+}
 
 // assistant_text still concatenates (separate from chrome) so claude's
 // narration between tool calls renders as one continuous markdown blob
@@ -2437,7 +2463,7 @@ function _appendAgentEvent(ev) {
   // Chrome batching: consecutive chrome events collapse into one
   // compact "▸ N events" indicator. Click the indicator to expand and
   // see each event listed individually.
-  if (AGENT_CHROME_TYPES.has(ev.type)) {
+  if (_isChromeEvent(ev)) {
     const prev = pane.lastElementChild;
     if (prev && prev.dataset && prev.dataset.evType === '_chrome_batch') {
       _appendToChromeBatch(prev, ev, ts);
@@ -2600,6 +2626,22 @@ function _chromeEventLine(ev, ts) {
   } else if (ev.type === 'rate_limit') {
     kind = 'rate-limit';
     summary = '';
+  } else if (ev.type === 'tool_result') {
+    const bytes = (ev.content || '').length;
+    kind = ev.isError ? '⚠ result' : '✓ result';
+    summary = bytes + ' bytes · for=' + (ev.tool_use_id || '').slice(-8);
+  } else if (ev.type === 'tool_use' && AGENT_CHROME_TOOL_USES.has(ev.name)) {
+    if (ev.name === 'AskUserQuestion') {
+      kind = '? ask';
+      const q = (ev.input && ev.input.questions && ev.input.questions[0] && ev.input.questions[0].question) || '';
+      summary = String(q).slice(0, 120);
+    } else if (ev.name === 'Write') {
+      kind = '✎ write';
+      summary = String((ev.input && ev.input.file_path) || '').slice(0, 120);
+    } else {
+      kind = ev.name.replace(/PlanMode$/, ' plan mode'); // ExitPlanMode → "exit plan mode"
+      summary = '';
+    }
   } else {
     summary = JSON.stringify(ev).slice(0, 120);
   }
@@ -2665,6 +2707,20 @@ function _chromeShortLabel(ev) {
   if (ev.type === 'system_init') return 'session init';
   if (ev.type === 'session_ready') return 'ready';
   if (ev.type === 'rate_limit') return 'rate-limit';
+  if (ev.type === 'tool_result') {
+    const bytes = (ev.content || '').length;
+    return (ev.isError ? '⚠ result · ' : '✓ result · ') + bytes + ' bytes';
+  }
+  if (ev.type === 'tool_use' && AGENT_CHROME_TOOL_USES.has(ev.name)) {
+    if (ev.name === 'AskUserQuestion') {
+      const q = (ev.input && ev.input.questions && ev.input.questions[0] && ev.input.questions[0].question) || '';
+      return 'ask · ' + String(q).slice(0, 60);
+    }
+    if (ev.name === 'Write') {
+      return '✎ write · ' + String((ev.input && ev.input.file_path) || '').slice(0, 60);
+    }
+    return ev.name.replace(/PlanMode$/, ' plan mode');   // ExitPlanMode → "exit plan mode"
+  }
   return ev.type || 'event';
 }
 
