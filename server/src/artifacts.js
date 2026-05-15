@@ -278,6 +278,33 @@ function _artifactHasContent(artifact) {
   return false;
 }
 
+// Mutation endpoints (refresh / run / mark / vote / comment / plan-merge /
+// delete-item / delete-comment) operate on rec.artifacts[type] — which
+// can drift away from the on-disk _myco_/<type>.<ext> file when:
+//   - the project is on a different host and the file was edited
+//     externally (git pull, hand-edit),
+//   - or the absCwd is a wrapper dir whose <project>/_myco_/ was never
+//     loaded into memory because no GET /artifact ever ran in this
+//     server lifetime.
+// Resolution: at the TOP of every mutation, refresh rec.artifacts[type]
+// from the file if the file has content. The file is the version-
+// controlled source of truth; in-memory just shadows it. No file write,
+// no saveStore — the caller's mutation will write through both via
+// persistArtifact when it finishes.
+function _loadArtifactIntoRecFromFile(rec, type) {
+  if (!rec || !type) return;
+  const fromFile = readArtifactFromFile(rec, type);
+  if (!fromFile) return;
+  const prev = rec.artifacts && rec.artifacts[type];
+  const prevCount = prev && Array.isArray(prev.items) ? prev.items.length : 0;
+  const nextCount = Array.isArray(fromFile.items) ? fromFile.items.length : 0;
+  if (!rec.artifacts) rec.artifacts = {};
+  rec.artifacts[type] = fromFile;
+  if (prevCount !== nextCount) {
+    console.log(`[artifact] sync ${type} rec.artifacts from file (${prevCount} → ${nextCount} items, sid=${rec.id || '?'})`);
+  }
+}
+
 function persistArtifact(rec, type, artifact) {
   if (!rec.artifacts) rec.artifacts = {};
   rec.artifacts[type] = artifact;
@@ -374,6 +401,7 @@ function register(app, deps) {
     if (!ctx) return;
     const type = String(req.query.type || '');
     if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
     let artifact;
     try {
       artifact = await extractArtifact(ctx.rec, type);
@@ -436,6 +464,7 @@ function register(app, deps) {
     if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
     if (!itemId) return res.status(400).json({ error: 'itemId required' });
     if (type === 'arch') return res.status(400).json({ error: 'arch is not actionable' });
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
 
     const item = findItem(ctx.rec, type, itemId);
     if (!item) return res.status(404).json({ error: 'no such item' });
@@ -466,6 +495,7 @@ function register(app, deps) {
     if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
     if (!itemId) return res.status(400).json({ error: 'itemId required' });
     if (type === 'arch') return res.status(400).json({ error: 'arch has no items' });
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
 
     const item = findItem(ctx.rec, type, itemId);
     if (!item) return res.status(404).json({ error: 'no such item' });
@@ -505,6 +535,7 @@ function register(app, deps) {
     if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
     if (type === 'arch') return res.status(400).json({ error: 'arch items can\'t be voted on' });
     if (!itemId) return res.status(400).json({ error: 'itemId required' });
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
 
     const item = findItem(ctx.rec, type, itemId);
     if (!item) return res.status(404).json({ error: 'no such item' });
@@ -540,6 +571,7 @@ function register(app, deps) {
     if (!itemId) return res.status(400).json({ error: 'itemId required' });
     if (!text) return res.status(400).json({ error: 'comment text required' });
     if (text.length > COMMENT_TEXT_MAX) return res.status(400).json({ error: `comment too long (max ${COMMENT_TEXT_MAX} chars)` });
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
 
     const item = findItem(ctx.rec, type, itemId);
     if (!item) return res.status(404).json({ error: 'no such item' });
@@ -573,6 +605,7 @@ function register(app, deps) {
     if (!ids || ids.length < 2) {
       return res.status(400).json({ error: 'body.ids must be an array of ≥ 2 item ids' });
     }
+    _loadArtifactIntoRecFromFile(ctx.rec, 'plan');
     let result;
     try {
       const slashcmds = require('./slashcmds');
@@ -601,6 +634,7 @@ function register(app, deps) {
     if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
     if (type === 'arch') return res.status(400).json({ error: 'arch has no items' });
     if (!itemId) return res.status(400).json({ error: 'itemId required' });
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
     const artifact = ctx.rec.artifacts && ctx.rec.artifacts[type];
     if (!artifact || !Array.isArray(artifact.items)) return res.status(404).json({ error: 'no items' });
     const before = artifact.items.length;
@@ -619,6 +653,7 @@ function register(app, deps) {
     const commentId = String(req.query.commentId || '');
     if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
     if (!itemId || !commentId) return res.status(400).json({ error: 'itemId + commentId required' });
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
 
     const item = findItem(ctx.rec, type, itemId);
     if (!item) return res.status(404).json({ error: 'no such item' });
@@ -654,5 +689,6 @@ module.exports = {
     writeArtifactToFile,
     writeMycoReadmeIfMissing,
     readLegacyArchFromFile,
+    _loadArtifactIntoRecFromFile,
   },
 };

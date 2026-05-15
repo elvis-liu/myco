@@ -518,6 +518,29 @@ test_best_practices_template() {
   grep -q "Project auto-memory index" server/src/slashcmds.js \
     && pass "slashcmds: dedupe prompt section for memory index present" \
     || fail "slashcmds: dedupe prompt section for memory index present"
+  # Regression: every plan-mutation endpoint must sync rec.artifacts from
+  # the on-disk file BEFORE mutating. Stale in-memory state vs fresh
+  # _myco_/<type>.<ext> caused silent merge no-ops on mycobeta 2026-05-15.
+  grep -q "_loadArtifactIntoRecFromFile" server/src/artifacts.js \
+    && pass "artifacts: _loadArtifactIntoRecFromFile helper present" \
+    || fail "artifacts: _loadArtifactIntoRecFromFile helper present"
+  # Each of the 8 mutation endpoints (refresh, run, mark, vote, comment,
+  # plan/merge, delete-item, delete-comment) must call the sync.
+  count=$(grep -c "_loadArtifactIntoRecFromFile(ctx.rec" server/src/artifacts.js || echo 0)
+  if [ "$count" -ge 8 ]; then
+    pass "artifacts: sync helper wired into ≥8 mutation endpoints (got $count)"
+  else
+    fail "artifacts: sync helper called only $count times, expected ≥8"
+  fi
+  if have_node; then
+    if node test/artifact-sync-from-file.test.js >/dev/null 2>&1; then
+      pass "test/artifact-sync-from-file.test.js (5 cases)"
+    else
+      fail "test/artifact-sync-from-file.test.js — re-run with 'node test/artifact-sync-from-file.test.js' to see failures"
+    fi
+  else
+    skip "test/artifact-sync-from-file.test.js (no host node)"
+  fi
   if have_node; then
     if node test/dedupe-context.test.js >/dev/null 2>&1; then
       pass "test/dedupe-context.test.js (5 cases)"
