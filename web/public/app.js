@@ -1964,6 +1964,8 @@ function appendChatMessage(message) {
         if (newEl) list.children[lastIdx].replaceWith(newEl);
       }
       _updatePendingMenuFromMessage(last);
+      _rescanPendingMenuQueue();
+      _renderPermModal();
       _renderPendingMenuCallout();
       return;
     }
@@ -1971,6 +1973,8 @@ function appendChatMessage(message) {
   state.chatMessages.push(message);
   _appendChatMessageDom(message);
   _updatePendingMenuFromMessage(message);
+  _rescanPendingMenuQueue();
+  _renderPermModal();
   _renderPendingMenuCallout();
   _bumpChatUnreadIfHidden(message);
 }
@@ -2145,6 +2149,262 @@ function _updatePendingMenuFromMessage(m) {
 function _rescanPendingMenu() {
   state.pendingMenu = null;
   for (const m of state.chatMessages) _updatePendingMenuFromMessage(m);
+  _rescanPendingMenuQueue();
+  _renderPermModal();
+}
+
+// Phase 1.5 — the modal-popup queue. Walks the current chat messages
+// and collects EVERY menu that's still actionable (not picked, not
+// submitted, not superseded). When the SDK fires multiple parallel
+// canUseTool callbacks (e.g., subagent + parent agent, or two tools
+// in the same assistant message), each menu gets its own hash and
+// queues up here. Clicks always carry the menu's specific hash so
+// pty.handleMenuPick → session.resolveMenuPick lands on the right
+// pending promise in _pendingPermissions. The queue is a derived view
+// over state.chatMessages; the single state.pendingMenu still tracks
+// the latest for the bare-digit chat shortcut.
+function _rescanPendingMenuQueue() {
+  const q = [];
+  const msgs = Array.isArray(state.chatMessages) ? state.chatMessages : [];
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (!m || !m.meta || m.meta.kind !== 'menu' || !m.meta.menu) continue;
+    const menu = m.meta.menu;
+    if (!Array.isArray(menu.options) || !menu.options.length) continue;
+    if (m.meta.pickedN != null || m.meta.submitted || m.meta.superseded) continue;
+    if (m._pickedN != null || m._submitted || m._answered) continue;
+    q.push({
+      hash: menu.hash || '',
+      kind: menu.kind || 'permission',
+      multi: !!menu.multi,
+      question: menu.question || '',
+      options: menu.options.slice(),
+      target: m.meta.target || null,
+      ts: m.ts || null,
+      msgIdx: i,
+    });
+  }
+  state.pendingMenuQueue = q;
+  if (typeof state.pendingMenuIdx !== 'number') state.pendingMenuIdx = 0;
+  if (state.pendingMenuIdx >= q.length) state.pendingMenuIdx = Math.max(0, q.length - 1);
+  // When a new menu arrives, re-arm the modal (user may have dismissed
+  // it for a previous question — but a fresh canUseTool deserves
+  // attention again).
+  if (q.length > (state._lastPermQueueLen || 0)) state.permModalDismissed = false;
+  state._lastPermQueueLen = q.length;
+}
+
+// Heuristic: option labels like "Type something", "Other…", "Chat about
+// this" are signals that the user is supposed to provide free-text in
+// the NEXT chat turn rather than have the option's label be the literal
+// answer. After resolving such a pick we focus the chat input with a
+// contextual placeholder so the typing affordance is obvious.
+function _permOptionIsFreeText(label) {
+  return /^\s*(type\s+something|other|chat\s+about|reply|something else)/i.test(String(label || ''));
+}
+
+// Detect if a menu option signals "let me chat first" (vs "type the
+// answer here"). Both focus the chat input on click, but the hint text
+// changes.
+function _permOptionIsChatAbout(label) {
+  return /chat\s+about/i.test(String(label || ''));
+}
+
+function _renderPermModal() {
+  const modal = document.getElementById('perm-modal');
+  if (!modal) return;
+  const q = state.pendingMenuQueue || [];
+  if (state.permModalDismissed || !q.length) {
+    modal.hidden = true;
+    return;
+  }
+  let idx = state.pendingMenuIdx || 0;
+  if (idx >= q.length) idx = q.length - 1;
+  const m = q[idx];
+
+  const titleEl = document.getElementById('perm-modal-title');
+  const pagerEl = document.getElementById('perm-modal-pager');
+  const metaEl = document.getElementById('perm-modal-meta');
+  const questionEl = document.getElementById('perm-modal-question');
+  const optsEl = document.getElementById('perm-modal-opts');
+  const prevBtn = modal.querySelector('[data-perm-nav="prev"]');
+  const nextBtn = modal.querySelector('[data-perm-nav="next"]');
+
+  // Title varies by kind. "permission" = tool wants to do something;
+  // "plan"/AskUserQuestion = claude wants the user to pick from a list.
+  if (m.kind === 'plan' || m.kind === 'ask') {
+    titleEl.textContent = 'Claude is asking a question';
+  } else {
+    titleEl.textContent = m.target && m.target.tool
+      ? `Permission needed · ${m.target.tool}`
+      : 'Permission needed';
+  }
+
+  // Pager + nav buttons — visible only with multiple pendings. The
+  // pager reads "1 of 3" so the user knows there's more queued up.
+  if (q.length > 1) {
+    pagerEl.textContent = `${idx + 1} of ${q.length}`;
+    prevBtn.hidden = false;
+    nextBtn.hidden = false;
+    prevBtn.disabled = (idx === 0);
+    nextBtn.disabled = (idx === q.length - 1);
+  } else {
+    pagerEl.textContent = '';
+    prevBtn.hidden = true;
+    nextBtn.hidden = true;
+  }
+
+  // Meta line — session id (truncated) + tool target. Helps disambiguate
+  // when subagent + parent agent both have pendings open.
+  const sid = (state.activeId || '').slice(-8);
+  let metaHtml = `<code>session=${escHtml(sid)}</code> · hash=<code>${escHtml((m.hash || '').slice(-8))}</code>`;
+  if (m.target && m.target.input) {
+    metaHtml += ` · <code>${escHtml(String(m.target.input).slice(0, 80))}</code>`;
+  }
+  metaEl.innerHTML = metaHtml;
+
+  questionEl.textContent = m.question || '(no question text)';
+
+  // Render each option. For multi-select, show the current checked
+  // state with a glyph; clicking toggles via sendMenuToggle. A Submit
+  // button at the bottom finalises. For single-select, each click
+  // directly resolves via sendMenuPick.
+  optsEl.innerHTML = '';
+  for (const o of m.options) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'perm-modal-opt';
+    btn.dataset.n = String(o.n);
+    btn.dataset.hash = m.hash || '';
+    btn.dataset.label = String(o.label || '');
+    btn.dataset.multi = m.multi ? '1' : '0';
+    btn.dataset.checkbox = o.checkbox ? '1' : '0';
+    btn.dataset.checked = o.checked ? '1' : '0';
+    const freeText = _permOptionIsFreeText(o.label) && !m.multi;
+    btn.dataset.freeText = freeText ? '1' : '0';
+    let glyph;
+    if (m.multi && o.checkbox) glyph = o.checked ? '[✓]' : '[ ]';
+    else if (freeText)         glyph = '✎';
+    else                       glyph = `[${o.n}]`;
+    btn.innerHTML = `<span class="perm-modal-opt-num">${escHtml(glyph)}</span>${escHtml(o.label || '')}` +
+      (o.description ? `<span class="perm-modal-opt-desc">${escHtml(o.description)}</span>` : '');
+    optsEl.appendChild(btn);
+  }
+  if (m.multi) {
+    const submit = document.createElement('button');
+    submit.type = 'button';
+    submit.className = 'perm-modal-opt perm-modal-submit';
+    submit.dataset.action = 'submit';
+    submit.dataset.hash = m.hash || '';
+    submit.innerHTML = `<span class="perm-modal-opt-num">↵</span>Submit selection`;
+    optsEl.appendChild(submit);
+  }
+
+  modal.hidden = false;
+}
+
+// Modal click handler — single delegated listener. Handles option pick
+// (single-select), checkbox toggle (multi-select), Submit, prev/next
+// navigation, and the various defer affordances (X, backdrop click).
+function _bindPermModal() {
+  const modal = document.getElementById('perm-modal');
+  if (!modal || modal.dataset.bound === '1') return;
+  modal.dataset.bound = '1';
+  modal.addEventListener('click', (e) => {
+    const navBtn = e.target.closest('[data-perm-nav]');
+    if (navBtn) {
+      const dir = navBtn.dataset.permNav;
+      const q = state.pendingMenuQueue || [];
+      if (dir === 'prev' && state.pendingMenuIdx > 0) state.pendingMenuIdx--;
+      else if (dir === 'next' && state.pendingMenuIdx < q.length - 1) state.pendingMenuIdx++;
+      _renderPermModal();
+      return;
+    }
+    if (e.target.closest('[data-perm-defer]')) {
+      state.permModalDismissed = true;
+      _renderPermModal();
+      return;
+    }
+    const submitBtn = e.target.closest('.perm-modal-submit');
+    if (submitBtn) {
+      const hash = submitBtn.dataset.hash || '';
+      if (!sendMenuSubmit(hash)) return;
+      _markAwaitingClaude();
+      _markChatMenuAnswered(hash, { submitted: true });
+      _advanceModalAfterResolve();
+      return;
+    }
+    const optBtn = e.target.closest('.perm-modal-opt');
+    if (!optBtn || optBtn.disabled) return;
+    const n = parseInt(optBtn.dataset.n || '0', 10);
+    if (!Number.isFinite(n) || n < 1) return;
+    const hash = optBtn.dataset.hash || '';
+    const isMulti = optBtn.dataset.multi === '1';
+    const isCheckbox = optBtn.dataset.checkbox === '1';
+    const isFreeText = optBtn.dataset.freeText === '1';
+    const label = optBtn.dataset.label || '';
+    if (isMulti && isCheckbox) {
+      if (!sendMenuToggle(n, hash)) return;
+      const checked = optBtn.dataset.checked === '1';
+      optBtn.dataset.checked = checked ? '0' : '1';
+      const glyphEl = optBtn.querySelector('.perm-modal-opt-num');
+      if (glyphEl) glyphEl.textContent = checked ? '[ ]' : '[✓]';
+      return;
+    }
+    if (!sendMenuPick(n, hash)) return;
+    _markAwaitingClaude();
+    _markChatMenuAnswered(hash, { pickedN: n });
+    if (isFreeText) {
+      // Free-text branch — surface the chat input and prompt the user
+      // to type their actual answer in the next chat turn.
+      _focusChatInput(_permOptionIsChatAbout(label)
+        ? 'Type your follow-up — claude is waiting…'
+        : 'Type your custom answer — claude is waiting…');
+    }
+    _advanceModalAfterResolve();
+  });
+}
+
+// Stamp the chat-row matching this menu's hash as answered, so the
+// next _rescanPendingMenuQueue drops it from the queue without
+// waiting for the server's state-update echo. Same flags
+// _resolveMenuRow sets when the user clicks the inline chat card.
+function _markChatMenuAnswered(hash, opts) {
+  if (!hash || !Array.isArray(state.chatMessages)) return;
+  for (let i = 0; i < state.chatMessages.length; i++) {
+    const m = state.chatMessages[i];
+    if (m && m.meta && m.meta.menu && m.meta.menu.hash === hash) {
+      m._answered = true;
+      if (opts && opts.pickedN != null) m._pickedN = opts.pickedN;
+      if (opts && opts.submitted) m._submitted = true;
+      return;
+    }
+  }
+}
+
+// After a successful pick/submit in the modal: rebuild the queue
+// (which now excludes the just-resolved hash via the _answered flag),
+// then render the next pending — or hide the modal if none remain.
+function _advanceModalAfterResolve() {
+  _rescanPendingMenuQueue();
+  const q = state.pendingMenuQueue || [];
+  if (!q.length) {
+    state.pendingMenuIdx = 0;
+    document.getElementById('perm-modal').hidden = true;
+    return;
+  }
+  // If the resolved menu was before or at the current pointer, the
+  // remaining queue is shorter — clamp idx so we don't index past
+  // the new end.
+  if (state.pendingMenuIdx >= q.length) state.pendingMenuIdx = q.length - 1;
+  _renderPermModal();
+}
+
+function _focusChatInput(placeholderHint) {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  if (placeholderHint) input.setAttribute('data-perm-hint', placeholderHint);
+  input.focus();
 }
 
 // Readonly-view safety net for new sessions. If 8 seconds pass without
@@ -2254,6 +2514,11 @@ function _resolveMenuRow(btn, opts) {
       if (b === btn) b.classList.add('chat-menu-picked');
     });
   }
+  // Resolving via the inline chat row should drop the menu from the
+  // modal queue too — otherwise the popup re-opens for an already-
+  // answered question on the next state-update.
+  _rescanPendingMenuQueue();
+  _renderPermModal();
 }
 
 // Optimistic checkbox flip on a multi-select toggle click. The server
@@ -2837,12 +3102,75 @@ function _agentToolIcon(name) {
 // AGENT_DEFAULT_EXPANDED.
 const AGENT_DEFAULT_EXPANDED = new Set(['assistant_text', 'fatal']);
 const AGENT_NO_BODY = new Set(['permission_request', 'permission_resolved', 'rate_limit']);
+// Phase 1.5 — consecutive same-type cards merge into one row so the
+// timeline focuses on results, not chrome. Chrome events fold with a
+// count badge ("⟲ reattach × 3"); consecutive assistant_text blocks
+// (claude's narration between tool calls) concatenate into one
+// rendered markdown body so you see one continuous reply instead of
+// six fragmented cards. Merging stops as soon as a non-combinable
+// event lands — tool_use, tool_result, permission, anything else
+// interrupts the run and forces a fresh card.
+const AGENT_COMBINE_CONSECUTIVE = new Set([
+  'turn_start',
+  'iteration_start',
+  'rate_limit',
+  'agent_init_snapshot',
+  'assistant_text',
+]);
 
 function _appendAgentEvent(ev) {
   const pane = _ensureAgentLogPane();
   const ts = (ev.ts || '').slice(11, 19) || new Date().toISOString().slice(11, 19);
+
+  // Combine-consecutive: if the last card in the pane is the same type
+  // and the type is combinable, merge into it instead of appending. The
+  // existing card's count badge is incremented and its body either
+  // appends a timestamp line (chrome events) or concatenates new claude
+  // text into the markdown render.
+  if (AGENT_COMBINE_CONSECUTIVE.has(ev.type)) {
+    const prev = pane.lastElementChild;
+    if (prev && prev.dataset && prev.dataset.evType === ev.type) {
+      const count = (parseInt(prev.dataset.combineCount || '1', 10)) + 1;
+      prev.dataset.combineCount = String(count);
+      const badge = prev.querySelector('.agent-card-count');
+      if (badge) badge.textContent = '× ' + count;
+      else {
+        const kindEl = prev.querySelector('.agent-card-kind');
+        if (kindEl) {
+          const b = document.createElement('span');
+          b.className = 'agent-card-count agent-mute';
+          b.textContent = '× ' + count;
+          kindEl.insertAdjacentElement('afterend', b);
+        }
+      }
+      // For claude text blocks, concatenate the new text into the body
+      // and re-render the markdown so the user sees one continuous
+      // reply. Other chrome types keep their first body — incrementing
+      // the count is signal enough.
+      if (ev.type === 'assistant_text') {
+        const body = prev.querySelector('.agent-card-body');
+        if (body) {
+          const merged = (prev.dataset.assistantText || '') + '\n\n' + (ev.text || '');
+          prev.dataset.assistantText = merged;
+          body.innerHTML = renderMd(merged);
+          renderMermaidInContainer(body).catch(() => {});
+          // Also refresh the head summary preview to the latest first line.
+          const summary = prev.querySelector('.agent-card-summary');
+          if (summary) {
+            const firstLine = merged.split('\n').find((l) => l.trim()) || '';
+            summary.textContent = firstLine.slice(0, 120);
+          }
+        }
+      }
+      pane.scrollTop = pane.scrollHeight;
+      return;
+    }
+  }
+
   const card = document.createElement('div');
   card.className = 'agent-card agent-card-' + (ev.type || 'unknown');
+  card.dataset.evType = ev.type || 'unknown';
+  card.dataset.combineCount = '1';
   const head = document.createElement('div');
   head.className = 'agent-card-head';
   head.innerHTML = `<span class="agent-card-ts">${escHtml(ts)}</span>`;
@@ -2868,12 +3196,17 @@ function _appendAgentEvent(ev) {
     head.innerHTML += `<span class="agent-card-kind agent-card-turn">▶ turn</span>
       <span class="agent-card-summary agent-mute">${escHtml(prompt)}</span>`;
     body.innerHTML = `<div class="agent-prompt">${escHtml(ev.prompt || '')}</div>`;
+  } else if (ev.type === 'iteration_start') {
+    head.innerHTML += `<span class="agent-card-kind agent-mute">⟳ iter</span>
+      <span class="agent-card-summary agent-mute">SDK query() ${ev.resume ? 'resumed' : 'started'}</span>`;
+    body.innerHTML = `<span class="agent-mute">${ev.resume ? 'Resuming a prior sdk-session.' : 'New query iteration began.'}</span>`;
   } else if (ev.type === 'assistant_text') {
     const firstLine = String(ev.text || '').split('\n').find((l) => l.trim()) || '';
     head.innerHTML += `<span class="agent-card-kind agent-card-claude">claude</span>
       <span class="agent-card-summary">${escHtml(firstLine.slice(0, 120))}</span>`;
     body.className += ' agent-card-md';
     body.innerHTML = renderMd(ev.text || '');
+    card.dataset.assistantText = ev.text || '';   // seed merge accumulator
     renderMermaidInContainer(body).catch(() => {});
   } else if (ev.type === 'tool_use') {
     const icon = _agentToolIcon(ev.name);
@@ -3307,6 +3640,51 @@ function bindChatUi() {
   bindChatpaneResize();
   bindChatAutocomplete();
   bindArtifactToggles();
+  _bindPermModal();
+  _bindPermModalKeys();
+}
+
+// Global key handler for the permission modal: Esc defers, digits 1-9
+// pick the matching option (single-select only — multi-select needs
+// explicit Submit). Registered once at chat-UI init.
+function _bindPermModalKeys() {
+  if (document.body.dataset.permKeysBound === '1') return;
+  document.body.dataset.permKeysBound = '1';
+  document.addEventListener('keydown', (e) => {
+    const modal = document.getElementById('perm-modal');
+    if (!modal || modal.hidden) return;
+    // Esc → defer. Doesn't interrupt the agent — the menus remain in
+    // the queue, the user can reopen via the sticky chat card.
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      state.permModalDismissed = true;
+      _renderPermModal();
+      return;
+    }
+    // Don't steal digits if focus is on the chat input or anywhere
+    // typeable — the user might be composing.
+    const tgt = e.target;
+    if (tgt && (tgt.tagName === 'TEXTAREA' || tgt.tagName === 'INPUT' || tgt.isContentEditable)) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (!/^[1-9]$/.test(e.key)) return;
+    const q = state.pendingMenuQueue || [];
+    const idx = state.pendingMenuIdx || 0;
+    const cur = q[idx];
+    if (!cur || cur.multi) return;     // multi-select needs Submit
+    const n = parseInt(e.key, 10);
+    const opt = (cur.options || []).find((o) => o.n === n);
+    if (!opt) return;
+    e.preventDefault();
+    if (!sendMenuPick(n, cur.hash)) return;
+    _markAwaitingClaude();
+    _markChatMenuAnswered(cur.hash, { pickedN: n });
+    if (_permOptionIsFreeText(opt.label)) {
+      _focusChatInput(_permOptionIsChatAbout(opt.label)
+        ? 'Type your follow-up — claude is waiting…'
+        : 'Type your custom answer — claude is waiting…');
+    }
+    _advanceModalAfterResolve();
+  });
 }
 
 // ─── Chatpane tabs (Discussion / Plan / Arch / Test) ─────────────────────────

@@ -3747,6 +3747,167 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 /* Phase 1 retired the per-card <details> elements (.agent-card-collapse).
    The whole card body is now toggled via the head's click handler and
    the .agent-card-expanded / .agent-card-collapsed classes above. */
+
+/* Count badge for combined consecutive cards. Subtle "× 3" appended
+   after the kind chip so a long run of reattaches / iter starts / etc.
+   reads as one row. */
+.agent-card-count {
+  font-size: 0.72rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 0 4px;
+}
+
+/* ─── Permission / AskUserQuestion modal ──────────────────────────────
+   Phase 1.5: pop a centered modal whenever the chat-pane menu queue is
+   non-empty. The user can't accidentally scroll past an open
+   canUseTool callback. Multiple parallel pendings (e.g., subagent +
+   parent agent both asking) navigate with prev/next; every click
+   carries the menu's hash so the server's _pendingPermissions Map
+   routes the resolve to the correct promise. */
+.perm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.perm-modal[hidden] { display: none; }
+.perm-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  cursor: pointer;       /* click-outside-to-defer */
+}
+.perm-modal-box {
+  position: relative;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-left: 4px solid #f0b440;
+  border-radius: 10px;
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow: auto;
+  padding: 16px 18px 14px;
+  box-shadow:
+    0 0 0 1px rgba(210, 153, 34, .25),
+    0 12px 40px -8px rgba(0, 0, 0, 0.6);
+  animation: perm-modal-in 0.16s ease-out;
+}
+@keyframes perm-modal-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .perm-modal-box { animation: none; }
+}
+.perm-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #21262d;
+}
+.perm-modal-title {
+  flex: 1;
+  font-weight: 600;
+  color: #f0b440;
+  font-size: 0.92rem;
+}
+.perm-modal-pager {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  color: var(--muted, #8b949e);
+  padding: 0 4px;
+}
+.perm-modal-nav,
+.perm-modal-close {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted, #8b949e);
+  font: inherit;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.perm-modal-nav:hover,
+.perm-modal-close:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg, #c9d1d9);
+}
+.perm-modal-close { font-size: 1.1rem; line-height: 1; }
+.perm-modal-meta {
+  font-size: 0.78rem;
+  color: var(--muted, #8b949e);
+  margin-bottom: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.perm-modal-meta code {
+  background: rgba(255, 255, 255, .06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.perm-modal-question {
+  color: var(--fg, #c9d1d9);
+  font-size: 0.95rem;
+  line-height: 1.4;
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.perm-modal-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.perm-modal-opt {
+  background: transparent;
+  color: var(--fg, #c9d1d9);
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 9px 12px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  font-size: 0.9rem;
+}
+.perm-modal-opt:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.10);
+  border-color: rgba(88, 166, 255, 0.45);
+}
+.perm-modal-opt:disabled { opacity: 0.45; cursor: default; }
+.perm-modal-opt-num {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted, #8b949e);
+  margin-right: 8px;
+}
+.perm-modal-opt-desc {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted, #8b949e);
+  margin-top: 3px;
+}
+.perm-modal-hint {
+  font-size: 0.72rem;
+  color: var(--muted, #8b949e);
+  text-align: center;
+  padding-top: 8px;
+  border-top: 1px solid #21262d;
+}
+.perm-modal-hint kbd {
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid #30363d;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+}
 .agent-tool-result-preview {
   margin: 0;
   max-height: 250px;

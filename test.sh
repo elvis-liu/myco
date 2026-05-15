@@ -608,6 +608,64 @@ test_best_practices_template() {
   grep -Pzoq "chat-msg\.chat-msg-menu:not\(\.chat-msg-menu-collapsed\)[\s\S]{0,800}position:\s*sticky" web/public/styles.css \
     && pass "styles.css: active permission menu is sticky-bottom" \
     || fail "styles.css: active permission menu is sticky-bottom"
+  # Phase 1.5: combine consecutive chrome events (turn_start, iteration_start,
+  # rate_limit, agent_init_snapshot, assistant_text) into one row. Multiple
+  # claude text blocks in the same turn fold into one card with merged
+  # markdown body; chrome events accumulate a × N count badge. Keeps the
+  # timeline focused on results (assistant_text / tool_use / tool_result /
+  # permission).
+  grep -q "AGENT_COMBINE_CONSECUTIVE" web/public/app.js \
+    && pass "app.js: combine-consecutive event set" \
+    || fail "app.js: combine-consecutive event set"
+  grep -q "iteration_start" web/public/app.js \
+    && pass "app.js: iteration_start renderer case" \
+    || fail "app.js: iteration_start renderer case"
+  grep -q "agent-card-count" web/public/styles.css \
+    && pass "styles.css: combined-card × N count badge" \
+    || fail "styles.css: combined-card × N count badge"
+  # Phase 1.5: permission / AskUserQuestion popup. Modal lives in
+  # index.html; the JS in app.js maintains state.pendingMenuQueue
+  # (a derived view over state.chatMessages — finds every menu that
+  # isn't picked/submitted/superseded). When multiple parallel
+  # canUseTool callbacks race (subagent + parent, or two tools in one
+  # assistant turn), each menu has its own hash; the prev/next nav
+  # cycles the queue and every click sends {t:'menu-pick', n, hash}
+  # so the server routes the resolve to the matching _pendingPermissions
+  # entry. Esc defers; click outside defers; digits 1-9 pick a single-
+  # select option without clicking. Multi-select renders checkbox
+  # toggles + a Submit button. Free-text options ("Type something" /
+  # "Chat about it") send the pick AND focus the chat input so the
+  # user types the actual answer in the next turn.
+  grep -q 'id="perm-modal"' web/public/index.html \
+    && pass "index.html: perm-modal element" \
+    || fail "index.html: perm-modal element"
+  grep -q "perm-modal-backdrop" web/public/index.html \
+    && pass "index.html: perm-modal backdrop (click-to-defer)" \
+    || fail "index.html: perm-modal backdrop (click-to-defer)"
+  grep -q "function _renderPermModal" web/public/app.js \
+    && pass "app.js: _renderPermModal defined" \
+    || fail "app.js: _renderPermModal defined"
+  grep -q "function _rescanPendingMenuQueue" web/public/app.js \
+    && pass "app.js: _rescanPendingMenuQueue defined" \
+    || fail "app.js: _rescanPendingMenuQueue defined"
+  grep -q "function _bindPermModalKeys" web/public/app.js \
+    && pass "app.js: _bindPermModalKeys (Esc + digit handler)" \
+    || fail "app.js: _bindPermModalKeys (Esc + digit handler)"
+  grep -q "function _permOptionIsFreeText" web/public/app.js \
+    && pass "app.js: free-text option detector" \
+    || fail "app.js: free-text option detector"
+  grep -q "state\.pendingMenuQueue" web/public/app.js \
+    && pass "app.js: state.pendingMenuQueue is read/written" \
+    || fail "app.js: state.pendingMenuQueue is read/written"
+  grep -q "perm-modal-submit" web/public/app.js \
+    && pass "app.js: multi-select Submit handled in modal" \
+    || fail "app.js: multi-select Submit handled in modal"
+  grep -q "\.perm-modal-box" web/public/styles.css \
+    && pass "styles.css: perm-modal-box styling" \
+    || fail "styles.css: perm-modal-box styling"
+  grep -Pzoq "\.perm-modal\s*\{[\s\S]{0,200}position:\s*fixed" web/public/styles.css \
+    && pass "styles.css: perm-modal is position:fixed overlay" \
+    || fail "styles.css: perm-modal is position:fixed overlay"
   # Phase 4: streaming-input + interrupt semantics. AgentSession holds a
   # single long-lived query() with an AsyncMessageQueue prompt;
   # interrupt() aborts via AbortController and the next write() resumes.

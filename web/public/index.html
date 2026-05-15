@@ -14,7 +14,7 @@
   <link rel="apple-touch-icon" href="/hetu.jpg?v=1" />
   <title>myco</title>
   <link rel="stylesheet" href="/vendor/xterm-css/xterm.css" />
-  <link rel="stylesheet" href="styles.css?v=131" />
+  <link rel="stylesheet" href="styles.css?v=132" />
   <link rel="stylesheet" href="/vendor/github-dark.min.css" />
 </head>
 <body>
@@ -217,6 +217,31 @@
   </div>
 
   <script src="/vendor/xterm/xterm.js"></script>
+  <!-- Permission / AskUserQuestion modal. Hidden by default; shown by
+       _renderPermModal whenever state.pendingMenuQueue has entries and
+       the user hasn't explicitly dismissed it. Routes every click back
+       through `sendMenuPick(n, hash)` — the hash uniquely identifies
+       the menu (derived from the SDK toolUseID), so multiple parallel
+       canUseTool requests (e.g., subagent tool calls in parallel)
+       resolve to the right pending promise on the server. -->
+  <div id="perm-modal" class="perm-modal" hidden>
+    <div class="perm-modal-backdrop" data-perm-defer="1"></div>
+    <div class="perm-modal-box" role="dialog" aria-modal="true" aria-labelledby="perm-modal-title">
+      <div class="perm-modal-head">
+        <button class="perm-modal-nav" data-perm-nav="prev" title="Previous pending" hidden>◀</button>
+        <span class="perm-modal-pager" id="perm-modal-pager"></span>
+        <span class="perm-modal-title" id="perm-modal-title">Permission needed</span>
+        <button class="perm-modal-nav" data-perm-nav="next" title="Next pending" hidden>▶</button>
+        <button class="perm-modal-close" data-perm-defer="1" title="Defer — modal will reopen when you click the chat menu card">×</button>
+      </div>
+      <div class="perm-modal-meta" id="perm-modal-meta"></div>
+      <div class="perm-modal-question" id="perm-modal-question"></div>
+      <div class="perm-modal-opts" id="perm-modal-opts"></div>
+      <div class="perm-modal-hint">
+        <kbd>Esc</kbd> defers · click outside to defer · digit keys (1, 2, 3…) also pick
+      </div>
+    </div>
+  </div>
   <script src="/vendor/xterm-fit/addon-fit.js"></script>
   <script src="/vendor/xterm-webgl/addon-webgl.js"></script>
   <script src="/vendor/xterm-canvas/addon-canvas.js"></script>
@@ -225,6 +250,6 @@
   <script src="/vendor/mermaid.min.js"></script>
   <script>if (typeof mermaid !== 'undefined') mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
   <script src="keyboard.js?v=7"></script>
-  <script src="app.js?v=178"></script>
+  <script src="app.js?v=179"></script>
 </body>
 </html>
