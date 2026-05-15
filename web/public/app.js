@@ -3341,10 +3341,14 @@ function _renderMergeProposals(proposals, errMsg) {
           return;
         }
         const data = await res.json().catch(() => ({}));
+        // Pull the applied group out of the callout BEFORE rebuilding
+        // the items list. renderArtifact preserves the rest of the
+        // callout across its body.innerHTML rebuild (see top of
+        // renderArtifact), so the remaining proposals stay visible
+        // without disappear-and-flicker-back.
+        group.remove();
+        if (!node.querySelector('.plan-merge-group')) node.remove();
         renderArtifact('plan', data.artifact);
-        // Re-render the remaining callout groups (this one dropped, others kept).
-        const remaining = proposals.filter((_, j) => j !== Number(group.dataset.mergeIdx));
-        _renderMergeProposals(remaining, null);
       } catch (err) {
         btn.textContent = 'Apply';
         btn.disabled = false;
@@ -3366,6 +3370,14 @@ function _renderMergeProposals(proposals, errMsg) {
 function renderArtifact(type, artifact) {
   const body = document.getElementById(`artifact-body-${type}`);
   if (!body) return;
+  // Preserve the merge-proposals callout across renderArtifact rebuilds.
+  // The Apply button handler relies on the callout DOM identity staying
+  // stable so the remaining proposals don't flicker (disappear during
+  // body.innerHTML rebuild, then re-mount). We detach here, do the
+  // rebuild, then re-insert at the top below. Bound event listeners on
+  // its buttons survive the detach.
+  const preservedCallout = type === 'plan' ? body.querySelector('.plan-merge-callout') : null;
+  if (preservedCallout) preservedCallout.remove();
   if (type === 'arch') {
     const md = artifact && artifact.markdown ? artifact.markdown.trim() : '';
     // Best-practices banner is prepended when the Arch-tab toggle is on
@@ -3392,6 +3404,10 @@ function renderArtifact(type, artifact) {
   const items = (artifact && Array.isArray(artifact.items)) ? artifact.items : [];
   if (!items.length) {
     body.innerHTML = '<div class="artifact-empty">Nothing extracted. The recent session activity may not contain todos.</div>';
+    // Re-attach preservedCallout (no flicker rule applies on the empty
+    // path too — the user just merged the last item, the callout might
+    // still have more proposals to render).
+    if (preservedCallout) body.insertBefore(preservedCallout, body.firstChild);
     return;
   }
   const me = state.chatUser || '';
@@ -3502,6 +3518,14 @@ function renderArtifact(type, artifact) {
         if (input && input.value.trim()) onArtifactComment(type, id, input.value.trim());
       });
     });
+  }
+  // Re-attach the merge-proposals callout that we detached at the top
+  // of this function. Putting it back at the start of body keeps the
+  // remaining proposals visible right above the items list, with the
+  // SAME DOM nodes (and bound click handlers) the user was already
+  // interacting with. No flicker.
+  if (preservedCallout) {
+    body.insertBefore(preservedCallout, body.firstChild);
   }
 }
 

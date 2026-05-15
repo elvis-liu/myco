@@ -506,6 +506,20 @@ test_best_practices_template() {
   grep -q "artifact-item-merged" web/public/styles.css \
     && pass "styles.css: artifact-item-merged style present" \
     || fail "styles.css: artifact-item-merged style present"
+  # Regression: clicking Apply on one merge proposal must not cause
+  # the OTHER proposals in the callout to flicker (disappear during
+  # renderArtifact's body.innerHTML rebuild, then re-mount). Fix:
+  # renderArtifact detaches `.plan-merge-callout` before the rebuild
+  # and re-inserts it after; Apply handler just removes the one
+  # clicked .plan-merge-group node directly.
+  grep -q "preservedCallout" web/public/app.js \
+    && pass "app.js: renderArtifact preserves the merge callout across rebuild" \
+    || fail "app.js: renderArtifact preserves the merge callout across rebuild"
+  if grep -q "_renderMergeProposals(remaining" web/public/app.js; then
+    fail "app.js: Apply handler still calls _renderMergeProposals(remaining) — flicker not fixed"
+  else
+    pass "app.js: Apply handler no longer rebuilds the callout (no flicker)"
+  fi
   # dedupePlanItems prompt enrichment: project CLAUDE.md + auto-memory
   # are inlined ahead of the item list so the LLM has project-specific
   # context when judging "same underlying concern".
