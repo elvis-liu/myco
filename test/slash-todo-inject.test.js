@@ -116,6 +116,115 @@ async function run(text, ctx) {
     assert.strictEqual(data.items[0].text, body);
   });
 
+  // ── per-layer prefixed ids (since 2026-05-15) ──────────────────────
+
+  await t('new items get fr-1 / td-1 / bug-1 (per-layer counter)', async () => {
+    const sid = 'sess-id-a';
+    const cwd = seedSession(sid);
+    await run('/fr a', { sessionId: sid, absCwd: cwd });
+    await run('/td b', { sessionId: sid, absCwd: cwd });
+    await run('/bug c', { sessionId: sid, absCwd: cwd });
+    const data = JSON.parse(fs.readFileSync(path.join(cwd, '_myco_', 'plan.json'), 'utf8'));
+    const byText = Object.fromEntries(data.items.map((it) => [it.text, it.id]));
+    assert.strictEqual(byText['a'], 'fr-1');
+    assert.strictEqual(byText['b'], 'td-1');
+    assert.strictEqual(byText['c'], 'bug-1');
+  });
+
+  await t('counter increments per layer (fr-1, fr-2; td-1, td-2)', async () => {
+    const sid = 'sess-id-b';
+    const cwd = seedSession(sid);
+    await run('/fr one', { sessionId: sid, absCwd: cwd });
+    await run('/td two', { sessionId: sid, absCwd: cwd });
+    await run('/fr three', { sessionId: sid, absCwd: cwd });
+    await run('/td four', { sessionId: sid, absCwd: cwd });
+    const data = JSON.parse(fs.readFileSync(path.join(cwd, '_myco_', 'plan.json'), 'utf8'));
+    const byText = Object.fromEntries(data.items.map((it) => [it.text, it.id]));
+    assert.strictEqual(byText['one'], 'fr-1');
+    assert.strictEqual(byText['three'], 'fr-2');
+    assert.strictEqual(byText['two'], 'td-1');
+    assert.strictEqual(byText['four'], 'td-2');
+  });
+
+  await t('hex-id legacy items are ignored by the counter scan', async () => {
+    // Seed with two pre-existing hex-id items, then add a fresh /td
+    // and confirm the new id starts at td-1 (not td-3 — the legacy
+    // items don't count).
+    const sid = 'sess-id-c';
+    const cwd = seedSession(sid);
+    const store = sessionsMod.loadStore();
+    const rec = store.sessions[sid];
+    rec.artifacts.plan = {
+      items: [
+        { id: 'a1b2c3d4e5f6', text: 'legacy 1', layer: 'Todo', done: false, source: 'user' },
+        { id: 'deadbeefcafe', text: 'legacy 2', layer: 'Todo', done: false, source: 'user' },
+      ],
+      updatedAt: null,
+    };
+    sessionsMod.saveStore();
+    await run('/td fresh', { sessionId: sid, absCwd: cwd });
+    const data = JSON.parse(fs.readFileSync(path.join(cwd, '_myco_', 'plan.json'), 'utf8'));
+    const fresh = data.items.find((it) => it.text === 'fresh');
+    assert.strictEqual(fresh.id, 'td-1', 'fresh /td should start at td-1 — legacy hex ids are not counted');
+  });
+
+  // ── /merge ─────────────────────────────────────────────────────────
+
+  await t('/merge collapses N items of same layer into lowest-numbered canonical', async () => {
+    const sid = 'sess-merge-a';
+    const cwd = seedSession(sid);
+    await run('/td first', { sessionId: sid, absCwd: cwd });
+    await run('/td second', { sessionId: sid, absCwd: cwd });
+    await run('/td third', { sessionId: sid, absCwd: cwd });
+    const replies = await run('/merge td-1 td-2 td-3', { sessionId: sid, absCwd: cwd });
+    assert.ok(replies.some((r) => /merged 3.*td-1/.test(r)), 'expected confirmation naming td-1: ' + JSON.stringify(replies));
+    const data = JSON.parse(fs.readFileSync(path.join(cwd, '_myco_', 'plan.json'), 'utf8'));
+    assert.strictEqual(data.items.length, 1, 'only canonical survives');
+    assert.strictEqual(data.items[0].id, 'td-1');
+    assert.ok(/first/.test(data.items[0].text), 'canonical retains its own body');
+    assert.ok(/merged from `td-2`/.test(data.items[0].text), 'canonical includes the td-2 divider');
+    assert.ok(/merged from `td-3`/.test(data.items[0].text), 'canonical includes the td-3 divider');
+    assert.deepStrictEqual(data.items[0].mergedFrom, ['td-2', 'td-3'],
+      'mergedFrom should list the absorbed ids');
+  });
+
+  await t('/merge refuses to cross layers', async () => {
+    const sid = 'sess-merge-b';
+    const cwd = seedSession(sid);
+    await run('/td a', { sessionId: sid, absCwd: cwd });
+    await run('/bug b', { sessionId: sid, absCwd: cwd });
+    const replies = await run('/merge td-1 bug-1', { sessionId: sid, absCwd: cwd });
+    assert.ok(replies.some((r) => /cannot merge across layers/i.test(r)),
+      'expected rejection, got: ' + JSON.stringify(replies));
+    const data = JSON.parse(fs.readFileSync(path.join(cwd, '_myco_', 'plan.json'), 'utf8'));
+    assert.strictEqual(data.items.length, 2, 'both items remain');
+  });
+
+  await t('/merge with an unknown id reports it without mutating', async () => {
+    const sid = 'sess-merge-c';
+    const cwd = seedSession(sid);
+    await run('/td only', { sessionId: sid, absCwd: cwd });
+    const replies = await run('/merge td-1 td-99', { sessionId: sid, absCwd: cwd });
+    assert.ok(replies.some((r) => /unknown id/i.test(r) && /td-99/.test(r)),
+      'expected unknown-id reply, got: ' + JSON.stringify(replies));
+    const data = JSON.parse(fs.readFileSync(path.join(cwd, '_myco_', 'plan.json'), 'utf8'));
+    assert.strictEqual(data.items.length, 1);
+  });
+
+  await t('/merge re-run on already-merged canonical keeps mergedFrom additive', async () => {
+    const sid = 'sess-merge-d';
+    const cwd = seedSession(sid);
+    await run('/td one', { sessionId: sid, absCwd: cwd });
+    await run('/td two', { sessionId: sid, absCwd: cwd });
+    await run('/td three', { sessionId: sid, absCwd: cwd });
+    await run('/merge td-1 td-2', { sessionId: sid, absCwd: cwd });
+    await run('/merge td-1 td-3', { sessionId: sid, absCwd: cwd });
+    const data = JSON.parse(fs.readFileSync(path.join(cwd, '_myco_', 'plan.json'), 'utf8'));
+    assert.strictEqual(data.items.length, 1);
+    assert.deepStrictEqual(data.items[0].mergedFrom, ['td-2', 'td-3'],
+      'mergedFrom should accumulate across multiple /merge calls');
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch {}
   if (failed) process.exit(1);

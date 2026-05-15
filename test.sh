@@ -362,7 +362,7 @@ test_best_practices_template() {
   # otherwise silently drop the in-memory-only addition on next open.
   if have_node; then
     if node test/slash-todo-inject.test.js >/dev/null 2>&1; then
-      pass "test/slash-todo-inject.test.js (5 cases)"
+      pass "test/slash-todo-inject.test.js (12 cases)"
     else
       fail "test/slash-todo-inject.test.js — re-run with 'node test/slash-todo-inject.test.js' to see failures"
     fi
@@ -448,6 +448,31 @@ test_best_practices_template() {
   grep -q "silent-drop:" server/src/pty.js \
     && pass "pty.js: handleMenuPick silent-drop paths now log" \
     || fail "pty.js: handleMenuPick silent-drop paths now log"
+  # Plan-item ids switched to per-layer counters (fr-1, td-1, bug-1)
+  # in 2026-05-15. Legacy hex ids still valid but no longer generated.
+  # /merge collapses N items into the lowest-numbered canonical;
+  # /dedupe asks claude to propose merge groups (no auto-apply).
+  grep -q "PLAN_LAYER_PREFIX" server/src/slashcmds.js \
+    && pass "slashcmds: per-layer id-prefix table present" \
+    || fail "slashcmds: per-layer id-prefix table present"
+  grep -q "_nextPlanItemId" server/src/slashcmds.js \
+    && pass "slashcmds: _nextPlanItemId counter present" \
+    || fail "slashcmds: _nextPlanItemId counter present"
+  grep -q "names: \['merge'\]" server/src/slashcmds.js \
+    && pass "slashcmds: /merge command registered" \
+    || fail "slashcmds: /merge command registered"
+  grep -q "names: \['dedupe'\]" server/src/slashcmds.js \
+    && pass "slashcmds: /dedupe command registered" \
+    || fail "slashcmds: /dedupe command registered"
+  grep -q "function handleMerge" server/src/slashcmds.js \
+    && pass "slashcmds: handleMerge present" \
+    || fail "slashcmds: handleMerge present"
+  grep -q "function handleDedupe\|async function handleDedupe" server/src/slashcmds.js \
+    && pass "slashcmds: handleDedupe present (LLM-proposal flow)" \
+    || fail "slashcmds: handleDedupe present (LLM-proposal flow)"
+  grep -q "runClaudeP" server/src/btw.js \
+    && pass "btw.js: runClaudeP exported for /dedupe" \
+    || fail "btw.js: runClaudeP exported for /dedupe"
   if have_node; then
     if node test/chat-routing.test.js >/dev/null 2>&1; then
       pass "test/chat-routing.test.js (7 cases)"

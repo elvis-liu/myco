@@ -227,4 +227,4 @@ function askAboutFile({ cwd, filePath, fileContent, anchor, history, question })
   return runClaudeP(cwd, buildFilePrompt({ filePath, fileContent, anchor, history, question }));
 }
 
-module.exports = { askAssistant, askAboutFile, shouldAskAssistant, ASSISTANT_USER };
+module.exports = { askAssistant, askAboutFile, shouldAskAssistant, ASSISTANT_USER, runClaudeP };
