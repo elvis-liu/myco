@@ -508,9 +508,13 @@ test_best_practices_template() {
   ! grep -q "chat-menu-opts\|chat-menu-submit\|chat-menu-toggle\|chat-menu-glyph\|chat-menu-hint" web/public/styles.css \
     && pass "styles.css: old inline-menu rules removed" \
     || fail "styles.css: old inline-menu rules still present"
-  grep -q "chat-menu-deferred" web/public/app.js \
-    && pass "app.js: pending menu row carries 'open in popup' hint" \
-    || fail "app.js: pending menu row carries 'open in popup' hint"
+  # The '↗ Awaiting answer — open in popup' affordance line was
+  # retired (2026-05-15). The chat-msg row itself carries
+  # data-perm-reopen='1' + .chat-msg-menu-active so clicking
+  # anywhere on an active menu reopens the modal.
+  grep -q "chat-msg-menu-active" web/public/app.js \
+    && pass "app.js: active menu row marked click-to-reopen-modal" \
+    || fail "app.js: active menu row not marked click-to-reopen-modal"
   grep -q "data-perm-reopen" web/public/app.js \
     && pass "app.js: clicking the chat row re-opens perm-modal" \
     || fail "app.js: clicking the chat row re-opens perm-modal"
