@@ -432,11 +432,15 @@ function redact(msg) {
 
 app.post('/sessions', requireAuth, async (req, res) => {
   try {
-    const { id, cwd } = await spawnSession(req.body.cwd, req.user, {
+    const { id, cwd, mode } = await spawnSession(req.body.cwd, req.user, {
       cols: req.body.cols,
       rows: req.body.rows,
+      // Opt into the SDK-driven driver (agent-sdk-research branch phase 1+).
+      // Default unset → 'pty'. Pass {"mode":"agent"} in the POST body to spawn
+      // an SDK session. PTY sessions remain the default until phase 8 flips it.
+      mode: req.body.mode === 'agent' ? 'agent' : undefined,
     });
-    res.json({ session_id: id, cwd });
+    res.json({ session_id: id, cwd, mode });
   } catch (err) {
     res.status(400).json({ error: redact(err.message) });
   }

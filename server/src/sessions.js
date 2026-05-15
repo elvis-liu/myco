@@ -380,7 +380,15 @@ async function spawnSession(rawCwd, user = 'default', opts = {}) {
   const rows = clamp(opts.rows, 10, 200, 30);
   const createdAt = new Date().toISOString();
 
-  const record = { id, user, cwd: toRel(absCwd, user), absCwd, claudeSessionId: null, createdAt };
+  // mode: 'pty' (default — claude CLI in node-pty, the legacy path)
+  //   or  'agent' (Claude Agent SDK driving structured events; opt-in
+  //                during the multi-phase migration on the
+  //                agent-sdk-research branch).
+  // Persisted on the record so ensureLiveSession reattach respawns
+  // with the same driver class.
+  const mode = opts.mode === 'agent' ? 'agent' : 'pty';
+
+  const record = { id, user, cwd: toRel(absCwd, user), absCwd, claudeSessionId: null, createdAt, mode };
   putSession(record);
 
   // Inject the myco best-practices template into the project's CLAUDE.md
@@ -390,10 +398,17 @@ async function spawnSession(rawCwd, user = 'default', opts = {}) {
   // local changes (we never rewrite an existing sentinel block).
   injectBestPracticesIntoClaudeMd(absCwd);
 
+  if (mode === 'agent') {
+    const { spawnAgent } = require('./agent-session');
+    const session = spawnAgent(id, { cwd: absCwd, cols, rows });
+    ptyMod._registerExternalSession(id, session);
+    return { id, cwd: record.cwd, mode };
+  }
+
   const spawnedAt = Date.now();
   ptyMod.spawnClaude(id, { cwd: absCwd, cols, rows });
   captureClaudeSessionId(id, absCwd, spawnedAt);
-  return { id, cwd: record.cwd };
+  return { id, cwd: record.cwd, mode };
 }
 
 // Best-practices block written into a project's CLAUDE.md. Wrapped in

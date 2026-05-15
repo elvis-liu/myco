@@ -503,6 +503,24 @@ function getSession(sessionId) {
   return sessions.get(sessionId) || null;
 }
 
+// Register a non-PTY session object (currently: AgentSession from
+// server/src/agent-session.js, the SDK-driven driver introduced in
+// the agent-sdk-research branch's phase 1). Lets the WS attach +
+// state-update + chat plumbing find it via the same `sessions` map
+// used for PtySession.
+function _registerExternalSession(sessionId, session) {
+  sessions.set(sessionId, session);
+  if (typeof session.on === 'function') {
+    session.on('exit', () => {
+      setTimeout(() => {
+        const cur = sessions.get(sessionId);
+        if (cur === session) sessions.delete(sessionId);
+      }, 250);
+    });
+  }
+  return session;
+}
+
 function killSession(sessionId) {
   const s = sessions.get(sessionId);
   if (s) { s.kill(); sessions.delete(sessionId); }
@@ -1167,6 +1185,13 @@ function attachWebSocket(session, ws, opts = {}) {
   const user = opts.user || null;
   const sessionId = session.sessionId;
 
+  // Agent-mode session (SDK-driven, phase 1 of the agent-sdk-research
+  // migration) — branch into the agent-event stream path. PTY sessions
+  // fall through to the legacy path below.
+  if (session.mode === 'agent') {
+    return _attachAgentWebSocket(session, ws, opts);
+  }
+
   // Replay ring buffer first so reconnects see prior context.
   const replay = Buffer.concat(session.buffer.map((d) => Buffer.from(d, 'utf8')));
   if (replay.length) {
@@ -1297,6 +1322,82 @@ function attachWebSocket(session, ws, opts = {}) {
     session.off('mode-change', onModeChange);
     session.off('state-update', onStateUpdate);
     stopTranscript();
+  });
+}
+
+// Agent-mode WS attach. Streams structured SDK events as `agent-event`
+// frames instead of `output` (PTY bytes). Replays the per-session
+// event ring on attach so reconnects see prior context.
+//
+// Phase 1 scope: minimal. Chat history + chat events still flow exactly
+// as in the PTY path. State-update (tool-progress) is wired. Menu
+// broadcasts arrive in phase 2 when canUseTool is hooked up.
+function _attachAgentWebSocket(session, ws, opts = {}) {
+  const user = opts.user || null;
+  const sessionId = session.sessionId;
+
+  // Replay event ring so a returning client sees prior context.
+  if (Array.isArray(session.buffer) && session.buffer.length) {
+    ws.send(JSON.stringify({ t: 'agent-replay', events: session.buffer }));
+  }
+  console.log(`[ws-attach] ${sessionId} user=${user || 'unknown'} mode=agent replay-events=${(session.buffer || []).length}`);
+
+  // Chat history mirrors the PTY path — same persisted rec.chat.
+  const history = sessionsMod.getChatHistory(sessionId);
+  if (history.length) {
+    ws.send(JSON.stringify({ t: 'chat-history', messages: history }));
+  }
+
+  // Initial system snapshot if available — tells the client which SDK
+  // session + model is on the other end.
+  if (session._initSnapshot) {
+    ws.send(JSON.stringify({ t: 'agent-init', snapshot: session._initSnapshot }));
+  }
+
+  const onAgentEvent = (event) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'agent-event', event }));
+  };
+  const onChat = (message) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'chat', message }));
+  };
+  const onStateUpdate = (payload) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'state-update', ...payload }));
+  };
+  const onExit = (code) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'exit', code }));
+  };
+
+  session.on('agent-event', onAgentEvent);
+  session.on('chat', onChat);
+  session.on('state-update', onStateUpdate);
+  session.on('exit', onExit);
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.t === 'ping') {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'pong' }));
+      return;
+    }
+    if (msg.t === 'chat' && typeof msg.text === 'string' && user) {
+      const text = msg.text.trim();
+      if (text) handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT));
+      return;
+    }
+    if (msg.t === 'resize' && Number.isFinite(msg.cols) && Number.isFinite(msg.rows)) {
+      session.resize(msg.cols, msg.rows);
+    }
+  });
+
+  ws.on('close', () => {
+    session.off('agent-event', onAgentEvent);
+    session.off('chat', onChat);
+    session.off('state-update', onStateUpdate);
+    session.off('exit', onExit);
   });
 }
 
@@ -1753,6 +1854,10 @@ module.exports = {
   attachWebSocket,
   attachViewerWebSocket,
   handleChatMessage,
+  // Exposed for sessions.spawnSession when mode='agent' — registers an
+  // AgentSession (or any non-PTY session object) in the same `sessions`
+  // map so getSession/attachWebSocket/state-update plumbing works.
+  _registerExternalSession,
   // Exposed for the menu-pick race-condition regression test.
   handleMenuPick,
   handleMenuToggle,

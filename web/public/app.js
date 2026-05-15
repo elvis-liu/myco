@@ -1436,6 +1436,12 @@ function openSession(id, opts = {}) {
         // round-trip required.
         state.artifacts = msg.artifacts || {};
         _onArtifactsCacheUpdated();
+      } else if (msg.t === 'agent-init' || msg.t === 'agent-replay' || msg.t === 'agent-event') {
+        // SDK-driven session frames (mode='agent', phase 1 of the
+        // agent-sdk-research migration). Routes through the basic
+        // event-log pane defined below — phase 3 will swap this for
+        // a rich structured renderer.
+        _handleAgentFrame(msg);
       } else if (msg.t === 'exit') {
         state.term?.writeln('\r\n[session ended]');
       } else if (msg.t === 'error') {
@@ -2755,6 +2761,82 @@ function _applyModeSnapshot(mode) {
 //   { kind: 'artifact',      artifactType, artifact }
 //   { kind: 'tool-progress', open: [{ id, name, summary, sinceMs }] }
 //   { kind: 'chat-clear' }   // /clear slash command — wipe local chat
+
+// ── agent-mode session rendering (phase 1) ──────────────────────────────
+//
+// Bare-bones event-log pane for SDK-driven sessions. Phase 3 will
+// replace this with a rich structured renderer that treats text /
+// tool_use / tool_result / result events as first-class cards.
+// Today's job: prove the pipeline end-to-end and give users something
+// to look at when they spawn a session with mode='agent'.
+function _handleAgentFrame(msg) {
+  _ensureAgentLogPane();
+  if (msg.t === 'agent-replay' && Array.isArray(msg.events)) {
+    for (const ev of msg.events) _appendAgentEvent(ev);
+    return;
+  }
+  if (msg.t === 'agent-init') {
+    _appendAgentEvent({
+      ts: new Date().toISOString(),
+      type: 'agent_init_snapshot',
+      sdkSessionId: msg.snapshot && msg.snapshot.sdkSessionId,
+      model: msg.snapshot && msg.snapshot.model,
+      tools: msg.snapshot && msg.snapshot.tools,
+    });
+    return;
+  }
+  if (msg.t === 'agent-event' && msg.event) {
+    _appendAgentEvent(msg.event);
+  }
+}
+
+function _ensureAgentLogPane() {
+  let pane = document.getElementById('agent-log');
+  if (pane) return pane;
+  pane = document.createElement('pre');
+  pane.id = 'agent-log';
+  pane.className = 'agent-log';
+  pane.style.cssText = 'flex:1;overflow:auto;padding:12px;margin:0;background:var(--bg-elev,#0d1117);color:var(--fg,#c9d1d9);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.8rem;white-space:pre-wrap;word-break:break-word;';
+  const host = document.getElementById('terminal-wrap') || document.querySelector('main') || document.body;
+  host.appendChild(pane);
+  return pane;
+}
+
+function _appendAgentEvent(ev) {
+  const pane = _ensureAgentLogPane();
+  const line = document.createElement('div');
+  line.className = 'agent-log-line agent-log-' + (ev.type || 'unknown');
+  const ts = (ev.ts || '').slice(11, 19) || new Date().toISOString().slice(11, 19);
+  let body = '';
+  if (ev.type === 'system_init') {
+    body = '[init] sdk-session=' + (ev.sdkSessionId || '?').slice(0, 8) + ' model=' + (ev.model || '?') + ' tools=' + (Array.isArray(ev.tools) ? ev.tools.length : 0);
+  } else if (ev.type === 'agent_init_snapshot') {
+    body = '[reattach] sdk-session=' + (ev.sdkSessionId || '?').slice(0, 8) + ' model=' + (ev.model || '?');
+  } else if (ev.type === 'turn_start') {
+    body = '[turn] ▶ ' + (ev.prompt || '').slice(0, 120);
+  } else if (ev.type === 'assistant_text') {
+    body = (ev.text || '').slice(0, 800);
+  } else if (ev.type === 'tool_use') {
+    body = '[tool] ' + ev.name + ' ' + JSON.stringify(ev.input || {}).slice(0, 180);
+  } else if (ev.type === 'tool_result') {
+    body = '[result] ' + (ev.isError ? '⚠ ' : '') + (ev.tool_use_id || '').slice(-6) + ' (' + (ev.content || '').length + ' bytes)';
+  } else if (ev.type === 'turn_result') {
+    const cost = ev.totalCostUsd != null ? ' cost=$' + ev.totalCostUsd.toFixed(4) : '';
+    body = '[done] ' + (ev.subtype || '') + cost;
+  } else if (ev.type === 'permission_denied') {
+    body = '[perm-denied] ' + (ev.toolName || '?') + ' (phase1 auto-deny — phase2 wires interactive UI)';
+  } else if (ev.type === 'rate_limit') {
+    body = '[rate-limit]';
+  } else if (ev.type === 'fatal') {
+    body = '[fatal] ' + (ev.error || '');
+  } else {
+    body = '[' + ev.type + '] ' + JSON.stringify(ev).slice(0, 300);
+  }
+  line.textContent = ts + '  ' + body;
+  pane.appendChild(line);
+  pane.scrollTop = pane.scrollHeight;
+}
+
 function _applyStateUpdate(msg) {
   if (!msg || !msg.kind) return;
   if (msg.kind === 'menu') {
