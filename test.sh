@@ -448,9 +448,11 @@ test_best_practices_template() {
   grep -q "_handleAgentFrame" web/public/app.js \
     && pass "app.js: agent-event frame handler wired" \
     || fail "app.js: agent-event frame handler wired"
-  grep -q "mode === 'agent'" server/src/sessions.js \
-    && pass "sessions.js: spawnSession branches on mode='agent'" \
-    || fail "sessions.js: spawnSession branches on mode='agent'"
+  # Phase 9: spawnSession no longer "branches" — agent is the only
+  # mode. The const declaration is the new contract.
+  grep -q "const mode = 'agent'" server/src/sessions.js \
+    && pass "sessions.js: spawnSession hardcodes mode='agent' (Phase 9)" \
+    || fail "sessions.js: spawnSession does not pin mode='agent'"
   if have_node; then
     if node test/agent-session.test.js >/dev/null 2>&1; then
       pass "test/agent-session.test.js (6 cases — incl phase-2 menu round-trip)"
