@@ -1837,11 +1837,15 @@ async function doSpawn() {
   // and the banner wraps awkwardly when we resize on attach).
   const cols = Math.max(40, Math.min(200, Math.floor(window.innerWidth / 9)));
   const rows = Math.max(20, Math.min(80, Math.floor((window.innerHeight - 100) / 18)));
+  // Agent-mode toggle from the spawn modal (agent-sdk-research migration).
+  // Server treats absent/anything-not-'agent' as the legacy PTY path.
+  const modeCheckbox = document.getElementById('spawn-mode-agent');
+  const mode = modeCheckbox && modeCheckbox.checked ? 'agent' : undefined;
   try {
     const res = await authedFetch('/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cwd, cols, rows }),
+      body: JSON.stringify({ cwd, cols, rows, mode }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);

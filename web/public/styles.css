@@ -761,6 +761,26 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   min-height: 44px;
 }
 
+#spawn-mode-label {
+  /* Overrides the default column layout from #spawn-dialog label so the
+     checkbox sits inline with its caption rather than stacked. */
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  cursor: pointer;
+  padding: 6px 0;
+  user-select: none;
+}
+#spawn-mode-label span {
+  font-size: 0.85rem;
+}
+#spawn-mode-agent {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 #spawn-actions {
   display: flex;
   justify-content: flex-end;
