@@ -3239,7 +3239,15 @@ async function refreshArtifact(type) {
   const btn = document.querySelector(`.artifact-refresh[data-type="${type}"]`);
   const body = document.getElementById(`artifact-body-${type}`);
   if (!body) return;
-  if (btn) btn.disabled = true;
+  // Plan refresh is now a two-step claude-p call (extract + dedupe
+  // scan), so it takes 15–30s instead of the previous ~10. Show the
+  // user we know it's slow.
+  let origBtnText = '';
+  if (btn) {
+    btn.disabled = true;
+    origBtnText = btn.textContent;
+    if (type === 'plan') btn.textContent = '⏳ Refreshing… (asking claude for merges)';
+  }
   try {
     const res = await authedFetch(
       `/sessions/${encodeURIComponent(sid)}/artifact/refresh?type=${encodeURIComponent(type)}`,
@@ -3251,11 +3259,108 @@ async function refreshArtifact(type) {
     }
     const data = await res.json().catch(() => ({}));
     renderArtifact(type, data.artifact || data);
+    // Plan-only: render the merge-proposal callout above the items.
+    // mergeProposals may be empty (no candidates) or absent (older
+    // server build) — both are no-ops for the callout.
+    if (type === 'plan') {
+      _renderMergeProposals(data.mergeProposals || [], data.mergeError || null);
+    }
   } catch (err) {
     body.innerHTML = `<div class="artifact-empty">Refresh failed: ${escHtml(err.message || String(err))}</div>`;
   } finally {
-    if (btn) btn.disabled = false;
+    if (btn) {
+      btn.disabled = false;
+      if (origBtnText) btn.textContent = origBtnText;
+    }
   }
+}
+
+// Render a yellow "Possible merges" callout above the plan items.
+// Each group exposes [Apply] / [Dismiss] buttons that hit the
+// /sessions/:id/artifact/plan/merge endpoint and re-render on success.
+// Empty proposals (or a mergeError) just clear the callout — no UI noise.
+function _renderMergeProposals(proposals, errMsg) {
+  const body = document.getElementById('artifact-body-plan');
+  if (!body) return;
+  // Always remove any previous callout first so a refresh that
+  // produces no candidates clears the stale UI.
+  const existing = body.querySelector('.plan-merge-callout');
+  if (existing) existing.remove();
+  if (errMsg) {
+    const node = _htmlToNode(
+      `<div class="plan-merge-callout plan-merge-error">` +
+        `<strong>⚠ Dedupe scan error:</strong> ${escHtml(errMsg)}` +
+      `</div>`
+    );
+    if (node) body.insertBefore(node, body.firstChild);
+    return;
+  }
+  if (!Array.isArray(proposals) || !proposals.length) return;
+  const groupsHtml = proposals.map((g, i) => {
+    const ids = (g.ids || []).join(' ');
+    const idChips = (g.ids || []).map((id) => `<code>${escHtml(id)}</code>`).join(', ');
+    const reason = escHtml(g.reason || '(no reason)');
+    return `<div class="plan-merge-group" data-merge-idx="${i}" data-merge-ids="${escHtml(ids)}">
+      <div class="plan-merge-reason">${reason}</div>
+      <div class="plan-merge-ids">${idChips}</div>
+      <div class="plan-merge-actions">
+        <button type="button" class="plan-merge-apply">Apply</button>
+        <button type="button" class="plan-merge-dismiss">Dismiss</button>
+      </div>
+    </div>`;
+  }).join('');
+  const node = _htmlToNode(
+    `<div class="plan-merge-callout">` +
+      `<div class="plan-merge-title">🪄 Possible merges (${proposals.length})</div>` +
+      groupsHtml +
+    `</div>`
+  );
+  if (!node) return;
+  body.insertBefore(node, body.firstChild);
+  // Wire buttons. Apply POSTs the merge endpoint and re-renders the
+  // artifact from the response (no second claude-p call needed).
+  node.querySelectorAll('.plan-merge-apply').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const group = btn.closest('.plan-merge-group');
+      const ids = String(group?.dataset?.mergeIds || '').split(/\s+/).filter(Boolean);
+      if (ids.length < 2) return;
+      btn.disabled = true;
+      btn.textContent = 'Merging…';
+      try {
+        const sid = state.activeId;
+        const res = await authedFetch(
+          `/sessions/${encodeURIComponent(sid)}/artifact/plan/merge`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) },
+        );
+        if (!res || !res.ok) {
+          const body = await res.json().catch(() => ({}));
+          btn.textContent = 'Apply';
+          btn.disabled = false;
+          group.insertAdjacentHTML('beforeend',
+            `<div class="plan-merge-error">⚠ ${escHtml(body.error || ('HTTP ' + (res ? res.status : '?')))}</div>`);
+          return;
+        }
+        const data = await res.json().catch(() => ({}));
+        renderArtifact('plan', data.artifact);
+        // Re-render the remaining callout groups (this one dropped, others kept).
+        const remaining = proposals.filter((_, j) => j !== Number(group.dataset.mergeIdx));
+        _renderMergeProposals(remaining, null);
+      } catch (err) {
+        btn.textContent = 'Apply';
+        btn.disabled = false;
+        group.insertAdjacentHTML('beforeend',
+          `<div class="plan-merge-error">⚠ ${escHtml(err.message || String(err))}</div>`);
+      }
+    });
+  });
+  node.querySelectorAll('.plan-merge-dismiss').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const group = btn.closest('.plan-merge-group');
+      group?.remove();
+      // If that was the last group, drop the whole callout.
+      if (!node.querySelector('.plan-merge-group')) node.remove();
+    });
+  });
 }
 
 function renderArtifact(type, artifact) {

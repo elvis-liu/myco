@@ -255,13 +255,73 @@ function _persistPlanArtifact(rec, sessionId) {
   } catch {}
 }
 
+// Pure merge logic. Mutates rec.artifacts.plan.items in place + returns
+// the merge summary. Throws an Error with a human-readable message on
+// validation failure (caller is expected to catch + surface). The
+// caller is responsible for persisting + broadcasting after — see
+// _persistPlanArtifact (slash handler) or persistArtifact+broadcast
+// (HTTP endpoint) for the two call sites.
+function mergePlanItems(rec, ids) {
+  if (!Array.isArray(ids) || ids.length < 2) {
+    throw new Error('need at least two ids');
+  }
+  if (!rec || !rec.artifacts || !rec.artifacts.plan || !Array.isArray(rec.artifacts.plan.items)) {
+    throw new Error('no plan items yet — nothing to merge');
+  }
+  const items = rec.artifacts.plan.items;
+  const lookup = new Map(items.map((it) => [it.id, it]));
+  const missing = ids.filter((id) => !lookup.has(id));
+  if (missing.length) {
+    throw new Error(`unknown id${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`);
+  }
+  const layers = new Set(ids.map((id) => lookup.get(id).layer));
+  if (layers.size > 1) {
+    throw new Error(`cannot merge across layers — got ${[...layers].join(' + ')}`);
+  }
+  const layer = [...layers][0];
+
+  // Sort the participating items by numeric suffix so the canonical
+  // is the lowest-numbered. Items with hex ids (no numeric suffix)
+  // sort to the end — pick the lowest-numbered prefixed id as
+  // canonical if present; otherwise the first arg.
+  const participants = ids.map((id) => lookup.get(id));
+  participants.sort((a, b) => {
+    const na = (a.id.match(/-(\d+)$/) || [])[1];
+    const nb = (b.id.match(/-(\d+)$/) || [])[1];
+    if (na && nb) return parseInt(na, 10) - parseInt(nb, 10);
+    if (na) return -1;
+    if (nb) return 1;
+    return 0;
+  });
+  const canonical = participants[0];
+  const others = participants.slice(1);
+
+  // Append other bodies to canonical.text with a clear divider naming
+  // each source. Existing canonical.text stays at the top.
+  const divider = '\n\n— merged from ';
+  for (const o of others) {
+    canonical.text = `${canonical.text}${divider}\`${o.id}\` (added by @${o.addedBy || 'unknown'}): ${o.text}`;
+  }
+  // mergedFrom is cumulative across repeated /merge calls so the
+  // chain of provenance survives.
+  const prior = Array.isArray(canonical.mergedFrom) ? canonical.mergedFrom : [];
+  canonical.mergedFrom = [...prior, ...others.map((o) => o.id)];
+
+  // Drop the merged-away items from items[].
+  const dropIds = new Set(others.map((o) => o.id));
+  rec.artifacts.plan.items = items.filter((it) => !dropIds.has(it.id));
+
+  return {
+    canonical,
+    absorbed: others.map((o) => o.id),
+    layer,
+  };
+}
+
 // /merge <id1> <id2> [<id3>…] — collapse the listed plan items (same
-// layer) into the lowest-numbered canonical. Bodies are concatenated
-// onto canonical.text with a divider that names each merged id;
-// canonical.mergedFrom keeps a flat list of merged ids (additive across
-// repeated merges, so the history is preserved). Non-canonical items
-// are removed from items[]. Refuses if the ids span layers — merging
-// a bug into a todo would muddle the plan-tab grouping.
+// layer) into the lowest-numbered canonical. Delegates the actual
+// mutation to mergePlanItems; this handler just parses the args,
+// catches validation errors, and replies in chat.
 function handleMerge(ctx) {
   const raw = (ctx.args || '').trim();
   if (!raw) {
@@ -275,86 +335,29 @@ function handleMerge(ctx) {
   }
   const sessionId = ctx.sessionId;
   if (!sessionId) { ctx.reply('(no session context — slash command dropped)'); return; }
-
-  try {
-    const store = sessionsMod.loadStore();
-    const rec = store.sessions[sessionId];
-    if (!rec || !rec.artifacts || !rec.artifacts.plan || !Array.isArray(rec.artifacts.plan.items)) {
-      ctx.reply('(no plan items yet — nothing to merge)');
-      return;
-    }
-    const items = rec.artifacts.plan.items;
-    const lookup = new Map(items.map((it) => [it.id, it]));
-    const missing = ids.filter((id) => !lookup.has(id));
-    if (missing.length) {
-      ctx.reply(`(unknown id${missing.length === 1 ? '' : 's'}: ${missing.map((id) => '`' + id + '`').join(', ')})`);
-      return;
-    }
-    const layers = new Set(ids.map((id) => lookup.get(id).layer));
-    if (layers.size > 1) {
-      ctx.reply(`(cannot merge across layers — got ${[...layers].join(' + ')})`);
-      return;
-    }
-    const layer = [...layers][0];
-
-    // Sort the participating items by numeric suffix so the canonical
-    // is the lowest-numbered. Items with hex ids (no numeric suffix)
-    // sort to the end — pick the lowest-numbered prefixed id as
-    // canonical if present; otherwise the first arg.
-    const participants = ids.map((id) => lookup.get(id));
-    participants.sort((a, b) => {
-      const na = (a.id.match(/-(\d+)$/) || [])[1];
-      const nb = (b.id.match(/-(\d+)$/) || [])[1];
-      if (na && nb) return parseInt(na, 10) - parseInt(nb, 10);
-      if (na) return -1;
-      if (nb) return 1;
-      return 0;
-    });
-    const canonical = participants[0];
-    const others = participants.slice(1);
-
-    // Append other bodies to canonical.text with a clear divider naming
-    // each source. Existing canonical.text stays at the top.
-    const divider = '\n\n— merged from ';
-    for (const o of others) {
-      canonical.text = `${canonical.text}${divider}\`${o.id}\` (added by @${o.addedBy || 'unknown'}): ${o.text}`;
-    }
-    // mergedFrom is cumulative across repeated /merge calls so the
-    // chain of provenance survives.
-    const prior = Array.isArray(canonical.mergedFrom) ? canonical.mergedFrom : [];
-    canonical.mergedFrom = [...prior, ...others.map((o) => o.id)];
-
-    // Drop the merged-away items from items[].
-    const dropIds = new Set(others.map((o) => o.id));
-    rec.artifacts.plan.items = items.filter((it) => !dropIds.has(it.id));
-
-    _persistPlanArtifact(rec, sessionId);
-    ctx.reply(`✓ merged ${others.length + 1} **${layer}** items into \`${canonical.id}\` (absorbed: ${others.map((o) => '`' + o.id + '`').join(', ')})`);
-  } catch (err) {
-    ctx.reply(`(/merge failed: ${err.message})`);
-  }
-}
-
-// /dedupe — ask claude (via the existing /btw runClaudeP path) to look
-// at the current plan items and propose merge groups. Strictly a
-// proposal step: the reply lists each group + the ready-to-paste
-// `/merge <id1> <id2>` command, and the user runs that explicitly.
-// No auto-apply, no side effects on rec.artifacts.plan.
-async function handleDedupe(ctx) {
-  const sessionId = ctx.sessionId;
-  if (!sessionId) { ctx.reply('(no session context — slash command dropped)'); return; }
   const store = sessionsMod.loadStore();
   const rec = store.sessions[sessionId];
-  const items = (rec && rec.artifacts && rec.artifacts.plan && Array.isArray(rec.artifacts.plan.items))
-    ? rec.artifacts.plan.items : [];
-  const eligible = items.filter((it) => it && it.id && PLAN_LAYER_PREFIX[it.layer]);
-  if (eligible.length < 2) {
-    ctx.reply('(/dedupe needs at least two plan items with prefixed ids — `/fr` `/td` `/bug` add them as `fr-N` / `td-N` / `bug-N`)');
+  let result;
+  try {
+    result = mergePlanItems(rec, ids);
+  } catch (err) {
+    ctx.reply(`(${err.message})`);
     return;
   }
+  _persistPlanArtifact(rec, sessionId);
+  ctx.reply(`✓ merged ${result.absorbed.length + 1} **${result.layer}** items into \`${result.canonical.id}\` (absorbed: ${result.absorbed.map((id) => '`' + id + '`').join(', ')})`);
+}
 
-  // Build the prompt — group items by layer, show id + text on one
-  // line each, and ASK FOR STRICT JSON so we can parse the response.
+// LLM-driven dedupe scan. Pure — does NOT mutate the rec/artifact, only
+// returns the proposal. Shape:
+//   { groups: [{ ids: [...], reason: '<one-line>' }], skipped?, error?, raw? }
+// `skipped` indicates the LLM wasn't called (e.g. <2 eligible items).
+// `error` indicates the LLM call/response failed.
+async function dedupePlanItems(items, cwd) {
+  const eligible = (items || []).filter((it) => it && it.id && PLAN_LAYER_PREFIX[it.layer]);
+  if (eligible.length < 2) {
+    return { groups: [], skipped: 'fewer than 2 eligible items (need prefixed ids in Feature/Todo/Bug)' };
+  }
   const byLayer = { Feature: [], Todo: [], Bug: [] };
   for (const it of eligible) {
     if (byLayer[it.layer]) byLayer[it.layer].push(it);
@@ -378,35 +381,22 @@ async function handleDedupe(ctx) {
     sections.join('\n'),
   ].join('\n');
 
-  ctx.reply('🔍 asking claude to scan for dedupe candidates… (one moment)');
+  const btw = require('./btw');
   let raw;
   try {
-    const btw = require('./btw');
-    raw = await btw.runClaudeP(ctx.absCwd || process.cwd(), promptBody);
+    raw = await btw.runClaudeP(cwd || process.cwd(), promptBody);
   } catch (err) {
-    ctx.reply(`(/dedupe: claude call failed: ${err.message})`);
-    return;
+    return { groups: [], error: 'claude call failed: ' + err.message };
   }
-  // The runClaudeP wrapper sometimes returns `(claude ...)` placeholders
-  // for errors / timeouts. Surface those instead of pretending to parse.
   if (/^\(claude /.test(raw)) {
-    ctx.reply(`(/dedupe: ${raw})`);
-    return;
+    return { groups: [], error: raw };
   }
   let parsed;
   try {
-    // Strip optional markdown fences in case claude ignored the instruction.
     const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
     parsed = JSON.parse(stripped);
   } catch {
-    ctx.reply([
-      '(/dedupe: claude response was not valid JSON; raw reply below)',
-      '',
-      '```',
-      raw.slice(0, 1500),
-      '```',
-    ].join('\n'));
-    return;
+    return { groups: [], error: 'claude response was not valid JSON', raw: raw.slice(0, 1500) };
   }
   const groups = Array.isArray(parsed && parsed.groups) ? parsed.groups : [];
   // Validate each group: ids must all exist in eligible + share a layer.
@@ -414,19 +404,52 @@ async function handleDedupe(ctx) {
   const layerById = new Map(eligible.map((it) => [it.id, it.layer]));
   const valid = [];
   for (const g of groups) {
-    const ids = Array.isArray(g && g.ids) ? g.ids.filter((id) => eligibleIds.has(id)) : [];
-    if (ids.length < 2) continue;
-    const layers = new Set(ids.map((id) => layerById.get(id)));
+    const gids = Array.isArray(g && g.ids) ? g.ids.filter((id) => eligibleIds.has(id)) : [];
+    if (gids.length < 2) continue;
+    const layers = new Set(gids.map((id) => layerById.get(id)));
     if (layers.size !== 1) continue;
-    valid.push({ ids, reason: String((g && g.reason) || '').slice(0, 200) });
+    valid.push({ ids: gids, reason: String((g && g.reason) || '').slice(0, 200) });
   }
+  return { groups: valid };
+}
 
-  if (!valid.length) {
+// /dedupe — slash command wrapper. Calls dedupePlanItems and formats
+// the result as a chat reply with ready-to-paste `/merge <id1> <id2>`
+// commands. No auto-apply.
+async function handleDedupe(ctx) {
+  const sessionId = ctx.sessionId;
+  if (!sessionId) { ctx.reply('(no session context — slash command dropped)'); return; }
+  const store = sessionsMod.loadStore();
+  const rec = store.sessions[sessionId];
+  const items = (rec && rec.artifacts && rec.artifacts.plan && Array.isArray(rec.artifacts.plan.items))
+    ? rec.artifacts.plan.items : [];
+  const eligible = items.filter((it) => it && it.id && PLAN_LAYER_PREFIX[it.layer]);
+  if (eligible.length < 2) {
+    ctx.reply('(/dedupe needs at least two plan items with prefixed ids — `/fr` `/td` `/bug` add them as `fr-N` / `td-N` / `bug-N`)');
+    return;
+  }
+  ctx.reply('🔍 asking claude to scan for dedupe candidates… (one moment)');
+  const result = await dedupePlanItems(items, ctx.absCwd);
+  if (result.error) {
+    if (result.raw) {
+      ctx.reply([
+        `(/dedupe: ${result.error}; raw reply below)`,
+        '',
+        '```',
+        result.raw,
+        '```',
+      ].join('\n'));
+    } else {
+      ctx.reply(`(/dedupe: ${result.error})`);
+    }
+    return;
+  }
+  if (!result.groups.length) {
     ctx.reply('✓ no merge candidates found — the plan items look distinct enough.');
     return;
   }
-  const lines = [`Found **${valid.length}** dedupe candidate${valid.length === 1 ? '' : 's'}. To merge, copy + run the corresponding line:`];
-  for (const g of valid) {
+  const lines = [`Found **${result.groups.length}** dedupe candidate${result.groups.length === 1 ? '' : 's'}. To merge, copy + run the corresponding line:`];
+  for (const g of result.groups) {
     lines.push('');
     lines.push(`- ${g.reason || '(no reason)'}`);
     lines.push(`  \`/merge ${g.ids.join(' ')}\``);
@@ -657,4 +680,7 @@ module.exports = {
   parseCommand,
   listCommands,
   ASSISTANT_USER,
+  // Exposed for artifacts.js refresh hook + future callers.
+  mergePlanItems,
+  dedupePlanItems,
 };

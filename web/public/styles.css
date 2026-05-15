@@ -1377,6 +1377,81 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   text-align: right;
 }
 
+/* Plan-tab merge-proposal callout. Pushed in at the top of
+   #artifact-body-plan by _renderMergeProposals after a refresh that
+   found candidates. Each group is one row with reason + ids +
+   Apply/Dismiss buttons. */
+.plan-merge-callout {
+  background: rgba(220, 180, 90, .08);
+  border: 1px solid rgba(220, 180, 90, .35);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.plan-merge-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: rgba(220, 180, 90, .95);
+  margin-bottom: 8px;
+}
+.plan-merge-group {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px dashed rgba(220, 180, 90, .22);
+}
+.plan-merge-group:first-of-type { border-top: none; padding-top: 0; }
+.plan-merge-reason {
+  grid-column: 1;
+  grid-row: 1;
+  font-size: 0.9rem;
+}
+.plan-merge-ids {
+  grid-column: 1;
+  grid-row: 2;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.plan-merge-ids code {
+  background: rgba(220, 180, 90, .12);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.75rem;
+}
+.plan-merge-actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-self: center;
+}
+.plan-merge-apply,
+.plan-merge-dismiss {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg);
+}
+.plan-merge-apply {
+  border-color: rgba(220, 180, 90, .55);
+  background: rgba(220, 180, 90, .15);
+}
+.plan-merge-apply:hover { background: rgba(220, 180, 90, .28); }
+.plan-merge-apply:disabled { opacity: .55; cursor: progress; }
+.plan-merge-dismiss:hover { background: var(--bg-hover, rgba(255,255,255,.05)); }
+.plan-merge-error {
+  grid-column: 1 / -1;
+  font-size: 0.78rem;
+  color: rgba(255, 120, 120, .9);
+  margin-top: 4px;
+}
+
 /* Plan items are bucketed into named architectural layers (Frontend /
    Backend / Tests / …) that the extractor assigns. Each bucket has a
    small header above its list. Test items don't have layers — they

@@ -473,6 +473,28 @@ test_best_practices_template() {
   grep -q "runClaudeP" server/src/btw.js \
     && pass "btw.js: runClaudeP exported for /dedupe" \
     || fail "btw.js: runClaudeP exported for /dedupe"
+  # Plan-refresh dedupe integration (2026-05-15): refresh endpoint
+  # returns { artifact, mergeProposals } when type=plan; the merge
+  # endpoint applies a proposal under user confirmation; client
+  # renders an Apply/Dismiss callout above the items.
+  grep -q "mergePlanItems" server/src/slashcmds.js \
+    && pass "slashcmds: mergePlanItems helper exported" \
+    || fail "slashcmds: mergePlanItems helper exported"
+  grep -q "dedupePlanItems" server/src/slashcmds.js \
+    && pass "slashcmds: dedupePlanItems helper exported" \
+    || fail "slashcmds: dedupePlanItems helper exported"
+  grep -q "mergeProposals" server/src/artifacts.js \
+    && pass "artifacts.js: refresh returns mergeProposals for plan" \
+    || fail "artifacts.js: refresh returns mergeProposals for plan"
+  grep -q "/artifact/plan/merge" server/src/artifacts.js \
+    && pass "artifacts.js: POST /artifact/plan/merge endpoint registered" \
+    || fail "artifacts.js: POST /artifact/plan/merge endpoint registered"
+  grep -q "_renderMergeProposals" web/public/app.js \
+    && pass "app.js: _renderMergeProposals callout wired" \
+    || fail "app.js: _renderMergeProposals callout wired"
+  grep -q "plan-merge-callout" web/public/styles.css \
+    && pass "styles.css: plan-merge-callout style present" \
+    || fail "styles.css: plan-merge-callout style present"
   # One-shot migration: rewrites pre-ca9bcf1 hex-id plan items to
   # fr-N/td-N/bug-N (addedAt order). Idempotent.
   [ -x migrate-plan-ids.js ] \
