@@ -1,4 +1,4 @@
-// Non-interactive Claude CLI invocation.
+// Non-interactive Claude invocation.
 //
 // Used by the Plan/Arch/Test extractor so extraction shares the running
 // container's `claude` auth (whatever ~/.claude/ has configured — claude.ai
@@ -6,80 +6,64 @@
 // a separate API key. Same auth path as the interactive PTY sessions
 // Mycelium spawns from pty.js.
 //
-// Returns the model's text response, or null on any failure (binary
-// missing, non-zero exit, timeout). Callers must tolerate null so a
+// Returns the model's text response, or null on any failure (timeout,
+// SDK error, no text emitted). Callers must tolerate null so a
 // misconfigured host degrades to an empty artifact rather than 500ing.
+//
+// Phase 7 of the agent-sdk-migration: was a `claude -p` subprocess
+// over child_process.spawn. Now uses @anthropic-ai/claude-agent-sdk
+// in-process — same auth, no PATH dep, faster (no process startup).
 
-const { spawn } = require('child_process');
+const DEFAULT_TIMEOUT_MS = 120000;
 
-const DEFAULT_TIMEOUT_MS = 120000;     // 2 min — CLI startup adds overhead vs raw API
-const STDERR_CAP = 600;                // bytes of stderr we keep for logging
+async function callClaudeCli({ system, userMessage, cwd, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  if (!userMessage) return null;
+  const { query } = require('@anthropic-ai/claude-agent-sdk');
+  const ac = new AbortController();
+  const timer = setTimeout(() => {
+    try { ac.abort(); } catch {}
+    console.error(`[claude-cli] timed out after ${timeoutMs}ms`);
+  }, timeoutMs);
 
-function callClaudeCli({ system, userMessage, cwd, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
-  return new Promise((resolve) => {
-    if (!userMessage) return resolve(null);
+  const options = {
+    cwd: cwd || process.cwd(),
+    allowedTools: [],          // pure text generation
+    permissionMode: 'dontAsk',
+    settingSources: [],
+    abortSignal: ac.signal,
+  };
+  if (system) options.appendSystemPrompt = system;
 
-    // `-p <prompt>` runs Claude in print mode and exits when the response
-    // ends. `--append-system-prompt` is grafted onto whatever default
-    // Claude Code already uses, so we keep its base behaviour and just
-    // append our extraction instructions. `--output-format text` is the
-    // default but we set it explicitly so this doesn't drift if Claude
-    // Code ever changes its default to stream-json.
-    const args = [];
-    if (system) { args.push('--append-system-prompt', system); }
-    args.push('--output-format', 'text');
-    args.push('-p', userMessage);
-
-    let proc;
-    try {
-      proc = spawn('claude', args, {
-        cwd: cwd || process.cwd(),
-        env: {
-          ...process.env,
-          // Force non-interactive terminal so the CLI doesn't try to
-          // render TUI chrome on stderr.
-          TERM: 'dumb',
-          NO_COLOR: '1',
-          CI: '1',
-        },
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch (err) {
-      console.error(`[claude-cli] spawn failed: ${err.message}`);
-      return resolve(null);
+  let stream;
+  try {
+    stream = query({ prompt: userMessage, options });
+  } catch (err) {
+    clearTimeout(timer);
+    console.error(`[claude-cli] sdk init failed: ${err.message}`);
+    return null;
+  }
+  let finalText = '';
+  let assistantText = '';
+  try {
+    for await (const m of stream) {
+      if (m.type === 'assistant' && m.message && Array.isArray(m.message.content)) {
+        for (const b of m.message.content) {
+          if (b.type === 'text') assistantText += b.text;
+        }
+      }
+      if (m.type === 'result') {
+        finalText = typeof m.result === 'string' ? m.result : '';
+      }
     }
-
-    let out = '';
-    let errOut = '';
-    let done = false;
-    const finish = (val) => { if (!done) { done = true; resolve(val); } };
-
-    const timer = setTimeout(() => {
-      try { proc.kill('SIGTERM'); } catch {}
-      console.error(`[claude-cli] timed out after ${timeoutMs}ms`);
-      finish(null);
-    }, timeoutMs);
-
-    proc.stdout.on('data', (d) => { out += d.toString('utf8'); });
-    proc.stderr.on('data', (d) => {
-      if (errOut.length < STDERR_CAP) {
-        errOut += d.toString('utf8').slice(0, STDERR_CAP - errOut.length);
-      }
-    });
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      console.error(`[claude-cli] proc error: ${err.code || ''} ${err.message}`);
-      finish(null);
-    });
-    proc.on('exit', (code) => {
-      clearTimeout(timer);
-      if (code !== 0) {
-        console.error(`[claude-cli] exited ${code}; stderr: ${errOut.replace(/\s+/g, ' ').trim().slice(0, 200)}`);
-        return finish(null);
-      }
-      finish(out.trim() || null);
-    });
-  });
+  } catch (err) {
+    clearTimeout(timer);
+    if (ac.signal.aborted) return null;
+    console.error(`[claude-cli] sdk error: ${err.message || String(err)}`);
+    return null;
+  }
+  clearTimeout(timer);
+  const text = (finalText || assistantText).trim();
+  return text || null;
 }
 
 module.exports = { callClaudeCli };

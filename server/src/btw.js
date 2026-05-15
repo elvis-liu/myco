@@ -7,7 +7,6 @@
 // (API key or claude.ai subscription) is set up for the main interactive
 // session works here too.
 
-const { spawn } = require('child_process');
 const { stripAnsi, tailLines, formatChat } = require('./text-utils');
 
 const TIMEOUT_MS = 60000;
@@ -50,52 +49,57 @@ function buildPrompt({ chatHistory, scrollback, lastMessage }) {
   ].join('\n');
 }
 
-// Spawn `claude -p` with `promptBody` on stdin, with a 60s timeout. Always
-// resolves to a string (Claude's reply, or an error stand-in) — never rejects.
-// Shared between askAssistant (chat-pane /btw) and askAboutFile (file-viewer
-// inline review).
-function runClaudeP(cwd, promptBody) {
-  return new Promise((resolve) => {
-    let proc;
-    try {
-      proc = spawn('claude', ['-p'], {
+// Single-turn Claude invocation. Always resolves to a string (Claude's
+// reply, or an error stand-in) — never rejects. Shared between
+// askAssistant (chat-pane /btw), askAboutFile (file-viewer review),
+// and slashcmds.dedupePlanItems.
+//
+// Phase 7 of the agent-sdk-migration (was: spawn `claude -p` subprocess
+// over stdin). Now uses @anthropic-ai/claude-agent-sdk's query() in-
+// process — same ~/.claude/ auth, no PATH dep on the claude binary,
+// faster (no process startup cost). Output: drains the streaming
+// result to a single text string for caller compatibility.
+async function runClaudeP(cwd, promptBody) {
+  const { query } = require('@anthropic-ai/claude-agent-sdk');
+  const ac = new AbortController();
+  const timer = setTimeout(() => { try { ac.abort(); } catch {} }, TIMEOUT_MS);
+  let stream;
+  try {
+    stream = query({
+      prompt: promptBody,
+      options: {
         cwd: cwd || process.cwd(),
-        env: process.env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    } catch (err) {
-      resolve(`(claude failed to start: ${err.message})`);
-      return;
-    }
-
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-    proc.on('error', (err) => resolve(`(claude error: ${err.message})`));
-
-    const timer = setTimeout(() => {
-      try { proc.kill('SIGTERM'); } catch {}
-      setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 2000);
-    }, TIMEOUT_MS);
-
-    proc.on('close', (code) => {
-      clearTimeout(timer);
-      const text = stdout.trim();
-      if (text) { resolve(text); return; }
-      // 143 = SIGTERM (timeout), 137 = SIGKILL. Don't surface noise.
-      if (code === 143 || code === 137) { resolve('(claude timed out)'); return; }
-      const err = stderr.trim().slice(0, 300);
-      resolve(`(claude exited ${code}${err ? `: ${err}` : ''})`);
+        allowedTools: [],          // text-completion only; no tool use
+        permissionMode: 'dontAsk', // hard-deny anything not in allowedTools
+        settingSources: [],        // skip skills/slash-commands; we want a clean baseline
+        abortSignal: ac.signal,
+      },
     });
-
-    try {
-      proc.stdin.write(promptBody);
-      proc.stdin.end();
-    } catch (err) {
-      resolve(`(claude stdin write failed: ${err.message})`);
+  } catch (err) {
+    clearTimeout(timer);
+    return `(claude failed to start: ${err.message})`;
+  }
+  let finalText = '';
+  let assistantText = '';
+  try {
+    for await (const m of stream) {
+      if (m.type === 'assistant' && m.message && Array.isArray(m.message.content)) {
+        for (const b of m.message.content) {
+          if (b.type === 'text') assistantText += b.text;
+        }
+      }
+      if (m.type === 'result') {
+        finalText = typeof m.result === 'string' ? m.result : '';
+      }
     }
-  });
+  } catch (err) {
+    clearTimeout(timer);
+    if (ac.signal.aborted) return '(claude timed out)';
+    return `(claude error: ${err.message || String(err)})`;
+  }
+  clearTimeout(timer);
+  const text = (finalText || assistantText).trim();
+  return text || '(claude returned no text)';
 }
 
 function askAssistant({ cwd, chatHistory, scrollback, lastMessage }) {

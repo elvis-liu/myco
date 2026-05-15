@@ -615,6 +615,24 @@ test_best_practices_template() {
   grep -q "\\[agent-resume\\]\\|\\[agent-attach\\]" server/src/pty.js \
     && pass "pty.js: [agent-attach]/[agent-resume] diagnostic logs present" \
     || fail "pty.js: [agent-attach]/[agent-resume] diagnostic logs present"
+  # Phase 7: runClaudeP (btw) + callClaudeCli (extractor) ported off
+  # the `claude -p` subprocess and onto the in-process SDK query().
+  if grep -q "spawn('claude'" server/src/btw.js; then
+    fail "btw.js: still spawns claude -p subprocess (phase 7 swap incomplete)"
+  else
+    pass "btw.js: claude -p subprocess removed"
+  fi
+  if grep -q "spawn('claude'" server/src/claude-cli.js; then
+    fail "claude-cli.js: still spawns claude -p subprocess (phase 7 swap incomplete)"
+  else
+    pass "claude-cli.js: claude -p subprocess removed"
+  fi
+  grep -q "@anthropic-ai/claude-agent-sdk" server/src/btw.js \
+    && pass "btw.js: imports claude-agent-sdk" \
+    || fail "btw.js: imports claude-agent-sdk"
+  grep -q "@anthropic-ai/claude-agent-sdk" server/src/claude-cli.js \
+    && pass "claude-cli.js: imports claude-agent-sdk" \
+    || fail "claude-cli.js: imports claude-agent-sdk"
   # dedupePlanItems prompt enrichment: project CLAUDE.md + auto-memory
   # are inlined ahead of the item list so the LLM has project-specific
   # context when judging "same underlying concern".
