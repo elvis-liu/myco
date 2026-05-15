@@ -186,13 +186,9 @@ t('app.js: meta.superseded triggers resolved card', () => {
   assert.ok(/Superseded by a newer dialog/.test(src), 'superseded chip copy missing');
 });
 
-t('app.js: appendTranscriptMessages has defensive timestamp sort', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
-  const fn = src.match(/function appendTranscriptMessages[\s\S]+?\n}/);
-  assert.ok(fn, 'appendTranscriptMessages not found');
-  assert.ok(/anyOlder/.test(fn[0]), 'out-of-order detection missing');
-  assert.ok(/sort\(/.test(fn[0]), 'sort call missing');
-});
+// Phase 9 step 9 retired appendTranscriptMessages (the JSONL transcript
+// pane is gone). The defensive out-of-order timestamp sort is no longer
+// needed because there's no transcript-delta WS frame anymore.
 
 t('app.js: _applyMenuStateUpdate recomputes isActiveMenu, does NOT hardcode false', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');

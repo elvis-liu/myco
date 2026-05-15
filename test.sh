@@ -736,30 +736,23 @@ test_best_practices_template() {
 }
 
 test_conv_view_css() {
-  grep -q 'conversation-wrap' web/public/styles.css && pass "conversation-wrap CSS" || fail "conversation-wrap CSS"
-  grep -q 'conv-msg-user' web/public/styles.css && pass "user message CSS" || fail "user message CSS"
-  grep -q 'conv-msg-assistant' web/public/styles.css && pass "assistant message CSS" || fail "assistant message CSS"
-  grep -q 'conv-tool-call' web/public/styles.css && pass "tool call CSS" || fail "tool call CSS"
+  # Phase 9 step 3 retired the JSONL transcript pane + its viewer
+  # helpers; the .conv-* CSS rules are dead code. The conv-mermaid
+  # container is still referenced by renderConvMessage (kept for any
+  # future agent-event-rendered mermaid block) so assert it survives.
   grep -q 'conv-mermaid' web/public/styles.css && pass "mermaid CSS" || fail "mermaid CSS"
 }
 
 test_conv_view_js() {
-  grep -q 'function renderConvMessage' web/public/app.js && pass "renderConvMessage" || fail "renderConvMessage"
   grep -q 'function renderMd' web/public/app.js && pass "renderMd" || fail "renderMd"
   grep -q 'function renderMermaidInContainer' web/public/app.js && pass "renderMermaidInContainer" || fail "renderMermaidInContainer"
   # Regression: mermaid.render leaks an error <div id="dmermaid-…"> when
   # parse fails (the "Syntax error in text, mermaid version X" SVG).
   # renderMermaidInContainer must clean those temp/orphan nodes so they
-  # don't stack up at the bottom of the read-only viewer's page.
+  # don't stack up at the bottom of any pane that renders mermaid.
   grep -q "document.getElementById('d' + id)" web/public/app.js \
     && pass "mermaid temp-div orphan cleanup" \
     || fail "mermaid temp-div orphan cleanup"
-  # Regression: read-only viewer's user messages must go through renderMd
-  # too. Earlier they used textContent and rendered markdown literally
-  # ("1. step", **bold**, ```code```).
-  grep -Pzoq "m.role === 'user'[\s\S]*?textEl.innerHTML = renderMd" web/public/app.js \
-    && pass "user-role transcript messages rendered as markdown" \
-    || fail "user-role transcript messages rendered as markdown"
   # Regression: discussion-panel chat messages must also go through renderMd
   # so menu broadcasts ("Claude wants to run `Bash(...)`"), allow/deny
   # notes, and the /allowlist output don't show as raw backticks/markdown.
@@ -772,16 +765,6 @@ test_conv_view_js() {
   test "$(grep -c 'if (state.ws !== ws) return;' web/public/app.js)" -ge 2 \
     && pass "stale-WS guard on both message handlers" \
     || fail "stale-WS guard on both message handlers"
-  # Regression: tool_result output renders as markdown (file content with
-  # markdown, code blocks, etc.) instead of one wall of plain text.
-  grep -q "body.innerHTML = renderMd(rest)" web/public/app.js \
-    && pass "tool_result body rendered as markdown" \
-    || fail "tool_result body rendered as markdown"
-  # Regression: transcript is capped to last N messages so very long
-  # sessions don't accumulate thousands of DOM turns.
-  grep -q "TRANSCRIPT_RENDER_CAP" web/public/app.js \
-    && pass "transcript-render cap defined" \
-    || fail "transcript-render cap defined"
   # Regression: Plan/Arch/Test panels must be wiped on session switch so
   # the previous session's extracted content doesn't linger.
   grep -q "function clearArtifactBodies" web/public/app.js \
@@ -791,7 +774,6 @@ test_conv_view_js() {
     && pass "clearArtifactBodies() called from openSession" \
     || fail "clearArtifactBodies() called from openSession"
   grep -q 'function openSession' web/public/app.js && pass "openSession" || fail "openSession"
-  grep -q 'function renderTranscriptMessages' web/public/app.js && pass "renderTranscriptMessages" || fail "renderTranscriptMessages"
 }
 
 test_at_myco_chat_handler() {
@@ -875,31 +857,23 @@ test_new_session_readonly() {
   grep -qF 'renderMermaidInContainer(list)' web/public/app.js \
     && pass "app.js: renderChatPane runs mermaid pass on the chat list" \
     || fail "app.js: chat pane does not process mermaid blocks"
-  # Regression: appendChatMessage and _postClaudeStreamToChat must NOT
-  # do a full innerHTML rebuild on every new row. The original
-  # implementation called renderChatPane(true) on each append, which
-  # wiped and rebuilt the entire chat DOM (re-parsing markdown and
-  # re-rendering mermaid for every prior row) on every streamed Claude
-  # text block — visible as the chat pane flashing/reloading entire
-  # history during a live turn. Switch to incremental _appendChatMessageDom.
+  # Regression: appendChatMessage must NOT do a full innerHTML rebuild
+  # on every new row. The original implementation called
+  # renderChatPane(true) on each append, which wiped and rebuilt the
+  # entire chat DOM (re-parsing markdown and re-rendering mermaid for
+  # every prior row) on every chat message — visible as the chat pane
+  # flashing/reloading entire history during a live turn. Switch to
+  # incremental _appendChatMessageDom.
   grep -qF '_appendChatMessageDom(message)' web/public/app.js \
     && pass "app.js: incremental chat append helper defined" \
     || fail "app.js: missing _appendChatMessageDom helper"
-  grep -qF '_appendChatMessageDom(row)' web/public/app.js \
-    && pass "app.js: _postClaudeStreamToChat uses incremental append" \
-    || fail "app.js: streaming claude path still does a full chat rebuild"
-  # Negative guard: neither hot append path should reference renderChatPane.
-  # (renderChatPane is still allowed in applyChatHistory + clearChat — the
-  # full-rebuild events.)
+  # Negative guard: appendChatMessage must not reference renderChatPane.
+  # (renderChatPane is still allowed in applyChatHistory + clearChat —
+  # the full-rebuild events.)
   if awk '/^function appendChatMessage\(/,/^}$/' web/public/app.js | grep -q 'renderChatPane('; then
     fail "app.js: appendChatMessage still calls renderChatPane (causes full rebuild on every chat frame)"
   else
     pass "app.js: appendChatMessage does not trigger full chat rebuild"
-  fi
-  if awk '/^function _postClaudeStreamToChat\(/,/^}$/' web/public/app.js | grep -q 'renderChatPane('; then
-    fail "app.js: _postClaudeStreamToChat still calls renderChatPane (causes full rebuild on every streamed text block)"
-  else
-    pass "app.js: _postClaudeStreamToChat does not trigger full chat rebuild"
   fi
   # Surgical menu deactivation: when a new menu (or menu-auto) lands, the
   # prior menu's clickable buttons must be replaced in-place. Without this,
@@ -1120,40 +1094,20 @@ test_new_session_readonly() {
   grep -q '_markAwaitingClaude' web/public/app.js \
     && pass "app.js: @myco marks awaiting-claude" \
     || fail "app.js: @myco marks awaiting-claude"
-  grep -q '_onTranscriptDeltaForChat' web/public/app.js \
-    && pass "app.js: transcript-delta routed into chat" \
-    || fail "app.js: transcript-delta routed into chat"
   grep -q 'CLAUDE_IDLE_MS' web/public/app.js \
     && pass "app.js: idle-timeout constant defined" \
     || fail "app.js: idle-timeout constant defined"
-  grep -q '_postClaudeStreamToChat' web/public/app.js \
-    && pass "app.js: streams assistant text to chat" \
-    || fail "app.js: streams assistant text to chat"
-  # Regression: each assistant text message must be appended as its own
-  # chat row (streaming UX), not buffered into one final post. The 2s
-  # debounce-then-buffer pattern was too aggressive — it fired after
-  # the FIRST assistant text and ignored everything claude said
-  # afterward (tool_result and subsequent summary text). Now we post
-  # each text on arrival and only retire the typing dots after
-  # CLAUDE_IDLE_MS of complete silence.
-  grep -qE 'm\.role === .assistant.|role === .assistant.' web/public/app.js \
-    && pass "app.js: handles assistant-role transcript messages" \
-    || fail "app.js: handles assistant-role transcript messages"
+  # Phase 9 step 9: transcript-delta WS frame is gone. The server-side
+  # persistAssistantTextToChat watcher mirrors assistant text into
+  # rec.chat (broadcast as 'chat' frames), so the chat pane still
+  # receives every claude reply — just without the client-side delta
+  # rendering path.
+  grep -q 'persistAssistantTextToChat' server/src/attach.js \
+    && pass "attach.js: assistant text persisted into rec.chat" \
+    || fail "attach.js: assistant-text watcher missing"
   grep -q '_scheduleClaudeIdleCheck' web/public/app.js \
-    && pass "app.js: schedules idle check on transcript activity" \
-    || fail "app.js: schedules idle check on transcript activity"
-  # Regression: _onTranscriptDeltaForChat must NOT gate on
-  # state.awaitingClaude. Claude often thinks silently for 30–60s
-  # before producing transcript output. The earlier 8s idle timer
-  # retired awaitingClaude=false and the post-text path was then
-  # dropping the eventual reply entirely (real bug filed against
-  # demo010 "generate sample source code" → claude's "Generated 4
-  # sample files…" never reached chat). _onClaudeIdle still keeps
-  # its own gate (that one is correct — only fires when dots are up).
-  awk '/^function _onTranscriptDeltaForChat\(/,/^\}/' web/public/app.js | \
-    grep -qE 'if \(!state\.awaitingClaude\) return' \
-    && fail "app.js: _onTranscriptDeltaForChat still gates on awaitingClaude (regression)" \
-    || pass "app.js: _onTranscriptDeltaForChat posts text regardless of awaiting state"
+    && pass "app.js: schedules idle check after @myco send" \
+    || fail "app.js: schedules idle check after @myco send"
   grep -q 'claude-typing-dots' web/public/styles.css \
     && pass "styles.css: typing-dots animation" \
     || fail "styles.css: typing-dots animation"
@@ -1174,13 +1128,6 @@ test_new_session_readonly() {
   grep -q 'function _retireClaudeTyping' web/public/app.js \
     && pass "app.js: shared _retireClaudeTyping path" \
     || fail "app.js: shared _retireClaudeTyping path missing"
-  # The grace timer must cancel when fresh transcript activity arrives,
-  # otherwise a momentary mid-turn spinner gap would yank the dots
-  # while claude is still streaming.
-  awk '/^function _onTranscriptDeltaForChat\(/,/^\}/' web/public/app.js | \
-    grep -q '_spinnerStopTimer' \
-    && pass "app.js: transcript activity cancels pending spinner-stop retirement" \
-    || fail "app.js: transcript activity does not cancel spinner-stop retirement"
   # Negative guard: doSpawn must NOT auto-switch new sessions to readonly.
   grep -qF 'openSession(body.session_id, { startInReadonly: true })' web/public/app.js \
     && fail "doSpawn auto-switched new sessions to readonly (regression)" \
@@ -1288,20 +1235,12 @@ test_new_session_readonly() {
   else
     skip "_migrateLegacyMemory smoke test (no host node)"
   fi
-  # Safety net: if a brand-new session lands on the readonly view and
-  # neither a menu callout nor any transcript content arrives within
-  # READONLY_FALLBACK_MS, auto-flip back to the live xterm so the user
-  # is never trapped on a "Waiting for session to start…" screen (e.g.
-  # when the spawn cwd is already trusted by Claude, so no menu fires).
-  grep -q 'READONLY_FALLBACK_MS' web/public/app.js \
-    && pass "app.js: readonly-fallback watchdog defined" \
-    || fail "app.js: readonly-fallback watchdog defined"
-  grep -q '_armReadonlyFallback' web/public/app.js \
-    && pass "app.js: armReadonlyFallback wired from openSession" \
-    || fail "app.js: armReadonlyFallback wired from openSession"
-  grep -q '_cancelReadonlyFallback' web/public/app.js \
-    && pass "app.js: cancelReadonlyFallback on menu/transcript/teardown" \
-    || fail "app.js: cancelReadonlyFallback on menu/transcript/teardown"
+  # Phase 9 step 9 retired the readonly-fallback watchdog (the JSONL
+  # transcript pane it could flip to is gone). Negative guard: keep
+  # the helpers out of app.js so they don't sneak back via copy-paste.
+  ! grep -q 'READONLY_FALLBACK_MS\|_armReadonlyFallback\|_cancelReadonlyFallback' web/public/app.js \
+    && pass "app.js: readonly-fallback watchdog retired (Phase 9 step 9)" \
+    || fail "app.js: readonly-fallback watchdog still present"
 }
 
 test_chat_user_capture() {
@@ -1665,12 +1604,10 @@ test_chat_window() {
   grep -qF 'setChatPane(window.innerWidth > 900)' web/public/app.js \
     && fail "app.js: init still auto-opens chat on desktop — hides terminal at boot" \
     || pass "app.js: init no longer auto-opens chat (boots on terminal)"
-  # Chrome-icon click contract: every button except 👁 preview is a
-  # show-only activator (no toggle-off on second click). 👁 preview is
-  # the only two-state toggle, switching between terminal and readonly.
-  # Pre-fix, all five buttons toggled, so a second tap closed the view
-  # the user was on. The new contract makes the icons behave like a
-  # mutually-exclusive tab row.
+  # Chrome-icon click contract: every chrome button is a show-only
+  # activator (no toggle-off on second click). Phase 9 step 9 retired
+  # the 👁 preview and 📜 transcript toggles — the chatpane is the
+  # only session view, so there's no terminal ↔ readonly flip left.
   grep -qF "setChatPane(true)" web/public/app.js \
     && pass "app.js: btn-chat click is show-only (setChatPane(true))" \
     || fail "app.js: btn-chat still toggles via setChatPane(!visible)"
@@ -1680,38 +1617,22 @@ test_chat_window() {
   grep -qF "btn.addEventListener('click', showFilesView)" web/public/app.js \
     && pass "app.js: btn-files click is show-only" \
     || fail "app.js: btn-files still toggles (closes on second click)"
-  grep -qF "btn-preview-readonly')?.addEventListener('click', toggleOwnerReadonlyPreview)" web/public/app.js \
-    && pass "app.js: btn-preview-readonly remains the only two-state toggle" \
-    || fail "app.js: btn-preview-readonly no longer toggles between terminal/readonly"
-  # 📜 transcript chrome icon — show-only activator for the readonly
-  # Phase 9 step 3 retired #btn-transcript and the showTranscriptView
-  # function — the JSONL transcript pane is gone, and the chatpane is
-  # the only session view (owners + read-only viewers). The negative
-  # guards lock in that they don't sneak back via copy-paste.
+  # Phase 9 step 9 retired #btn-transcript and #btn-preview-readonly
+  # along with their toggleOwnerReadonlyPreview / showTranscriptView
+  # handlers — the JSONL transcript pane is gone, chatpane is the
+  # only session view. Negative guards keep them out of the source.
   ! grep -qF 'id="btn-transcript"' web/public/index.html \
     && pass "index.html: btn-transcript retired (Phase 9 step 3)" \
     || fail "index.html: btn-transcript still in chrome cluster"
-  # Phase 9 step 3 stubbed showTranscriptView as a no-op (kept the
-  # signature so legacy call sites don't crash). The negative guard
-  # checks the BODY is empty / commented, not the signature.
-  if awk '/^function showTranscriptView\(/,/^}$/' web/public/app.js | grep -qE 'showConversationView\(|conv-content|btn-preview-readonly|btn-transcript'; then
-    fail "app.js: showTranscriptView still touches removed DOM"
-  else
-    pass "app.js: showTranscriptView stubbed (Phase 9 step 3)"
-  fi
-  # Always-tail contract: chat/conv/xterm are tail-readers — they
-  # should always pin to the latest content. New transcript messages
-  # must unconditionally scroll; the previous isConvAtBottom() guard
-  # stranded users on old content if their scroll position was even
-  # 60px above the bottom.
-  if awk '/^function appendTranscriptMessages\(/,/^}$/' web/public/app.js | grep -q 'if (wasAtBottom)'; then
-    fail "app.js: appendTranscriptMessages still gates scrollConvToBottom on wasAtBottom — strands users on old content"
-  else
-    pass "app.js: appendTranscriptMessages always pins to latest"
-  fi
-  # Phase 9 step 3 retired showConversationView (the JSONL transcript
-  # pane is gone). The always-tail contract is the chatpane's
-  # scrollChatToLatest now, asserted elsewhere.
+  ! grep -qF 'id="btn-preview-readonly"' web/public/index.html \
+    && pass "index.html: btn-preview-readonly retired (Phase 9 step 9)" \
+    || fail "index.html: btn-preview-readonly still in chrome cluster"
+  ! grep -qE 'function (showTranscriptView|showConversationView|showTranscriptWaiting|showTerminalView|toggleOwnerReadonlyPreview)\b' web/public/app.js \
+    && pass "app.js: transcript/terminal view helpers retired (Phase 9 step 9)" \
+    || fail "app.js: transcript/terminal view helpers still defined"
+  ! grep -qE 'function (renderTranscriptMessages|appendTranscriptMessages|tailMessages)\b' web/public/app.js \
+    && pass "app.js: transcript-render helpers retired (Phase 9 step 9)" \
+    || fail "app.js: transcript-render helpers still defined"
   # Plan / Arch / Test artifact views (promoted to top-level chrome buttons,
   # commit 15187ea). Each has its own main-pane container and a chrome button.
   for view in plan arch test; do
@@ -2173,21 +2094,11 @@ test_chat_window() {
   grep -qF 'meta: { transcriptUuid: m.uuid, fromTranscript: true }' server/src/attach.js \
     && pass "attach.js: persisted chat rows carry meta.transcriptUuid for dedup" \
     || fail "attach.js: persisted chat rows missing meta.transcriptUuid"
-  # Client dedup: when chat-history already has a row with the same
-  # uuid, the live transcript-delta path skips it so we don't render
-  # the same reply twice on a reconnect.
-  grep -qF 'c.meta.transcriptUuid === m.uuid' web/public/app.js \
-    && pass "app.js: transcript-delta dedups against chat-history" \
-    || fail "app.js: transcript-delta dedup against chat-history missing"
-  grep -qF '_postClaudeStreamToChat(m.text.trim(), m.uuid)' web/public/app.js \
-    && pass "app.js: live chat rows stamp transcriptUuid for dedup" \
-    || fail "app.js: live chat rows missing transcriptUuid stamp"
   # Regression: appendChatMessage (the 'chat' WS frame handler) must
   # dedup by meta.transcriptUuid. Without this, the SAME assistant text
-  # arriving via transcript-delta first and then the server's 'chat'
-  # push from persistAssistantTextToChat rendered twice in the chat
-  # pane (observed on mycobeta demo010 as identical "claude 01:17"
-  # rows duplicated back-to-back).
+  # arriving via chat-history replay AND the live persistAssistantText-
+  # ToChat push rendered twice in the chat pane (observed on mycobeta
+  # demo010 as identical "claude 01:17" rows duplicated back-to-back).
   # The dedup line is unique to this function — searching globally
   # is simpler than awk-ranging which is finicky under pipefail.
   grep -qF 'existing.meta.transcriptUuid === uuid' web/public/app.js \
@@ -2435,7 +2346,6 @@ test_index_html_contents() {
   local index
   index=$(curl -sf "http://127.0.0.1:$SMOKE_PORT/" 2>/dev/null || echo "")
   echo "$index" | grep -q 'id="chatpane"' && pass "index serves chatpane" || fail "index serves chatpane"
-  echo "$index" | grep -q 'conversation-wrap' && pass "index serves conversation-wrap" || fail "index serves conversation-wrap"
   echo "$index" | grep -q 'mermaid.min.js' && pass "index includes mermaid script" || fail "index includes mermaid script"
   echo "$index" | grep -q 'highlight.min.js' && pass "index includes highlight script" || fail "index includes highlight script"
 }

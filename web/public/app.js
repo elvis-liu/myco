@@ -31,7 +31,6 @@ const state = {
   // gated on the same width thresholds for consistency.
   chatPaneVisible: typeof window !== 'undefined' &&
     (window.innerWidth >= 1200 || window.innerWidth <= 900),
-  shareMode: false, // kept for compat — no longer gates UI
   // Per-session file explorer state. Cleared when session changes.
   files: {
     visible: false,
@@ -154,8 +153,8 @@ function showShareError(msg) {
     `padding:20px;text-align:center;">${escHtml(msg)}</div>`;
 }
 
-// Phase 9 step 2: xterm is retired. Kept as a no-op so legacy call
-// sites (mostly inside showTerminalView) don't bomb.
+// Phase 9 step 2: xterm is retired. Kept as a no-op so any cached-page
+// call sites don't bomb.
 function ensureXtermForFallback() { /* no-op: xterm retired */ }
 
 // Touch device detection: narrow viewport OR coarse pointer (matchMedia)
@@ -169,12 +168,13 @@ const IS_TOUCH_DEVICE = (() => {
   } catch { return false; }
 })();
 
-// The main pane has six mutually-exclusive sub-panes. Always hide the
+// The main pane has four mutually-exclusive sub-panes. Always hide the
 // others when switching; otherwise the panes stack and the inactive one
 // disappears behind / beside the active one. Chat is NOT in this list —
 // it's a left-sidebar overlay (desktop) / full-pane overlay (mobile)
 // that can coexist with whatever main-pane view is active underneath.
-const MAIN_PANE_IDS = ['terminal-wrap', 'conversation-wrap', 'files-wrap', 'plan-wrap', 'arch-wrap', 'test-wrap'];
+// (Phase 9 step 3 retired #terminal-wrap and #conversation-wrap.)
+const MAIN_PANE_IDS = ['files-wrap', 'plan-wrap', 'arch-wrap', 'test-wrap'];
 
 function _hideMainPaneSiblings(keep) {
   for (const id of MAIN_PANE_IDS) {
@@ -201,34 +201,11 @@ function _hideMainPaneSiblings(keep) {
   if (window.innerWidth <= 900 && state.chatPaneVisible) setChatPane(false);
 }
 
-// Phase 9 step 3: the JSONL transcript pane (#conversation-wrap) is
-// gone. These three helpers stay as no-ops so legacy call sites
-// don't bomb on missing DOM nodes. The chatpane is the only view
-// left, and openSession / the 'viewer-mode' WS handler call
+// Phase 9 step 3 retired the JSONL transcript pane (#conversation-wrap)
+// and its viewer helpers (showConversationView / showTranscriptView /
+// showTranscriptWaiting / showTerminalView). All sessions render in
+// the chat pane now — openSession + the 'viewer-mode' WS handler call
 // setChatPane(true) directly.
-function showConversationView() { /* retired with #conversation-wrap */ }
-function showTranscriptView()  { /* retired — chatpane is the only view */ }
-function showTranscriptWaiting() { /* retired — chatpane shows live state */ }
-
-function showTerminalView() {
-  // Phase 9 step 3: #terminal-wrap may be gone. Stay defensive so the
-  // function doesn't throw when called from a cached page.
-  _hideMainPaneSiblings('terminal-wrap');
-  const wrap = document.getElementById('terminal-wrap');
-  if (wrap) wrap.hidden = false;
-  updateChatButton();
-  if (state.fitAddon) requestAnimationFrame(() => state.fitAddon.fit());
-  if (state.term) requestAnimationFrame(() => { try { state.term.scrollToBottom(); } catch {} });
-}
-
-// 📜 transcript chrome icon — unconditional "show the readonly
-// transcript viewer." For owners this also flips state.previewAsViewer
-// so the artifact-toggle/main-view machinery treats us as being in
-// readonly mode (matches what 👁 preview does when toggling INTO
-// Phase 9 step 3 retired showTranscriptView + showTranscriptWaiting
-// — both rendered into the now-deleted #conversation-wrap. They live
-// as no-ops above next to showConversationView so any remaining
-// click handlers / WS-frame branches don't crash.
 
 function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -324,124 +301,6 @@ async function renderMermaidInContainer(container) {
       node.remove();
     }
   } catch {}
-}
-
-function scrollConvToBottom() {
-  // The transcript scroller used to be #conversation-wrap; once #terminal-tail
-  // was docked at the bottom, #conv-messages became the actual scroller.
-  const wrap = document.getElementById('conv-messages');
-  if (!wrap) return;
-  requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
-}
-
-function isConvAtBottom() {
-  const wrap = document.getElementById('conv-messages');
-  if (!wrap) return true;
-  return wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 60;
-}
-
-// Cap the number of transcript messages rendered. Long sessions accumulate
-// thousands of turns in the JSONL; without a cap the read-only viewer ends
-// up holding the whole history in DOM, which gets slow on mobile and
-// memory-hungry on long-running sessions. We keep the most-recent slice and
-// drop the oldest. State retains the full array so we can re-render the
-// trailing window after each delta.
-const TRANSCRIPT_RENDER_CAP = 500;
-
-function tailMessages(messages) {
-  if (!Array.isArray(messages)) return [];
-  if (messages.length <= TRANSCRIPT_RENDER_CAP) return messages;
-  return messages.slice(messages.length - TRANSCRIPT_RENDER_CAP);
-}
-
-// Transcript turns are inserted into #conv-content (a child of #conv-messages
-// that lives ABOVE #terminal-tail). Wiping conv-content via innerHTML never
-// touches the sibling tail card, so the embedded mini xterm survives every
-// transcript reset/append.
-function renderTranscriptMessages(messages) {
-  showConversationView();
-  const content = document.getElementById('conv-content');
-  if (!content) return;
-  content.innerHTML = '';
-  const tailed = tailMessages(messages);
-  if (Array.isArray(messages) && messages.length > tailed.length) {
-    const banner = document.createElement('div');
-    banner.className = 'conv-truncation-note';
-    banner.textContent = `… ${messages.length - tailed.length} earlier message${messages.length - tailed.length === 1 ? '' : 's'} hidden (showing the most recent ${tailed.length})`;
-    content.appendChild(banner);
-  }
-  let turnEl = null;
-  for (const m of tailed) {
-    const el = renderConvMessage(m);
-    // Start a new turn on user messages
-    if (m.role === 'user' || m.role === 'title') {
-      turnEl = document.createElement('div');
-      turnEl.className = 'conv-turn';
-      content.appendChild(turnEl);
-    }
-    if (turnEl) {
-      turnEl.appendChild(el);
-    } else {
-      content.appendChild(el);
-    }
-  }
-  scrollConvToBottom();
-  renderMermaidInContainer(content);
-  // Re-attach the pending-menu callout (if any) at the top — the
-  // innerHTML wipe above removed it. Keeps the menu visible across
-  // transcript re-renders so the user can still pick an option.
-  _renderPendingMenuCallout();
-}
-
-function appendTranscriptMessages(messages) {
-  // Once the running transcript exceeds the render cap, switch from append
-  // to a re-render of the trailing window so oldest entries fall off the
-  // top. Under-cap appends stay fast.
-  if (Array.isArray(state.transcriptMessages) && state.transcriptMessages.length > TRANSCRIPT_RENDER_CAP) {
-    renderTranscriptMessages(state.transcriptMessages);
-    return;
-  }
-  // Defensive out-of-order guard. The caller pushes `messages` onto
-  // state.transcriptMessages BEFORE invoking us. If any incoming msg
-  // carries a ts older than the last pre-push entry, the array is now
-  // out of order — typically after a reconnect that delivered a delta
-  // for a transcript-flush that happened mid-network-blip, or after a
-  // subagent/Monitor event arriving asynchronously. Sort + re-render
-  // so the chronology stays correct. Rare path; cheap when it fires.
-  if (Array.isArray(state.transcriptMessages) && state.transcriptMessages.length > messages.length) {
-    const prevLen = state.transcriptMessages.length - messages.length;
-    const lastPrevTs = state.transcriptMessages[prevLen - 1] && state.transcriptMessages[prevLen - 1].ts;
-    const anyOlder = lastPrevTs && messages.some((m) => m && m.ts && m.ts < lastPrevTs);
-    if (anyOlder) {
-      state.transcriptMessages.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
-      renderTranscriptMessages(state.transcriptMessages);
-      return;
-    }
-  }
-  const content = document.getElementById('conv-content');
-  if (!content) return;
-  let turnEl = content.lastElementChild;
-  if (turnEl && !turnEl.classList?.contains('conv-turn')) turnEl = null;
-  for (const m of messages) {
-    const el = renderConvMessage(m);
-    if (m.role === 'user' || m.role === 'title') {
-      turnEl = document.createElement('div');
-      turnEl.className = 'conv-turn';
-      content.appendChild(turnEl);
-    }
-    if (turnEl) {
-      turnEl.appendChild(el);
-    } else {
-      content.appendChild(el);
-    }
-  }
-  // Always pin to latest — per the chat-pane/conv contract, these views
-  // are tail-readers: new messages should always pull the viewport
-  // down. Previously this only scrolled when isConvAtBottom() was true,
-  // which silently stranded the user on old content if they were
-  // anywhere above the last ~60px of the scroller.
-  scrollConvToBottom();
-  renderMermaidInContainer(content);
 }
 
 function renderConvMessage(m) {
@@ -1057,57 +916,41 @@ async function deleteSessionWithConfirm(s) {
 
 // ── terminal attach ───────────────────────────────────────────────────────────
 
-// Drop the previous session's WS, xterm, transcript, file pane, and the
-// terminal/conversation wraps. Leaves clearReadOnly to dispose the
-// read-only banner + tail xterm so we don't double-dispose them here.
+// Drop the previous session's WS, file pane, and any lingering main-
+// pane wraps. Leaves clearReadOnly to dispose the read-only banner.
 function _teardownPreviousSession() {
-  _cancelReadonlyFallback();
   if (state.ws) { state.ws.close(); state.ws = null; }
-  if (state.term) { state.term.dispose(); state.term = null; }
   state.viewerMode = false;
-  state.transcriptMessages = [];
   // Phase 9 step 2 + 3 deleted #terminal, #terminal-wrap,
   // #conversation-wrap, and #conv-content. Each lookup may return
   // null for a fresh-cache page; guard each access so a missing
   // node doesn't throw and abort openSession (the 2026-05-15
   // 'clicked on a session, nothing show up' incident).
-  const termEl = document.getElementById('terminal');
-  if (termEl) termEl.innerHTML = '';
   const termWrap = document.getElementById('terminal-wrap');
   if (termWrap) termWrap.hidden = true;
   const convWrap = document.getElementById('conversation-wrap');
   if (convWrap) convWrap.hidden = true;
-  const conv = document.getElementById('conv-content');
-  if (conv) conv.innerHTML = '';
-  clearReadOnly();                               // resets banner + tail term
+  clearReadOnly();                               // resets banner
   hideFilesView();
   state.files.currentPath = '.';
   state.files.history = [];
   state.files.viewing = null;
 }
 
-// Reset state + chrome for the new session id (preview toggle, artifact
-// views, sidebar list, chat panes, etc.). Does not start any network I/O.
+// Reset state + chrome for the new session id (artifact views, sidebar
+// list, chat panes, etc.). Does not start any network I/O.
 function _resetUiForNewSession(id) {
   state.activeId = id;
   state.viewerMode = false;
-  state.transcriptMessages = [];
-  state.previewAsViewer = false;             // reset preview toggle on session switch
   state.pendingMenu = null;                  // clear any inline menu callout
   state.pendingMenuQueue = [];               // and the modal queue
   state.pendingMenuIdx = 0;
   state.permModalDismissed = false;
   state._lastPermQueueLen = 0;
   state._agentChatPaneArmed = false;         // re-arm auto-open for the next agent frame
-  // Restore terminal-wrap visibility — PTY sessions need it, and the
-  // agent-frame handler will re-hide for agent sessions on the next
-  // frame.
-  const wrap = document.getElementById('terminal-wrap');
-  if (wrap) wrap.hidden = false;
   // Hide the modal if it was open for the previous session.
   const modal = document.getElementById('perm-modal');
   if (modal) modal.hidden = true;
-  document.getElementById('btn-preview-readonly')?.classList.remove('active');
   // Hide all Plan/Arch/Test main-pane views so the previous session's
   // extracted content doesn't linger. Chrome-button active classes are
   // also cleared in clearArtifactBodies.
@@ -1208,26 +1051,6 @@ function openSession(id, opts = {}) {
         // gates claude-routing for read-only users.
         setChatPane(true);
         applyReadOnly(msg.owner);
-      } else if (msg.t === 'transcript-init') {
-        state.transcriptMessages = msg.messages || [];
-        if (state.transcriptMessages.length) _cancelReadonlyFallback();
-        renderTranscriptMessages(state.transcriptMessages);
-      } else if (msg.t === 'transcript-delta') {
-        const newMsgs = msg.messages || [];
-        if (newMsgs.length) _cancelReadonlyFallback();
-        state.transcriptMessages.push(...newMsgs);
-        appendTranscriptMessages(newMsgs);
-        _onTranscriptDeltaForChat(newMsgs);
-        if (newMsgs.some((m) => m && m.role === 'assistant')) {
-          // Claude is now producing transcript output → any earlier
-          // pending menu (trust-folder etc.) has been resolved.
-          if (state.pendingMenu) {
-            state.pendingMenu = null;
-            _renderPendingMenuCallout();
-          }
-        }
-      } else if (msg.t === 'transcript-waiting') {
-        showTranscriptWaiting();
       } else if (msg.t === 'output') {
         // SDK Phase 9 step 2: agent-mode sessions don't emit `t:'output'`
         // frames — the PTY byte stream is gone. Keep the branch as a
@@ -1392,29 +1215,12 @@ function updateChatButton() {
   // visibility doesn't depend on the chatpane.
   const fbtn = document.getElementById('btn-files');
   if (fbtn) fbtn.hidden = !state.activeId || !hasContent;
-  // Preview-as-viewer toggle: only show for the actual session owner, since
-  // a shared viewer is already in viewer mode and a "preview" is meaningless
-  // for them.
-  const pbtn = document.getElementById('btn-preview-readonly');
-  if (pbtn) {
-    const session = state.activeId && state.sessions
-      ? state.sessions.find((s) => s.id === state.activeId) : null;
-    const isOwner = !!(session && session.owned);
-    pbtn.hidden = !state.activeId || !isOwner || !hasContent;
-  }
   // Plan / Arch / Test toggles: available to everyone with an active session
   // (owners + viewers can both inspect/refresh extracted artifacts).
   for (const t of ['plan', 'arch', 'test']) {
     const el = document.getElementById('btn-' + t);
     if (el) el.hidden = !state.activeId || !hasContent;
   }
-  // 📜 transcript: available to everyone with an active session — same
-  // gate as the artifact toggles. Brings up the readonly conversation
-  // viewer (which is the same surface viewers default to). For owners
-  // it's a quick way to flip to readonly without going through the
-  // toggle-style 👁 preview.
-  const tbtn = document.getElementById('btn-transcript');
-  if (tbtn) tbtn.hidden = !state.activeId || !hasContent;
 }
 
 // Touch scroll handler. Synthesizes WheelEvents from finger deltas + has a
@@ -1581,13 +1387,10 @@ function applyChatHistory(messages) {
 function appendChatMessage(message) {
   if (!message || typeof message !== 'object') return;
   // Dedup by transcript uuid — Claude's assistant text reaches the
-  // client through two paths now: the live transcript-delta (which
-  // posts a _localOnly row via _postClaudeStreamToChat) AND a 'chat'
-  // frame from persistAssistantTextToChat on the server. If
-  // transcript-delta arrived first the local row is already in chat;
-  // skip the server-side push to avoid rendering the same reply twice.
-  // (If chat arrives first the existing _onTranscriptDeltaForChat dedup
-  // handles the reverse direction.)
+  // client through the server's persistAssistantTextToChat watcher as
+  // a 'chat' frame stamped with meta.transcriptUuid. Replays (chat-
+  // history on reconnect) carry the same uuid; this guard catches
+  // the duplicate so we don't re-render the same reply twice.
   const uuid = message.meta && message.meta.transcriptUuid;
   if (uuid) {
     for (let i = 0; i < state.chatMessages.length; i++) {
@@ -2116,49 +1919,11 @@ function _focusChatInput(placeholderHint) {
   input.focus();
 }
 
-// Readonly-view safety net for new sessions. If 8 seconds pass without
-// a menu callout or any transcript content, flip back to the live xterm
-// so the user can see whatever Claude is showing (banner + interactive
-// prompt) and respond directly. Cancelled by any signal that the
-// readonly view actually has something useful: pending menu, transcript
-// content, or a manual flip via btn-preview-readonly.
-const READONLY_FALLBACK_MS = 8000;
-
-function _armReadonlyFallback(id) {
-  _cancelReadonlyFallback();
-  state._readonlyFallbackTimer = setTimeout(() => {
-    state._readonlyFallbackTimer = null;
-    // Bail if the user already navigated away, manually flipped out of
-    // readonly, or the readonly view has filled in with real content.
-    if (state.activeId !== id) return;
-    if (!state.previewAsViewer) return;
-    if (state.pendingMenu) return;
-    if (Array.isArray(state.transcriptMessages) && state.transcriptMessages.length) return;
-    console.log('[myco] readonly fallback: no menu/transcript after', READONLY_FALLBACK_MS, 'ms — flipping to xterm');
-    // Same effect as clicking btn-preview-readonly to turn it off.
-    state.previewAsViewer = false;
-    document.getElementById('btn-preview-readonly')?.classList.remove('active');
-    clearReadOnly();
-    showTerminalView();
-    updateChatButton();
-  }, READONLY_FALLBACK_MS);
-}
-
-function _cancelReadonlyFallback() {
-  if (state._readonlyFallbackTimer) {
-    clearTimeout(state._readonlyFallbackTimer);
-    state._readonlyFallbackTimer = null;
-  }
-}
-
 // No-op. The menu picker now renders inline inside each menu chat
-// message (see renderChatMessage). We still keep the existing call
-// sites (after applyChatHistory / appendChatMessage / transcript
-// renders / waiting swaps) so the watchdog-cancel side effect runs
-// on every menu event.
-function _renderPendingMenuCallout() {
-  if (state.pendingMenu) _cancelReadonlyFallback();
-}
+// message (see renderChatMessage). The previous readonly-fallback
+// watchdog (Phase 9 step 3 retired) drove this; the function is kept
+// as a hook so legacy call sites stay no-throw.
+function _renderPendingMenuCallout() { /* no-op */ }
 
 // Phase 2.5: the modal popup (perm-modal) owns picking now. The chat
 // row for a pending menu is a quiet "↗ open in popup" hint; clicking
@@ -2392,60 +2157,6 @@ function _markAwaitingClaude() {
   _scheduleClaudeIdleCheck();
 }
 
-// Called from the transcript-delta WS frame handler whenever new
-// transcript messages arrive. Streams every assistant text into chat
-// as it lands. Critically, this does NOT gate on state.awaitingClaude —
-// claude can think silently for 30–60s before producing any output, and
-// that quiet period used to retire the typing dots AND make this
-// handler return early via an `if (!awaitingClaude) return` guard, so
-// the eventual "Generated 4 sample files…" reply never reached chat.
-// The dots are managed by a separate timer for visual feedback only;
-// they don't gate posting.
-function _onTranscriptDeltaForChat(messages) {
-  let sawSomething = false;
-  for (const m of messages) {
-    if (!m) continue;
-    if (m.role === 'assistant') {
-      sawSomething = true;
-      const tools = Array.isArray(m.toolCalls) ? m.toolCalls.length : 0;
-      state.pendingClaudeToolCalls = (state.pendingClaudeToolCalls || 0) + tools;
-      if (m.text && m.text.trim()) {
-        // Dedupe — transcript-delta can re-emit the same uuid after a
-        // reconnect (server replays from startByte) and we don't want
-        // to double-post in chat. Two layers of dedup:
-        //   1. _claudeSeenText: within-tab repeat (cheap Set).
-        //   2. chatMessages scan by meta.transcriptUuid: catches the
-        //      case where the server has ALREADY persisted this message
-        //      into rec.chat and the client got it via chat-history /
-        //      'chat' push, so the live transcript-delta should skip it.
-        if (!state._claudeSeenText) state._claudeSeenText = new Set();
-        const key = m.uuid || (m.ts + '|' + m.text.slice(0, 40));
-        const alreadyInChat = m.uuid && state.chatMessages.some(
-          (c) => c && c.meta && c.meta.transcriptUuid === m.uuid,
-        );
-        if (!state._claudeSeenText.has(key) && !alreadyInChat) {
-          state._claudeSeenText.add(key);
-          _postClaudeStreamToChat(m.text.trim(), m.uuid);
-          state.pendingClaudeReplyPosted = true;
-        }
-      }
-    } else if (m.role === 'tool_result' || m.role === 'user') {
-      // tool_result = claude got data back; user = our own @myco echo.
-      // Both count as "still alive" for the idle timer.
-      sawSomething = true;
-    }
-  }
-  // Reset the typing-dots idle timer only when dots are currently up.
-  if (sawSomething && state.awaitingClaude) _scheduleClaudeIdleCheck();
-  // Fresh transcript activity means claude is still streaming — if a
-  // spinner-stop retirement was queued from a momentary spinner blip,
-  // cancel it so we don't yank the dots mid-turn.
-  if (sawSomething && state._spinnerStopTimer) {
-    clearTimeout(state._spinnerStopTimer);
-    state._spinnerStopTimer = null;
-  }
-}
-
 function _scheduleClaudeIdleCheck() {
   if (state._claudeIdleTimer) clearTimeout(state._claudeIdleTimer);
   state._claudeIdleTimer = setTimeout(_onClaudeIdle, CLAUDE_IDLE_MS);
@@ -2457,44 +2168,18 @@ function _onClaudeIdle() {
 }
 
 // Single retire path used by both the 30s idle timer fallback and the
-// spinner-stop signal. Posts the "ran N tool calls without reply"
-// summary if applicable, then clears awaiting state and re-renders.
+// spinner-stop signal. Clears awaiting state and re-renders the
+// indicator. Phase 9 step 3 retired the transcript-delta path that
+// counted assistant tool calls, so the "ran N tool calls without
+// reply" footer is no longer produced here.
 function _retireClaudeTyping() {
   if (state._claudeIdleTimer) { clearTimeout(state._claudeIdleTimer); state._claudeIdleTimer = null; }
   if (state._spinnerStopTimer) { clearTimeout(state._spinnerStopTimer); state._spinnerStopTimer = null; }
   state._spinnerSeen = false;
-  if (!state.awaitingClaude) { _renderClaudeTyping(); return; }
-  if (!state.pendingClaudeReplyPosted && state.pendingClaudeToolCalls > 0) {
-    const n = state.pendingClaudeToolCalls;
-    _postClaudeStreamToChat(`_(Claude ran ${n} tool call${n === 1 ? '' : 's'} and didn't post a text reply.)_`);
-  }
   state.awaitingClaude = false;
   state.pendingClaudeToolCalls = 0;
   state.pendingClaudeReplyPosted = false;
   state._claudeSeenText = null;
-  _renderClaudeTyping();
-}
-
-function _postClaudeStreamToChat(text, uuid) {
-  // Local-only chat row for INSTANT live feedback. The server now
-  // mirrors assistant text into rec.chat via persistAssistantTextToChat
-  // (with meta.transcriptUuid), so on reconnect the chat-history path
-  // brings the same message back as a properly persisted row. Stamping
-  // the uuid here means the chat-history-driven dedup in
-  // _onTranscriptDeltaForChat can recognize "this is the same message"
-  // and won't double-render.
-  const row = {
-    user: 'claude',
-    text: text,
-    ts: new Date().toISOString(),
-    _localOnly: true,
-  };
-  if (uuid) row.meta = { transcriptUuid: uuid };
-  state.chatMessages.push(row);
-  _appendChatMessageDom(row);
-  // Re-render the typing indicator so it slots back below the newest
-  // message (the indicator is a sibling of the list; the new message
-  // bumps it visually).
   _renderClaudeTyping();
 }
 
@@ -2600,48 +2285,20 @@ function _setClaudeStatusLine(text, structured) {
   _renderClaudeTyping();
 }
 
-// Live PTY mode transition handler. Appends a transcript-shaped pill
-// frame ({role:'plan_mode'|'auto_mode', state, ts}) so renderConvMessage
-// emits the same pill it would for a JSONL-replayed event. Dedup window
-// is 5 seconds — the JSONL flush eventually delivers an equivalent
-// record (often with a slightly different timestamp), so without this
-// guard the viewer would see "Entered plan mode" twice.
+// Live PTY mode transition handler. Phase 9 step 3 retired the JSONL
+// transcript pane that used to render these pills. We still cache the
+// current mode for any future use (badge in the chat pane, etc.) but
+// no longer push into a transcript array that has no renderer.
 function _onLiveModeChange(msg) {
   if (!msg || !msg.to) return;
-  // 'default' is the absence of a mode — render as "Exited <prior>"
-  // pill so the viewer sees a single transition narrative rather than
-  // a contentless "Entered default" line.
-  const toMode = msg.to === 'default' ? msg.from : msg.to;
-  if (!toMode || toMode === 'default') return;
-  const role = (toMode === 'plan') ? 'plan_mode'
-    : (toMode === 'accept' || toMode === 'auto') ? 'auto_mode'
-    : null;
-  if (!role) return;
-  const state_ = msg.to === 'default' ? 'exited' : 'entered';
-  const frame = { role, state: state_, ts: msg.ts, _live: true };
-  if (_isDuplicateModeFrame(frame)) return;
-  if (!Array.isArray(state.transcriptMessages)) state.transcriptMessages = [];
-  state.transcriptMessages.push(frame);
-  appendTranscriptMessages([frame]);
+  state.currentMode = msg.to || 'default';
 }
 
-// Apply a mode-snapshot received on attach. Pre-fix, mode pills only
-// rendered on the next Shift+Tab because mode-change emits only on
-// transition. The snapshot lets a viewer reconnecting mid-session see
-// the current mode without waiting for the next change. Idempotent:
-// if the snapshot mode matches the most-recent rendered pill, no-op.
+// Apply a mode-snapshot received on attach. Same retirement as
+// _onLiveModeChange — keeps the cached mode in state for any future
+// consumer (e.g., a chat-pane mode badge) without rendering a pill.
 function _applyModeSnapshot(mode) {
   state.currentMode = mode || 'default';
-  if (state.currentMode === 'default') return;          // nothing to render
-  const role = state.currentMode === 'plan' ? 'plan_mode'
-    : state.currentMode === 'accept' ? 'auto_mode'
-    : null;
-  if (!role) return;                                      // bypass / unknown — no pill
-  const frame = { role, state: 'entered', ts: new Date().toISOString(), _live: true };
-  if (_isDuplicateModeFrame(frame)) return;
-  if (!Array.isArray(state.transcriptMessages)) state.transcriptMessages = [];
-  state.transcriptMessages.push(frame);
-  appendTranscriptMessages([frame]);
 }
 
 // Dispatch a state-update WS frame to the right local applier based on
@@ -3026,23 +2683,6 @@ function _onArtifactsCacheUpdated(type) {
   loadArtifact(active).catch(() => {});
 }
 
-// True if an existing transcript row already announces this mode
-// transition within ±5s — guards against JSONL replay + live PTY
-// dual-delivery for the same event.
-function _isDuplicateModeFrame(frame) {
-  const list = state.transcriptMessages;
-  if (!Array.isArray(list) || !list.length) return false;
-  const ts = Date.parse(frame.ts || '');
-  if (!Number.isFinite(ts)) return false;
-  for (let i = list.length - 1; i >= Math.max(0, list.length - 20); i--) {
-    const m = list[i];
-    if (!m || m.role !== frame.role || m.state !== frame.state) continue;
-    const prevTs = Date.parse(m.ts || '');
-    if (Number.isFinite(prevTs) && Math.abs(prevTs - ts) < 5000) return true;
-  }
-  return false;
-}
-
 // Send an inline menu pick via the dedicated WS frame. Bypasses chat
 // entirely so the click on a pending-menu callout button doesn't show up
 // as a `/decide N` message in the discussion. Silent-drop if the WS is
@@ -3170,41 +2810,11 @@ function sendChatMessage(text) {
   return true;
 }
 
-// Read-only viewer UI: a small banner above the structured transcript
-// identifies the session owner. The transcript pane renders the JSONL
-// (user/assistant/tool messages); the live terminal-tail pane below it
-// surfaces interactive PTY prompts (which never make it into the JSONL).
-// Owner-only "preview as viewer" toggle. Flips between the live PTY terminal
-// view and the structured-transcript + read-only banner view that shared
-// viewers see. Doesn't change actual permissions — the owner's WS still
-// allows input + chat + everything else; this is a pure presentation swap
-// so the owner can sanity-check what's visible to viewers.
-function toggleOwnerReadonlyPreview() {
-  // Manual toggle: the user has made a deliberate choice, so the
-  // auto-flip-back watchdog should never override it.
-  _cancelReadonlyFallback();
-  state.previewAsViewer = !state.previewAsViewer;
-  const btn = document.getElementById('btn-preview-readonly');
-  if (btn) btn.classList.toggle('active', state.previewAsViewer);
-  if (state.previewAsViewer) {
-    // Re-render the transcript from state in case the conv-content was
-    // wiped by a session switch since we last viewed it.
-    if (Array.isArray(state.transcriptMessages) && state.transcriptMessages.length) {
-      renderTranscriptMessages(state.transcriptMessages);
-    } else {
-      showConversationView();
-      const content = document.getElementById('conv-content');
-      if (content && !content.innerHTML.trim()) {
-        content.innerHTML = '<div class="conv-waiting">Waiting for transcript… (Claude may not have produced any output yet)</div>';
-      }
-    }
-    applyReadOnly(state.chatUser || 'you');
-  } else {
-    clearReadOnly();
-    showTerminalView();
-  }
-  updateChatButton();
-}
+// Read-only viewer UI: a small banner above the chat pane identifies
+// the session owner. applyReadOnly / clearReadOnly are still wired
+// from the 'viewer-mode' WS frame handler — guests use the chatpane
+// like owners do, just with the server-side handleChatMessage gate
+// blocking claude-routing.
 
 function applyReadOnly(owner) {
   state.readOnly = true;
@@ -3309,18 +2919,10 @@ function bindChatUi() {
   //     open). To switch away, click a different view's icon — main-
   //     pane buttons are mutually exclusive; chat lives alongside the
   //     main view as a side panel.
-  //   preview                              →  TOGGLE between terminal
-  //     and readonly transcript. This is the only button with two
-  //     states, because the two views are reciprocal (one or the
-  //     other is always visible in the main pane).
+  // Phase 9 step 3 retired the 👁 preview and 📜 transcript toggles —
+  // the chatpane is the only session view now (owners + read-only
+  // viewers), so there's no longer a terminal ↔ transcript flip.
   document.getElementById('btn-chat')?.addEventListener('click', () => setChatPane(true));
-  document.getElementById('btn-preview-readonly')?.addEventListener('click', toggleOwnerReadonlyPreview);
-  // 📜 transcript — single-click activator (same show-only contract as
-  // the other chrome icons). Always brings up the readonly conversation
-  // view regardless of which main pane is currently active. Distinct
-  // from 👁 preview: preview toggles between terminal ↔ readonly, this
-  // one is unconditional "show me the transcript".
-  document.getElementById('btn-transcript')?.addEventListener('click', showTranscriptView);
   // The legacy chatpane-close × was removed; #btn-chat itself toggles
   // open/closed via its .active state. Optional-chain still leaves this
   // a no-op for any cached page that still has the old element.
@@ -3418,14 +3020,10 @@ function showArtifactView(type) {
   if (!ARTIFACT_TYPES.includes(type)) return;
   if (!state.activeId) return;
   const wrapId = _wrapIdForArtifact(type);
-  const termWrap = document.getElementById('terminal-wrap');
-  const convWrap = document.getElementById('conversation-wrap');
   const filesWrap = document.getElementById('files-wrap');
   // Capture whatever the user was looking at, so closing this view restores
-  // them to that pane rather than dumping them on the terminal.
-  if (!termWrap.hidden) state.artifactView.prev = 'terminal';
-  else if (!convWrap.hidden) state.artifactView.prev = 'conversation';
-  else if (filesWrap && !filesWrap.hidden) state.artifactView.prev = 'files';
+  // them to that pane rather than dumping them on the chatpane.
+  if (filesWrap && !filesWrap.hidden) state.artifactView.prev = 'files';
   // (otherwise leave the prior prev alone — we may be flipping between
   // artifact views and want to return to the same upstream pane.)
   _hideMainPaneSiblings(wrapId);
@@ -3446,11 +3044,11 @@ function hideArtifactView() {
   document.getElementById(wrapId).hidden = true;
   document.getElementById('btn-' + type)?.classList.remove('active');
   state.artifactView.active = null;
-  // Restore whichever main-pane view the user was on before opening this.
-  const prev = state.artifactView.prev || 'terminal';
-  if (prev === 'conversation') showConversationView();
-  else if (prev === 'files') showFilesView();
-  else showTerminalView();
+  // Phase 9 step 3 retired the terminal + transcript wraps. The chatpane
+  // is always present underneath any artifact view, so closing one just
+  // means hiding it — the chatpane reappears automatically. Files view
+  // is the only sibling we still restore explicitly.
+  if (state.artifactView.prev === 'files') showFilesView();
 }
 
 function toggleArtifactView(type) {
@@ -4174,9 +3772,11 @@ function toggleFilesPane() {
 
 function showFilesView() {
   if (!state.activeId) return;
-  const termWrap = document.getElementById('terminal-wrap');
-  const convWrap = document.getElementById('conversation-wrap');
-  state.files.prevView = !termWrap.hidden ? 'terminal' : (!convWrap.hidden ? 'conversation' : null);
+  // Phase 9 step 3 retired #terminal-wrap and #conversation-wrap; the
+  // chatpane is the only sibling left underneath the files view, and
+  // it reappears automatically when the files wrap is hidden, so we
+  // no longer need to track a prevView pane to restore.
+  state.files.prevView = null;
   _hideMainPaneSiblings('files-wrap');
   document.getElementById('files-wrap').hidden = false;
   // Reset the inner panes — on mobile, opening a file hides the tree-pane
@@ -4192,18 +3792,13 @@ function showFilesView() {
 }
 
 function hideFilesView() {
-  document.getElementById('files-wrap').hidden = true;
-  document.getElementById('files-view-pane').hidden = true;
+  const wrap = document.getElementById('files-wrap');
+  if (wrap) wrap.hidden = true;
+  const viewPane = document.getElementById('files-view-pane');
+  if (viewPane) viewPane.hidden = true;
   document.getElementById('btn-files')?.classList.remove('active');
   state.files.visible = false;
-  // Restore the previous main view (terminal or conversation).
-  if (state.activeId) {
-    const which = state.files.prevView;
-    if (which === 'terminal') document.getElementById('terminal-wrap').hidden = false;
-    else if (which === 'conversation') document.getElementById('conversation-wrap').hidden = false;
-  }
   state.files.prevView = null;
-  if (state.fitAddon) requestAnimationFrame(() => { try { state.fitAddon.fit(); } catch {} });
   updateChatButton();
 }
 
