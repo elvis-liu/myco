@@ -446,26 +446,13 @@ async function spawnSession(rawCwd, user = 'default', opts = {}) {
   const rows = clamp(opts.rows, 10, 200, 30);
   const createdAt = new Date().toISOString();
 
-  // mode: 'agent' (DEFAULT since phase 8 — Claude Agent SDK driving
-  //                 structured events) or 'pty' (legacy: claude CLI in
-  //                 node-pty; the path that ran from 2025-02 through
-  //                 2026-05). Persisted on the record so
-  //                 ensureLiveSession reattach respawns with the same
-  //                 driver class. Override per-session via
-  //                 POST /sessions {"mode":"pty"}; the spawn-modal
-  //                 checkbox flips between them.
-  //
-  //                 To force the old default fleet-wide (escape hatch
-  //                 if agent mode regresses): set the env var
-  //                 MYCO_DEFAULT_MODE=pty on the running container.
-  // SDK Phase 9 (in flight): new sessions are agent-only. We still
-  // honour persisted rec.mode='pty' on EXISTING sessions so legacy
-  // ensureLiveSession respawns aren't broken; but the spawn path
-  // rejects fresh PTY requests with a clear error rather than
-  // silently deprecating. The MYCO_DEFAULT_MODE=pty escape hatch is
-  // also gone — there's no fleet-wide rollback to the PTY default.
+  // SDK Phase 9 (in flight): new sessions are agent-only. Existing
+  // rec.mode='pty' records still respawn via the PTY driver in
+  // ensureLiveSession until pty.js is deleted in Phase 9 step 2;
+  // this code path only governs FRESH spawns. The fleet-wide
+  // env-var rollback hatch is gone — agent is the only spawn mode.
   if (opts.mode === 'pty') {
-    throw new Error('PTY mode is being retired (Phase 9). New sessions are agent-mode only. Spawn without {"mode":"pty"}.');
+    throw new Error('PTY mode is retired (Phase 9). New sessions are agent-mode only. Spawn without a mode field.');
   }
   const mode = 'agent';
 
