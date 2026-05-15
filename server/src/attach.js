@@ -330,12 +330,16 @@ function _toggleMenuChatCheckbox(sessionId, n, hash) {
   }
 }
 
-// Wire transcript messages from a session's JSONL file to a websocket.
+// Watch a session's JSONL transcript and mirror assistant text into
+// rec.chat (so the chat pane survives a refresh) + feed tool-progress
+// ingestion. Phase 9 step 9 retired the transcript-init / transcript-
+// delta / transcript-waiting WS frames — the client no longer has a
+// JSONL-rendering pane. The watcher is pure server-side now.
+//
 // Handles the new-session race: a freshly spawned claude takes ~5s to
 // write its first JSONL line, so resolveTranscriptPath returns null on
-// the initial attach. We send transcript-waiting, then poll every 3s
-// until the path resolves, then stream transcript-init followed by
-// transcript-delta on every appended message.
+// the initial attach. The 3s poll detects when the file appears (and
+// when a /resume re-exec writes to a NEW path) and rebinds.
 //
 // Returns a cleanup function the caller wires onto ws.on('close').
 function streamTranscriptToWs(sessionId, ws) {
@@ -348,16 +352,13 @@ function streamTranscriptToWs(sessionId, ws) {
   function startWatching(filePath) {
     watchingPath = filePath;
     transcriptMod.readNewMessages(filePath, 0).then(({ messages, bytesRead }) => {
-      if (closed || ws.readyState !== ws.OPEN) return;
-      ws.send(JSON.stringify({ t: 'transcript-init', messages, bytes: bytesRead }));
+      if (closed) return;
       persistAssistantTextToChat(sessionId, messages);
       if (session && typeof session.ingestTranscriptForToolProgress === 'function') {
         session.ingestTranscriptForToolProgress(messages);
       }
       unwatch = transcriptMod.watchTranscript(filePath, (newMsgs) => {
-        if (!closed && ws.readyState === ws.OPEN) {
-          ws.send(JSON.stringify({ t: 'transcript-delta', messages: newMsgs }));
-        }
+        if (closed) return;
         persistAssistantTextToChat(sessionId, newMsgs);
         if (session && typeof session.ingestTranscriptForToolProgress === 'function') {
           session.ingestTranscriptForToolProgress(newMsgs);
@@ -367,11 +368,7 @@ function streamTranscriptToWs(sessionId, ws) {
   }
 
   const initialPath = transcriptMod.resolveTranscriptPath(sessionId);
-  if (initialPath) {
-    startWatching(initialPath);
-  } else {
-    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'transcript-waiting' }));
-  }
+  if (initialPath) startWatching(initialPath);
 
   pollTimer = setInterval(() => {
     if (closed || ws.readyState !== ws.OPEN) {
