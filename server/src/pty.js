@@ -309,10 +309,12 @@ class PtySession extends EventEmitter {
     }
     const change = this.menuInterceptor.detectChange(this.headless);
     // Debug: when MYCO_MENU_DEBUG=1, dump the headless visible text on
-    // every detectChange call so we can correlate what the scanner sees
-    // with what claude is actually rendering. Throttled to one dump per
-    // 3s per session to keep logs readable.
-    if (process.env.MYCO_MENU_DEBUG === '1') {
+    // detectChange calls that actually saw something change — newMenu /
+    // sameMenu / cleared. Skip the noChange case (the vast majority of
+    // scans) so leaving the flag on doesn't burn through the in-memory
+    // log buffer at 38 lines × 2 sessions × 1 dump/3s. Throttled to one
+    // dump per 3s per session to keep logs readable.
+    if (process.env.MYCO_MENU_DEBUG === '1' && change) {
       const now = Date.now();
       if (!this._lastMenuDump || now - this._lastMenuDump > 3000) {
         this._lastMenuDump = now;
