@@ -29,13 +29,16 @@ underlying engine the CLI uses. There's no second runtime to install.
 - AWS Bedrock (`CLAUDE_CODE_USE_BEDROCK=1` + AWS creds)
 - Vertex AI (`CLAUDE_CODE_USE_VERTEX=1`)
 - Azure (`CLAUDE_CODE_USE_FOUNDRY=1`)
-- **No claude.ai subscription auth for third-party products** — Anthropic
-  explicitly disallows third parties offering subscription login to their
-  customers. **This affects myco directly**: today the PTY inherits whatever
-  the wrapping `claude` CLI authenticated with (subscription OR API key);
-  with the SDK we MUST use an API key (or cloud-provider key). Per-user
-  attribution would shift from "the user's claude.ai sub" to "myco's
-  centralized API key" — billing/quota implications.
+- **No claude.ai subscription auth for third-party REDISTRIBUTION** — Anthropic
+  disallows third parties offering subscription login *to their customers*
+  (e.g., a SaaS where N customers share one sub). **For personal use it's
+  fine**: empirically verified by installing the SDK in this container with
+  no `ANTHROPIC_API_KEY` set — the SDK picked up `~/.claude/.credentials.json`
+  (populated by `claude login`) and ran a successful query against the Pro
+  subscription. For myco specifically: as long as each collaborator runs
+  `claude login` with their OWN account, no auth changes needed for the SDK
+  pivot. The centralized-API-key model only matters if myco wanted to bill
+  on behalf of users (free-trial, demo accounts, etc.).
 
 **June 15 2026 billing change:** Agent SDK and `claude -p` usage on
 subscription plans draws from a new monthly Agent SDK credit pool ($20/mo
@@ -197,10 +200,15 @@ Mode can be changed mid-session via `setPermissionMode()` / `set_permission_mode
    results, etc. as styled blocks. Could be a feature (richer UI) or a
    regression (no copy-paste from a real terminal). The CLI Plan-mode wizard's
    custom TUI rendering doesn't exist either.
-2. **Subscription auth gone.** Today users with a claude.ai subscription
-   ride that. SDK requires API keys. For multi-user myco, that means either
-   a single centralized myco API key (everyone shares quota) or per-user
-   API keys (operational headache).
+2. **Subscription auth — fine for personal use, blocked for redistribution.**
+   (Updated 2026-05-15 after empirical test.) The SDK picks up
+   `~/.claude/.credentials.json` populated by `claude login` and runs against
+   the subscription — no API key needed. Verified in-container with no
+   `ANTHROPIC_API_KEY` set. The "third-party redistribution" wording in the
+   docs is about offering subscription auth *to your customers*, not about
+   the SDK refusing to work with subscription credentials. **Net: no auth
+   changes required for the SDK pivot in myco's current single-tenant
+   model.**
 3. **Slash commands** that Claude Code's TUI implements (`/clear`, `/agents`,
    `/init`, `/help` inside Claude) — we'd need to reimplement any user-facing
    ones, or surface "this is an SDK session, those commands don't apply" UX.
