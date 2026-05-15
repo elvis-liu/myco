@@ -18,9 +18,25 @@
 // See agent-sdk-migration-plan.md on this branch for the full phasing.
 
 const { EventEmitter } = require('events');
+const crypto = require('crypto');
 const { query } = require('@anthropic-ai/claude-agent-sdk');
 
 const MAX_EVENTS = 500;
+
+// Truncate Claude's tool inputs to a chat-card-sized blurb.
+function _summariseToolInput(name, input) {
+  try {
+    if (name === 'Bash') return String((input && input.command) || '').slice(0, 200);
+    if (name === 'Read' || name === 'Edit' || name === 'Write') return String((input && input.file_path) || '').slice(0, 200);
+    if (name === 'Glob' || name === 'Grep') {
+      const q = (input && (input.pattern || input.query)) || '';
+      const p = (input && input.path) ? ` in ${input.path}` : '';
+      return (q + p).slice(0, 200);
+    }
+    if (name === 'WebFetch') return String((input && input.url) || '').slice(0, 200);
+    return JSON.stringify(input || {}).slice(0, 200);
+  } catch { return ''; }
+}
 
 class AgentSession extends EventEmitter {
   constructor(sessionId, opts = {}) {
@@ -62,6 +78,13 @@ class AgentSession extends EventEmitter {
     this._inFlight = null;
     this._abortController = null;
 
+    // Phase 2: chat-pane menu integration. Each canUseTool fire stores
+    // its resolve fn + the structured request here keyed by a hash; the
+    // chat-pane menu pick (handleMenuPick in pty.js) reaches in via
+    // resolveMenuPick(hash, n) to settle the pending promise so the
+    // SDK iteration can continue with the user's choice.
+    this._pendingPermissions = new Map();
+
     // If an initial prompt was passed, auto-kick the first turn.
     if (opts.initialPrompt) {
       // Defer one tick so listeners attached after construction still
@@ -86,21 +109,7 @@ class AgentSession extends EventEmitter {
       cwd: this.cwd,
       permissionMode: 'default',
       abortSignal: this._abortController.signal,
-      // Phase 2 will move AskUserQuestion + permission requests to the
-      // chat-pane menu card flow. Until then, auto-deny so the iteration
-      // doesn't hang on an unanswerable callback.
-      canUseTool: async (toolName, input /* , ctx */) => {
-        this._emit({
-          type: 'permission_denied',
-          phase: 'phase1-canUseTool-not-wired',
-          toolName,
-          inputKeys: Object.keys(input || {}),
-        });
-        return {
-          behavior: 'deny',
-          message: '(myco agent-session phase 1 — interactive permissions land in phase 2; this tool was auto-denied)',
-        };
-      },
+      canUseTool: (toolName, input, ctx) => this._canUseTool(toolName, input, ctx),
     };
     if (this.sdkSessionId) sdkOpts.resume = this.sdkSessionId;
 
@@ -162,7 +171,7 @@ class AgentSession extends EventEmitter {
         } else if (block.type === 'tool_use') {
           this.openToolCalls.set(block.id, {
             name: block.name,
-            summary: this._summariseToolInput(block.name, block.input),
+            summary: _summariseToolInput(block.name, block.input),
             ts: new Date().toISOString(),
           });
           this._emit({
@@ -215,13 +224,175 @@ class AgentSession extends EventEmitter {
     this._emit({ type: 'unknown_event', raw_type: m.type, raw: m });
   }
 
-  _summariseToolInput(name, input) {
-    try {
-      if (name === 'Bash') return String((input && input.command) || '').slice(0, 80);
-      if (name === 'Read' || name === 'Edit' || name === 'Write') return String((input && input.file_path) || '').slice(0, 80);
-      if (name === 'Glob' || name === 'Grep') return String((input && (input.pattern || input.query)) || '').slice(0, 80);
-      return JSON.stringify(input || {}).slice(0, 80);
-    } catch { return ''; }
+  // Synthesize a chat-pane menu from a canUseTool fire, broadcast it via
+  // the existing 'menu' event pipeline (so menuMod.handleSessionMenu →
+  // broadcastMenuToChat fires unchanged), and return a Promise that
+  // resolves when the user clicks an option in the chat pane (the click
+  // arrives via WS as menu-pick → pty.handleMenuPick → this session's
+  // resolveMenuPick(hash, n)).
+  //
+  // Two flavours:
+  //
+  //   1. AskUserQuestion — Claude has clarifying questions for the user.
+  //      input.questions[0] becomes the menu; multi-question packs are
+  //      collapsed to question[0] for now (phase 3 wizard support TBD).
+  //
+  //   2. Any other tool — Claude wants permission to run it. We render
+  //      a 3-option permission menu: [Allow once] [Allow always] [Deny].
+  //      Option 2 echoes ctx.suggestions back as updatedPermissions so a
+  //      .claude/settings.local.json rule lands.
+  _canUseTool(toolName, input, ctx) {
+    const toolUseID = (ctx && ctx.toolUseID) || ('synth-' + crypto.randomBytes(6).toString('hex'));
+    const hash = 'agent-' + toolUseID;
+
+    if (toolName === 'AskUserQuestion') {
+      return this._handleAskUserQuestion(input, hash, toolUseID);
+    }
+    return this._handlePermissionRequest(toolName, input, ctx, hash, toolUseID);
+  }
+
+  _handleAskUserQuestion(input, hash, toolUseID) {
+    const questions = Array.isArray(input && input.questions) ? input.questions : [];
+    if (!questions.length) {
+      // No questions to display — auto-allow with empty answers so the
+      // SDK doesn't hang.
+      return Promise.resolve({ behavior: 'allow', updatedInput: { questions, answers: {} } });
+    }
+    const q0 = questions[0];
+    const opts = Array.isArray(q0 && q0.options) ? q0.options : [];
+    if (questions.length > 1) {
+      console.log(`[agent-menu] ${this.sessionId} AskUserQuestion with ${questions.length} questions — phase 2 only handles the first one`);
+    }
+
+    return new Promise((resolve) => {
+      const menu = {
+        kind: 'plan',                     // matches today's plan-mode dialog rendering
+        question: q0.question || '',
+        options: opts.map((o, i) => ({
+          n: i + 1,
+          label: String(o.label || ''),
+          description: o.description || '',
+        })),
+        hash,
+        multi: !!q0.multiSelect,
+      };
+      this._pendingPermissions.set(hash, {
+        kind: 'ask',
+        toolUseID,
+        rawQuestions: questions,
+        resolve,
+      });
+      this._emit({
+        type: 'permission_request',
+        toolName: 'AskUserQuestion',
+        hash,
+        toolUseID,
+        question: menu.question,
+        optionCount: menu.options.length,
+      });
+      this.emit('menu', menu);             // → menuMod.handleSessionMenu wired in agent registration path
+    });
+  }
+
+  _handlePermissionRequest(toolName, input, ctx, hash, toolUseID) {
+    const summary = _summariseToolInput(toolName, input);
+    return new Promise((resolve) => {
+      const menu = {
+        kind: 'permission',
+        question: `Allow ${toolName}${summary ? ': ' + summary : ''}?`,
+        options: [
+          { n: 1, label: 'Allow once', description: 'Run this single call.' },
+          { n: 2, label: 'Allow always', description: 'Auto-approve matching calls in this project.' },
+          { n: 3, label: 'Deny',         description: 'Block this call; Claude will choose a different approach.' },
+        ],
+        hash,
+        rawText: `${toolName}(${summary})`,  // shape menuMod.handleSessionMenu's permissions.extractPermissionTarget consumes
+      };
+      this._pendingPermissions.set(hash, {
+        kind: 'permission',
+        toolUseID,
+        toolName,
+        input,
+        suggestions: (ctx && Array.isArray(ctx.suggestions)) ? ctx.suggestions : [],
+        resolve,
+      });
+      this._emit({
+        type: 'permission_request',
+        toolName,
+        hash,
+        toolUseID,
+        summary,
+      });
+      this.emit('menu', menu);
+    });
+  }
+
+  // Called by pty.handleMenuPick when the user clicks an option in the
+  // chat pane (or via /decide N). Resolves the corresponding canUseTool
+  // promise with the SDK-shaped response.
+  resolveMenuPick(hash, n) {
+    const pending = this._pendingPermissions.get(hash);
+    if (!pending) {
+      console.log(`[agent-menu] ${this.sessionId} pick for unknown hash ${hash.slice(-12)} — ignoring`);
+      return false;
+    }
+    this._pendingPermissions.delete(hash);
+    this.pendingMenu = null;
+
+    if (pending.kind === 'ask') {
+      const q0 = pending.rawQuestions[0];
+      const opts = (q0 && q0.options) || [];
+      const picked = opts[n - 1];
+      if (!picked) {
+        pending.resolve({ behavior: 'deny', message: 'User picked an invalid option' });
+        return true;
+      }
+      // SDK expects { questions, answers: { <questionText>: <label> } }
+      // For multi-question packs we only have answers for q[0]; the SDK
+      // currently tolerates missing answers but we log for visibility.
+      const answers = {};
+      answers[q0.question] = picked.label;
+      this._emit({
+        type: 'permission_resolved',
+        toolName: 'AskUserQuestion',
+        hash,
+        pickedN: n,
+        pickedLabel: picked.label,
+      });
+      pending.resolve({
+        behavior: 'allow',
+        updatedInput: { questions: pending.rawQuestions, answers },
+      });
+      return true;
+    }
+
+    // Permission flavour: 1=allow once, 2=allow always, 3=deny.
+    if (n === 3) {
+      this._emit({ type: 'permission_resolved', toolName: pending.toolName, hash, pickedN: n, decision: 'deny' });
+      pending.resolve({
+        behavior: 'deny',
+        message: 'User declined this action via myco chat pane',
+      });
+      return true;
+    }
+    const reply = { behavior: 'allow', updatedInput: pending.input };
+    if (n === 2 && pending.suggestions.length) {
+      // Echo SDK-provided suggestions back so the rule lands in
+      // .claude/settings.local.json and future matching calls skip the
+      // prompt entirely.
+      const persist = pending.suggestions.filter((s) => s && s.destination === 'localSettings');
+      if (persist.length) reply.updatedPermissions = persist;
+    }
+    this._emit({
+      type: 'permission_resolved',
+      toolName: pending.toolName,
+      hash,
+      pickedN: n,
+      decision: n === 2 ? 'allow-always' : 'allow-once',
+      persistedRules: (reply.updatedPermissions || []).length,
+    });
+    pending.resolve(reply);
+    return true;
   }
 
   _broadcastToolProgress() {

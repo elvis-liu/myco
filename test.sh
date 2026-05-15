@@ -555,7 +555,7 @@ test_best_practices_template() {
     || fail "sessions.js: spawnSession branches on mode='agent'"
   if have_node; then
     if node test/agent-session.test.js >/dev/null 2>&1; then
-      pass "test/agent-session.test.js (3 cases, network-dependent)"
+      pass "test/agent-session.test.js (6 cases — incl phase-2 menu round-trip)"
     else
       # Network or auth may fail in CI; skip rather than red the suite.
       skip "test/agent-session.test.js (skipped — SDK or auth unavailable)"
@@ -563,6 +563,21 @@ test_best_practices_template() {
   else
     skip "test/agent-session.test.js (no host node)"
   fi
+  # Phase 2: canUseTool synthesizes chat-pane menus + resolveMenuPick
+  # threads the answer back. handleMenuPick routes to agent sessions
+  # when session.mode === 'agent'.
+  grep -q "resolveMenuPick" server/src/agent-session.js \
+    && pass "agent-session.js: resolveMenuPick handler present" \
+    || fail "agent-session.js: resolveMenuPick handler present"
+  grep -q "_handleAskUserQuestion\|_handlePermissionRequest" server/src/agent-session.js \
+    && pass "agent-session.js: AskUserQuestion + permission menu builders present" \
+    || fail "agent-session.js: AskUserQuestion + permission menu builders present"
+  grep -q "session.resolveMenuPick" server/src/pty.js \
+    && pass "pty.js: handleMenuPick routes to agent sessions" \
+    || fail "pty.js: handleMenuPick routes to agent sessions"
+  grep -q "menuMod.handleSessionMenu" server/src/pty.js \
+    && pass "pty.js: _registerExternalSession wires 'menu' to menuMod" \
+    || fail "pty.js: _registerExternalSession wires 'menu' to menuMod"
   # dedupePlanItems prompt enrichment: project CLAUDE.md + auto-memory
   # are inlined ahead of the item list so the LLM has project-specific
   # context when judging "same underlying concern".

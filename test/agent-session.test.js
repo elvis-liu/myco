@@ -134,6 +134,103 @@ function collectEvents(session, { until, timeoutMs = 60000 }) {
     assert.strictEqual(typeof s.write, 'function');
     assert.strictEqual(typeof s.resize, 'function');
     assert.strictEqual(typeof s.kill, 'function');
+    assert.strictEqual(typeof s.resolveMenuPick, 'function');
+    s.kill();
+  });
+
+  // Phase 2 — canUseTool synthesizes a chat-pane menu and the resolve
+  // promise settles when the user clicks an option. No SDK roundtrip
+  // needed for this slice.
+
+  await t('AskUserQuestion → menu broadcast → resolveMenuPick threads the answer back', async () => {
+    const s = new AgentSession('test-ask-1', { cwd: process.cwd() });
+    let broadcastMenu = null;
+    s.on('menu', (menu) => { broadcastMenu = menu; });
+
+    const input = {
+      questions: [{
+        question: 'How should I format the output?',
+        header: 'Format',
+        multiSelect: false,
+        options: [
+          { label: 'Summary',  description: 'Brief overview' },
+          { label: 'Detailed', description: 'Full explanation' },
+        ],
+      }],
+    };
+    const pending = s._canUseTool('AskUserQuestion', input, { toolUseID: 'tu_ask_1' });
+    // Menu should have fired by now (synchronous emit before the await).
+    assert.ok(broadcastMenu, 'expected a menu to be emitted');
+    assert.strictEqual(broadcastMenu.kind, 'plan');
+    assert.strictEqual(broadcastMenu.question, 'How should I format the output?');
+    assert.deepStrictEqual(
+      broadcastMenu.options.map((o) => ({ n: o.n, label: o.label })),
+      [{ n: 1, label: 'Summary' }, { n: 2, label: 'Detailed' }],
+    );
+    assert.match(broadcastMenu.hash, /^agent-tu_ask_1$/);
+
+    // Simulate the chat-pane click on option 2.
+    const handled = s.resolveMenuPick(broadcastMenu.hash, 2);
+    assert.strictEqual(handled, true);
+
+    // The canUseTool promise should now resolve with the SDK-shaped
+    // response: questions passed through, answers keyed by question text.
+    const resolved = await pending;
+    assert.strictEqual(resolved.behavior, 'allow');
+    assert.deepStrictEqual(
+      resolved.updatedInput,
+      { questions: input.questions, answers: { 'How should I format the output?': 'Detailed' } },
+    );
+    s.kill();
+  });
+
+  await t('Permission request (non-AskUserQuestion) → 3-option menu, picks 1/2/3 do allow-once/allow-always/deny', async () => {
+    const s = new AgentSession('test-perm-1', { cwd: process.cwd() });
+    const menus = [];
+    s.on('menu', (m) => menus.push(m));
+
+    // Allow-once path
+    const p1 = s._canUseTool('Bash', { command: 'ls -la' }, { toolUseID: 'tu_perm_1', suggestions: [] });
+    assert.strictEqual(menus.length, 1);
+    assert.strictEqual(menus[0].kind, 'permission');
+    assert.match(menus[0].question, /Allow Bash/);
+    assert.deepStrictEqual(
+      menus[0].options.map((o) => ({ n: o.n, label: o.label })),
+      [
+        { n: 1, label: 'Allow once' },
+        { n: 2, label: 'Allow always' },
+        { n: 3, label: 'Deny' },
+      ],
+    );
+    s.resolveMenuPick(menus[0].hash, 1);
+    const r1 = await p1;
+    assert.strictEqual(r1.behavior, 'allow');
+    assert.deepStrictEqual(r1.updatedInput, { command: 'ls -la' });
+    assert.strictEqual(r1.updatedPermissions, undefined, 'allow-once must NOT persist a rule');
+
+    // Allow-always path with a suggestion: should echo the suggestion
+    // back in updatedPermissions so a .claude/settings.local.json rule lands.
+    const suggestion = { destination: 'localSettings', behavior: 'allow', pattern: 'Bash(ls *)' };
+    const p2 = s._canUseTool('Bash', { command: 'ls /tmp' }, { toolUseID: 'tu_perm_2', suggestions: [suggestion] });
+    s.resolveMenuPick(menus[1].hash, 2);
+    const r2 = await p2;
+    assert.strictEqual(r2.behavior, 'allow');
+    assert.deepStrictEqual(r2.updatedPermissions, [suggestion], 'allow-always must echo localSettings suggestions back');
+
+    // Deny path
+    const p3 = s._canUseTool('Edit', { file_path: '/etc/passwd' }, { toolUseID: 'tu_perm_3', suggestions: [] });
+    s.resolveMenuPick(menus[2].hash, 3);
+    const r3 = await p3;
+    assert.strictEqual(r3.behavior, 'deny');
+    assert.match(r3.message, /declined/i);
+
+    s.kill();
+  });
+
+  await t('resolveMenuPick with unknown hash returns false and does not crash', () => {
+    const s = new AgentSession('test-unknown-1', { cwd: process.cwd() });
+    const handled = s.resolveMenuPick('agent-no-such-hash', 1);
+    assert.strictEqual(handled, false);
     s.kill();
   });
 

@@ -508,9 +508,14 @@ function getSession(sessionId) {
 // the agent-sdk-research branch's phase 1). Lets the WS attach +
 // state-update + chat plumbing find it via the same `sessions` map
 // used for PtySession.
+//
+// Phase 2: also wires the session's 'menu' event into menuMod's
+// existing handleSessionMenu pipeline so canUseTool fires propagate
+// into the chat-pane menu cards exactly like PTY-scraped menus did.
 function _registerExternalSession(sessionId, session) {
   sessions.set(sessionId, session);
   if (typeof session.on === 'function') {
+    session.on('menu', (menu) => menuMod.handleSessionMenu(sessionId, session, menu));
     session.on('exit', () => {
       setTimeout(() => {
         const cur = sessions.get(sessionId);
@@ -609,6 +614,15 @@ function handleMenuPick(sessionId, session, n, hash) {
   _markMenuChatAnswered(sessionId, n, hash);
   if (!session || !session.alive) {
     console.log(`[menu-pick] ${sessionId} silent-drop: session not alive (n=${n})`);
+    return;
+  }
+  // Agent-mode sessions (SDK-driven): the chat-pane click resolves the
+  // pending canUseTool callback instead of writing a digit into a PTY.
+  // No queueing / hash-mismatch dance needed — canUseTool is one-shot
+  // per call, and the hash is derived from the SDK's stable toolUseID.
+  if (session.mode === 'agent' && typeof session.resolveMenuPick === 'function' && hash) {
+    const handled = session.resolveMenuPick(hash, n);
+    console.log(`[menu-pick] ${sessionId} mode=agent hash=${hash.slice(-12)} n=${n} handled=${handled}`);
     return;
   }
   const pending = session.pendingMenu;
