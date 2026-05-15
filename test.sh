@@ -425,6 +425,17 @@ test_best_practices_template() {
   grep -q "chat-msg-mention-me" web/public/styles.css \
     && pass "styles.css: chat-msg-mention-me styles present" \
     || fail "styles.css: chat-msg-mention-me styles present"
+  # Regression: resolved menu rows must keep the question text visible
+  # above the ✓ Picked / ✓ Submitted / ↪ Superseded line. Hiding the
+  # question (the prior "tooltip-only" treatment) made the chat read
+  # like the question came AFTER its answer when claude later recapped
+  # the same wording in plain assistant text.
+  grep -q "chat-text-resolved" web/public/app.js \
+    && pass "app.js: resolved-menu rows still show the question text" \
+    || fail "app.js: resolved-menu rows still show the question text"
+  grep -q "chat-text-resolved" web/public/styles.css \
+    && pass "styles.css: chat-text-resolved muted style present" \
+    || fail "styles.css: chat-text-resolved muted style present"
   if have_node; then
     if node test/chat-routing.test.js >/dev/null 2>&1; then
       pass "test/chat-routing.test.js (7 cases)"

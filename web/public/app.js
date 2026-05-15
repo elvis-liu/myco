@@ -2435,15 +2435,19 @@ function renderChatMessage(m, isActiveMenu) {
     // instead of silently rendering only the lead + question.
     optsHtml = '<div class="chat-menu-resolved">(buttons unavailable — try a hard-refresh of this page)</div>';
   }
-  // Collapsed menu card: skip the lead+question body, surface the
-  // question on hover instead. Keeps history scrollable without losing
-  // recoverability.
-  const tooltip = isResolvedMenu && m.meta && m.meta.menu && m.meta.menu.question
-    ? ` title="${escHtml(m.meta.menu.question)}"` : '';
+  // Resolved menu cards still show the FULL question text above the
+  // resolved-line. (Before 2026-05-15 the question was hidden behind a
+  // hover tooltip, but that left "✓ Picked [2] Discard local changes"
+  // dangling without context — and when claude later texted a recap
+  // that quoted the same wording, users read the recap as a fresh
+  // unanswered question.) For active menus the original lead+question
+  // body still renders, since the picker buttons are right below.
+  const resolvedQuestion = isResolvedMenu && m.meta && m.meta.menu && m.meta.menu.question
+    ? m.meta.menu.question : '';
   const textHtml = isResolvedMenu
-    ? ''
+    ? (resolvedQuestion ? `<div class="chat-text chat-text-resolved">${renderMd('> ' + resolvedQuestion)}</div>` : '')
     : `<div class="chat-text">${renderMd(body)}</div>`;
-  return `<div class="${cls}"${tooltip}>
+  return `<div class="${cls}">
     <div class="chat-meta"><span class="chat-user">${escHtml(m.user || '?')}</span><span class="chat-ts">${escHtml(ts)}</span></div>
     ${textHtml}
     ${optsHtml}
