@@ -605,9 +605,24 @@ test_best_practices_template() {
   grep -Pzoq "agent-card\.agent-card-collapsed[\s\S]{0,80}agent-card-body[\s\S]{0,40}display:\s*none" web/public/styles.css \
     && pass "styles.css: collapsed cards hide their body" \
     || fail "styles.css: collapsed cards hide their body"
-  grep -Pzoq "chat-msg\.chat-msg-menu:not\(\.chat-msg-menu-collapsed\)[\s\S]{0,800}position:\s*sticky" web/public/styles.css \
-    && pass "styles.css: active permission menu is sticky-bottom" \
-    || fail "styles.css: active permission menu is sticky-bottom"
+  # Phase 2.5 retired the sticky-bottom + inline option buttons on the
+  # chat-msg-menu row. Permission picking moved to the perm-modal
+  # popup (asserted further below). The chat row is now a passive
+  # history entry + a "↗ open in popup" re-entry hint.
+  ! grep -q "position: sticky" web/public/styles.css \
+    | grep -v "perm-modal\|perm-modal-pager" >/dev/null 2>&1 || true
+  ! grep -q "chat-menu-opt\b" web/public/app.js \
+    && pass "app.js: old inline .chat-menu-opt buttons removed" \
+    || fail "app.js: old inline .chat-menu-opt buttons still present"
+  ! grep -q "chat-menu-opts\|chat-menu-submit\|chat-menu-toggle\|chat-menu-glyph\|chat-menu-hint" web/public/styles.css \
+    && pass "styles.css: old inline-menu rules removed" \
+    || fail "styles.css: old inline-menu rules still present"
+  grep -q "chat-menu-deferred" web/public/app.js \
+    && pass "app.js: pending menu row carries 'open in popup' hint" \
+    || fail "app.js: pending menu row carries 'open in popup' hint"
+  grep -q "data-perm-reopen" web/public/app.js \
+    && pass "app.js: clicking the chat row re-opens perm-modal" \
+    || fail "app.js: clicking the chat row re-opens perm-modal"
   # Phase 1.5: combine consecutive chrome events (turn_start, iteration_start,
   # rate_limit, agent_init_snapshot, assistant_text) into one row. Multiple
   # claude text blocks in the same turn fold into one card with merged
@@ -1066,20 +1081,16 @@ test_new_session_readonly() {
   grep -q "meta.kind === 'menu'" web/public/app.js \
     && pass "app.js: detects menu chat messages by meta.kind" \
     || fail "app.js: detects menu chat messages by meta.kind"
-  grep -q 'chat-menu-opt' web/public/app.js \
-    && pass "app.js: chat message renders inline menu buttons" \
-    || fail "app.js: chat message renders inline menu buttons"
   grep -q '_findLastMenuMessageIdx' web/public/app.js \
-    && pass "app.js: only latest menu message is clickable" \
-    || fail "app.js: only latest menu message is clickable"
-  # Regression: pending-menu callout clicks go through a dedicated
-  # WS frame, NOT through chat — the user shouldn't see `/decide N`
-  # messages cluttering the discussion when they click [1]/[2] on the
-  # readonly view's trust/plan/permission callout. See handleMenuPick
-  # in pty.js and sendMenuPick in app.js.
+    && pass "app.js: only latest menu message is the active one" \
+    || fail "app.js: only latest menu message is the active one"
+  # Phase 2.5: menu picks route through the perm-modal popup, which
+  # sends {t:'menu-pick', n, hash} via sendMenuPick — hash is the SDK
+  # toolUseID-derived identity that lets parallel canUseTool callbacks
+  # resolve to the right promise on the server.
   grep -qF 'sendMenuPick(n, hash)' web/public/app.js \
-    && pass "app.js: option click uses sendMenuPick(n, hash)" \
-    || fail "app.js: option click uses sendMenuPick(n, hash)"
+    && pass "app.js: modal option click uses sendMenuPick(n, hash)" \
+    || fail "app.js: modal option click uses sendMenuPick(n, hash)"
   grep -q "msg.t === 'menu-pick'" server/src/pty.js \
     && pass "pty.js: handles menu-pick WS frame" \
     || fail "pty.js: handles menu-pick WS frame"
@@ -2334,18 +2345,15 @@ test_chat_window() {
   grep -qF 'function sendMenuSubmit' web/public/app.js \
     && pass "app.js: sendMenuSubmit defined" \
     || fail "app.js: sendMenuSubmit missing"
-  grep -qF 'chat-menu-toggle' web/public/app.js \
-    && pass "app.js: multi-select renders chat-menu-toggle buttons" \
-    || fail "app.js: multi-select rendering missing chat-menu-toggle class"
-  grep -qF 'chat-menu-submit' web/public/app.js \
-    && pass "app.js: multi-select renders Submit button" \
-    || fail "app.js: multi-select Submit button missing"
-  grep -qF '.chat-menu-opt.chat-menu-toggle' web/public/styles.css \
-    && pass "css: multi-select toggle styling present" \
-    || fail "css: multi-select toggle styling missing"
-  grep -qF '.chat-menu-submit' web/public/styles.css \
-    && pass "css: multi-select Submit styling present" \
-    || fail "css: multi-select Submit styling missing"
+  # Phase 2.5: multi-select toggles + Submit moved to the perm-modal
+  # popup. The chat-pane inline chat-menu-toggle / chat-menu-submit
+  # buttons (and their CSS) were retired.
+  grep -qF 'perm-modal-submit' web/public/app.js \
+    && pass "app.js: modal renders Submit button for multi-select" \
+    || fail "app.js: modal renders Submit button for multi-select"
+  grep -qF 'data-checkbox' web/public/app.js \
+    && pass "app.js: modal tracks checkbox state for multi-select" \
+    || fail "app.js: modal tracks checkbox state for multi-select"
   # Regression: index.html static cache busters (app.js?v=N, styles.css?v=N)
   # used to be hand-bumped on every client change. Forgetting the bump
   # shipped new app.js to disk but kept returning browsers on the cached

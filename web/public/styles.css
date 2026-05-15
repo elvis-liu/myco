@@ -3400,162 +3400,41 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   border-radius: 8px;
   padding: 10px 12px;
 }
-/* Active (unanswered) menu cards get a brighter highlight — tinted
-   background, glowing left accent, and a soft outer shadow so a fresh
-   "🤔 Claude is waiting" prompt is impossible to miss in a long chat
-   scroll. The collapsed/resolved variant below opts out of all of this
-   so history stays calm. */
+/* Active (unanswered) menu chat row — quiet attention cue (left
+   accent + subtle tint). The pulsing border, sticky-bottom pin, and
+   inline option buttons were retired in Phase 2.5 in favour of the
+   perm-modal popup, which now owns the entire picker UX. The chat
+   row is history + a re-entry hint ("↗ open in popup"). */
 .chat-msg.chat-msg-menu:not(.chat-msg-menu-collapsed) {
-  background: linear-gradient(180deg, rgba(210, 153, 34, .10) 0%, rgba(210, 153, 34, .04) 100%);
-  border-color: rgba(210, 153, 34, .35);
+  background: linear-gradient(180deg, rgba(210, 153, 34, .08) 0%, rgba(210, 153, 34, .03) 100%);
+  border-color: rgba(210, 153, 34, .30);
   border-left-width: 4px;
   border-left-color: #f0b440;
-  box-shadow:
-    0 0 0 1px rgba(210, 153, 34, .18),
-    0 2px 10px -2px rgba(210, 153, 34, .28);
-  animation: chat-menu-pulse 2.4s ease-in-out infinite;
-  /* Phase 1: pin the active unresolved menu to the visible bottom of
-     the chat scroll so the user can't scroll past it unanswered. The
-     opaque gradient background is the same as above, repeated here so
-     newer chat messages scrolling under it don't bleed through. */
-  position: sticky;
-  bottom: 8px;
-  z-index: 4;
-  /* Without an explicit background-clip the gradient + box-shadow can
-     leave a thin transparent halo at the rounded corners when the
-     element overlaps the row below it during sticky-stick. */
-  background-clip: padding-box;
 }
-@keyframes chat-menu-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 1px rgba(210, 153, 34, .18),
-      0 2px 10px -2px rgba(210, 153, 34, .28);
-  }
-  50% {
-    box-shadow:
-      0 0 0 1px rgba(210, 153, 34, .35),
-      0 2px 18px -2px rgba(210, 153, 34, .55);
-  }
-}
-/* Respect reduced-motion: keep the highlight, drop the pulse. */
-@media (prefers-reduced-motion: reduce) {
-  .chat-msg.chat-msg-menu:not(.chat-msg-menu-collapsed) {
-    animation: none;
-  }
-}
-/* Card header — the lead + question line(s). Subtle divider below it
-   visually separates the header from the option rows. */
-/* Flatten the inner from-claude bubble when it sits inside a menu card —
-   otherwise the green-tinted .chat-text background + left border draws a
-   nested card inside the outer menu card, doubling padding and wasting
-   horizontal space. The outer .chat-msg-menu IS the card; the text is
-   just its header (separated from the option rows by a subtle divider). */
 .chat-msg.chat-msg-menu .chat-text {
   background: transparent;
   border-left: none;
   border-right: none;
   border-radius: 0;
-  margin: 0 0 8px 0;
-  padding: 0 0 8px 0;
+  margin: 0 0 6px 0;
+  padding: 0 0 6px 0;
   border-bottom: 1px solid #21262d;
 }
-.chat-menu-opts {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.chat-menu-opt {
-  background: transparent;
-  color: #c9d1d9;
-  border: none;
-  border-radius: 4px;
-  padding: 7px 10px;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.12s;
-}
-.chat-menu-opt:hover:not(:disabled) {
-  background: rgba(88, 166, 255, 0.12);
-}
-.chat-menu-opt:active:not(:disabled) {
-  background: rgba(31, 111, 235, 0.30);
-}
-.chat-menu-opt:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-.chat-menu-opt.chat-menu-picked {
-  background: rgba(63, 185, 80, 0.16);
-  color: #c9d1d9;
-  opacity: 1;
-}
-.chat-menu-hint {
-  color: #6e7681;
-  font-size: 0.78rem;
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid #21262d;
-}
-/* Multi-select dialogs — checkbox-style toggle buttons + a separate
-   Submit row. The .chat-menu-glyph holds the ☐/☑ icon so it's easy to
-   target for the toggle animation. .is-checked overrides the default
-   button styling with a green tint so checked boxes are visually
-   distinct from un-clicked options. */
-.chat-menu-opt.chat-menu-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.chat-menu-opt.chat-menu-toggle.is-checked {
-  background: rgba(63, 185, 80, 0.12);
-  color: #c9d1d9;
-}
-.chat-menu-opt.chat-menu-toggle.is-checked:hover:not(:disabled) {
-  background: rgba(63, 185, 80, 0.22);
-}
-.chat-menu-glyph {
-  display: inline-block;
-  width: 1.2em;
-  text-align: center;
-  font-size: 1.05em;
-  color: #58a6ff;
-}
-.chat-menu-opt.chat-menu-toggle.is-checked .chat-menu-glyph {
-  color: #3fb950;
-}
-.chat-menu-submit {
-  margin-top: 6px;
-  background: rgba(31, 111, 235, 0.18);
-  color: #c9d1d9;
-  border: 1px solid rgba(88, 166, 255, 0.35);
-  border-radius: 6px;
-  padding: 7px 12px;
-  font: inherit;
-  cursor: pointer;
-  text-align: center;
-  transition: background 0.12s;
-}
-.chat-menu-submit:hover:not(:disabled) {
-  background: rgba(31, 111, 235, 0.32);
-}
-.chat-menu-submit:active:not(:disabled) {
-  background: rgba(31, 111, 235, 0.46);
-}
-.chat-menu-submit:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-/* Compact summary line that REPLACES the option-buttons block once the
-   menu is answered. Keeps the chat history tidy — no graveyard of
-   disabled buttons cluttering the scroll. */
+/* Compact resolved-line that REPLACES the option-buttons block once
+   the menu is answered. Same selector also handles the "↗ open in
+   popup" deferred state on still-active menus. */
 .chat-menu-resolved {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid #21262d;
+  margin-top: 4px;
   font-size: 0.85rem;
-  color: #3fb950;       /* green, matches the picked-row highlight */
+  color: #3fb950;       /* green for resolved */
+}
+.chat-menu-resolved.chat-menu-deferred {
+  color: #f0b440;       /* yellow for "answer me in the popup" */
+  cursor: pointer;
+  user-select: none;
+}
+.chat-menu-resolved.chat-menu-deferred:hover {
+  text-decoration: underline;
 }
 
 /* Collapsed menu card — applied to .chat-msg.chat-msg-menu once the

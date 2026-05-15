@@ -2109,7 +2109,11 @@ function _deactivatePriorMenuRows(list, incomingHash) {
     // belongs here too for callers that bypass the dedup.
     if (incomingHash && m.meta.menu.hash === incomingHash) continue;
     const oldEl = children[i];
-    if (!oldEl || !oldEl.querySelector('.chat-menu-opts')) continue;
+    // Re-render any chat row that's still flagged as the active
+    // menu. The chat-msg-menu base class is a reliable selector;
+    // chat-msg-menu-collapsed means already resolved.
+    if (!oldEl || !oldEl.classList.contains('chat-msg-menu')) continue;
+    if (oldEl.classList.contains('chat-msg-menu-collapsed')) continue;
     const newEl = _htmlToNode(renderChatMessage(m, /*isActiveMenu*/ false));
     if (newEl) oldEl.replaceWith(newEl);
   }
@@ -2380,8 +2384,9 @@ function _bindPermModal() {
 
 // Stamp the chat-row matching this menu's hash as answered, so the
 // next _rescanPendingMenuQueue drops it from the queue without
-// waiting for the server's state-update echo. Same flags
-// _resolveMenuRow sets when the user clicks the inline chat card.
+// waiting for the server's state-update echo. Called by the modal's
+// click and key handlers after sendMenuPick / sendMenuSubmit; the
+// flags survive the next renderChatPane so the row stays collapsed.
 function _markChatMenuAnswered(hash, opts) {
   if (!hash || !Array.isArray(state.chatMessages)) return;
   for (let i = 0; i < state.chatMessages.length; i++) {
@@ -2464,94 +2469,33 @@ function _renderPendingMenuCallout() {
   if (state.pendingMenu) _cancelReadonlyFallback();
 }
 
-// Click delegation: any chat-message option button anywhere in the
-// chat list. Sends the pick through the dedicated menu-pick frame
-// (no chat pollution) and visually marks the message as resolved so
-// the user can see which option they took, plus prevents double-fire.
+// Phase 2.5: the modal popup (perm-modal) owns picking now. The chat
+// row for a pending menu is a quiet "↗ open in popup" hint; clicking
+// it re-opens the modal in case the user dismissed it earlier. Multi-
+// select toggle / Submit, checkbox flips, and hash-routed picks all
+// live in the modal handler (_bindPermModal + _bindPermModalKeys).
 function _bindChatMenuClicks() {
   const list = document.getElementById('chat-messages');
   if (!list || list.dataset.menuBound === '1') return;
   list.dataset.menuBound = '1';
   list.addEventListener('click', (e) => {
-    // Multi-select Submit button — sends just Enter, finalising the dialog.
-    const submitBtn = e.target.closest('.chat-menu-submit');
-    if (submitBtn && !submitBtn.disabled) {
-      const hash = submitBtn.dataset.hash || '';
-      if (!sendMenuSubmit(hash)) return;
-      _resolveMenuRow(submitBtn, { submitted: true });
-      _markAwaitingClaude();
-      return;
+    if (!e.target.closest('[data-perm-reopen]')) return;
+    state.permModalDismissed = false;
+    // Bias the modal to the menu the user just clicked, if it's in
+    // the queue. Find its hash from the surrounding chat-msg.
+    const msgEl = e.target.closest('.chat-msg.chat-msg-menu');
+    if (msgEl && msgEl.parentNode) {
+      const idx = Array.prototype.indexOf.call(msgEl.parentNode.children, msgEl);
+      const m = state.chatMessages[idx];
+      const hash = m && m.meta && m.meta.menu && m.meta.menu.hash;
+      if (hash) {
+        const q = state.pendingMenuQueue || [];
+        const qIdx = q.findIndex((p) => p.hash === hash);
+        if (qIdx >= 0) state.pendingMenuIdx = qIdx;
+      }
     }
-    const btn = e.target.closest('.chat-menu-opt');
-    if (!btn || btn.disabled) return;
-    const n = Number(btn.dataset.n);
-    if (!Number.isFinite(n) || n < 1) return;
-    const hash = btn.dataset.hash || '';
-    const isToggle = btn.classList.contains('chat-menu-toggle');
-    if (isToggle) {
-      // Multi-select toggle — flip checkbox state, send digit-only frame.
-      if (!sendMenuToggle(n, hash)) return;
-      _toggleCheckboxOnRow(btn, n);
-      return;   // do NOT mark answered or yank pendingMenu — user is still composing
-    }
-    // Plain pick (single-select OR non-checkbox option in a multi-select
-    // dialog like "Done" — both behave as digit+CR final pick).
-    if (!sendMenuPick(n, hash)) return;
-    state.pendingMenu = null;
-    _resolveMenuRow(btn, { pickedN: n });
-    _markAwaitingClaude();
+    _renderPermModal();
   });
-}
-
-// Stamp the chat row + the chat-messages DOM as resolved. opts.pickedN
-// for single-select / Done in multi-select. opts.submitted=true for
-// multi-select Submit. Without this, the next renderChatPane / inline
-// re-render would reconstruct the picker (claude's streaming reply
-// triggers many of those) and the disabled state would vanish.
-function _resolveMenuRow(btn, opts) {
-  const msgEl = btn.closest('.chat-msg');
-  if (msgEl && msgEl.parentNode) {
-    const idx = Array.prototype.indexOf.call(msgEl.parentNode.children, msgEl);
-    if (idx >= 0 && state.chatMessages[idx]) {
-      state.chatMessages[idx]._answered = true;
-      if (opts.pickedN != null) state.chatMessages[idx]._pickedN = opts.pickedN;
-      if (opts.submitted) state.chatMessages[idx]._submitted = true;
-    }
-  }
-  // Disable every option in this row immediately — don't wait for the
-  // next renderChatPane.
-  const grp = btn.closest('.chat-menu-opts');
-  if (grp) {
-    grp.querySelectorAll('.chat-menu-opt, .chat-menu-submit').forEach((b) => {
-      b.disabled = true;
-      if (b === btn) b.classList.add('chat-menu-picked');
-    });
-  }
-  // Resolving via the inline chat row should drop the menu from the
-  // modal queue too — otherwise the popup re-opens for an already-
-  // answered question on the next state-update.
-  _rescanPendingMenuQueue();
-  _renderPermModal();
-}
-
-// Optimistic checkbox flip on a multi-select toggle click. The server
-// also persists the new state on the chat row (see _toggleMenuChatCheckbox
-// in pty.js), but this gives instant feedback without waiting for the
-// 'chat' frame round-trip.
-function _toggleCheckboxOnRow(btn, n) {
-  const msgEl = btn.closest('.chat-msg');
-  if (msgEl && msgEl.parentNode) {
-    const idx = Array.prototype.indexOf.call(msgEl.parentNode.children, msgEl);
-    const m = state.chatMessages[idx];
-    if (m && m.meta && m.meta.menu && Array.isArray(m.meta.menu.options)) {
-      const opt = m.meta.menu.options.find((o) => o.n === n);
-      if (opt && opt.checkbox) opt.checked = !opt.checked;
-    }
-  }
-  const checked = btn.classList.toggle('is-checked');
-  btn.setAttribute('aria-pressed', checked ? 'true' : 'false');
-  const glyph = btn.querySelector('.chat-menu-glyph');
-  if (glyph) glyph.textContent = checked ? '☑' : '☐';
 }
 
 function clearChat() {
@@ -2685,45 +2629,15 @@ function renderChatMessage(m, isActiveMenu) {
     // silently no-op against the hash-guard on the server side).
     optsHtml = '<div class="chat-menu-resolved">↪ Superseded by a newer dialog</div>';
   } else if (menuOpts && isActiveMenu) {
-    // data-hash stamps the click with the specific menu's identity so
-    // the server can validate that the user's pick still corresponds
-    // to the menu currently displayed in Claude's TUI — if another
-    // menu has since taken its place (parallel tool calls, rapid
-    // dialog turnover), the pick is dropped instead of silently
-    // answering the wrong question.
-    const menuHash = (m.meta.menu && m.meta.menu.hash) || '';
-    if (isMulti) {
-      // Multi-select: each checkbox option is a toggle (click sends
-      // menu-toggle frame); non-checkbox options are plain picks (final
-      // "Done"/"Submit" rendered by claude inside the dialog options).
-      // Plus an explicit Submit button at the end for dialogs that don't
-      // include their own "Done" option.
-      const buttons = menuOpts.map((o) => {
-        if (o.checkbox) {
-          const checked = !!o.checked;
-          const glyph = checked ? '☑' : '☐';
-          return `<button type="button" class="chat-menu-opt chat-menu-toggle${checked ? ' is-checked' : ''}" data-n="${o.n}" data-hash="${escHtml(menuHash)}" aria-pressed="${checked ? 'true' : 'false'}"><span class="chat-menu-glyph">${glyph}</span> [${o.n}] ${escHtml(o.label)}</button>`;
-        }
-        return `<button type="button" class="chat-menu-opt" data-n="${o.n}" data-hash="${escHtml(menuHash)}">[${o.n}] ${escHtml(o.label)}</button>`;
-      }).join('');
-      optsHtml = `<div class="chat-menu-opts chat-menu-opts-multi">${buttons}<button type="button" class="chat-menu-submit" data-hash="${escHtml(menuHash)}">↵ Submit</button><div class="chat-menu-hint">Click to toggle; Submit when done.</div></div>`;
-    } else {
-      optsHtml = `<div class="chat-menu-opts">${menuOpts.map((o) =>
-        `<button type="button" class="chat-menu-opt" data-n="${o.n}" data-hash="${escHtml(menuHash)}">[${o.n}] ${escHtml(o.label)}</button>`
-      ).join('')}<div class="chat-menu-hint">Pick here — goes straight to the session, no chat post.</div></div>`;
-    }
+    // Phase 2.5: the inline button row is retired. The modal popup
+    // (perm-modal) is the single answer surface; multi-agent / parallel
+    // pendings are queued there with prev/next nav, and every click
+    // sends the hash that uniquely identifies the menu. This chat row
+    // now serves only as history + a re-entry hint if the user
+    // dismissed the modal.
+    optsHtml = `<div class="chat-menu-resolved chat-menu-deferred" data-perm-reopen="1">↗ Awaiting answer — open in popup</div>`;
   } else if (menuOpts) {
-    // Menu broadcast that's no longer the latest AND has no recorded
-    // pick (e.g. older menu in history that got superseded). Show
-    // nothing extra — the lead + question above is enough.
     optsHtml = '<div class="chat-menu-resolved">(no longer active)</div>';
-  } else if (m.meta && m.meta.kind === 'menu') {
-    // Defensive: a "menu" message landed without an options array.
-    // Shouldn't happen with the current server (broadcastMenuToChat
-    // always populates meta.menu.options), but if a stale broadcast
-    // or a bundle/data mismatch hides the buttons, surface that fact
-    // instead of silently rendering only the lead + question.
-    optsHtml = '<div class="chat-menu-resolved">(buttons unavailable — try a hard-refresh of this page)</div>';
   }
   // Resolved menu cards still show the FULL question text above the
   // resolved-line. (Before 2026-05-15 the question was hidden behind a
