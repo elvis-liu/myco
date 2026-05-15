@@ -243,8 +243,8 @@ function _persistPlanArtifact(rec, sessionId) {
     console.error(`[plan-item] write _myco_/plan.json failed: ${err.message}`);
   }
   try {
-    const ptyMod = require('./pty');
-    const session = ptyMod.getSession && ptyMod.getSession(sessionId);
+    const attachMod = require('./attach');
+    const session = attachMod.getSession && attachMod.getSession(sessionId);
     if (session) {
       session.emit('state-update', {
         kind: 'artifact',
@@ -707,13 +707,13 @@ function handleClear(ctx) {
     return;
   }
   try {
-    // Prefer ctx.session (passed by pty.handleChatMessage) and fall back to
-    // pty.getSession(id) so the slash-todo-inject-style unit tests, which
-    // only supply { sessionId, absCwd, reply }, still observe a no-op
-    // instead of a crash.
+    // Prefer ctx.session (passed by attach.handleChatMessage) and fall
+    // back to attach.getSession(id) so the slash-todo-inject-style unit
+    // tests, which only supply { sessionId, absCwd, reply }, still
+    // observe a no-op instead of a crash.
     let session = ctx.session || null;
     if (!session) {
-      try { session = require('./pty').getSession(sessionId); } catch {}
+      try { session = require('./attach').getSession(sessionId); } catch {}
     }
     if (session) session.emit('state-update', { kind: 'chat-clear' });
   } catch {}

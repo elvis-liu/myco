@@ -78,9 +78,9 @@ function broadcastMenuToChat(sessionId, session, menu, target) {
   // The supersede sweep keeps the modal queue and chat history from
   // accumulating zombie picks.
   try {
-    const ptyMod = require('./pty');
-    if (typeof ptyMod._supersedeStaleMenus === 'function') {
-      ptyMod._supersedeStaleMenus(sessionId);
+    const attachMod = require('./attach');
+    if (typeof attachMod._supersedeStaleMenus === 'function') {
+      attachMod._supersedeStaleMenus(sessionId);
     }
   } catch {}
   const lines = [];

@@ -1,8 +1,9 @@
 // Per-session allow/deny lists for Claude's tool-use permission dialogs.
 // When Claude pauses on a "Allow Bash command?" / "Allow Edit?" prompt,
-// the menu-interceptor in pty.js calls into here to decide whether to
-// auto-pick Yes (allow), auto-pick No (deny), or fall through to a chat
-// broadcast for the user to /decide manually.
+// AgentSession.canUseTool / PreToolUse hook in agent-session.js calls
+// into here to decide whether to auto-pick Yes (allow), auto-pick No
+// (deny), or fall through to a chat broadcast for the user to /decide
+// manually.
 //
 // Pattern syntax (subset of Claude Code's own settings.json convention):
 //   "Read"             — any Read invocation
@@ -12,16 +13,35 @@
 //   "Bash(*)"          — any Bash (use sparingly)
 //   "Bash(git:*)"      — alias for "Bash(git)" (Claude Code's "everything after" form)
 
-// Late-bound: pty.js → permissions.js is part of a require cycle through
-// sessions.js, so destructuring loadStore/saveStore at import time would
-// capture `undefined`. Always reach through `sessionsMod.fn` at call time.
+// Late-bound: attach.js → permissions.js is part of a require cycle
+// through sessions.js, so destructuring loadStore/saveStore at import
+// time would capture `undefined`. Always reach through `sessionsMod.fn`
+// at call time.
 const sessionsMod = require('./sessions');
 const loadStore = (...a) => sessionsMod.loadStore(...a);
 const saveStore = (...a) => sessionsMod.saveStore(...a);
 
-// TUI-output regexes live in pty-patterns.js (one home so future tweaks
-// for new claude-code rendering quirks all land in the same file).
-const { PERMISSION_TOOL_RE, PERMISSION_INPUT_RE } = require('./pty-patterns');
+// Tool-name line in claude's permission dialog. Tool names are matched
+// with an OPTIONAL inner space so we catch both the camelCase API name
+// and the display-form claude renders ("Web Search" → "WebSearch"); the
+// caller strips whitespace from the capture before matching against
+// allow/deny patterns. Keep the roster in sync with claude code's known
+// tool set.
+//
+// Inlined from the deleted server/src/pty-patterns.js (Phase 9 step 2)
+// — these two regexes are the only TUI-output patterns still in use now
+// that the PTY scraper is gone; the AgentSession.canUseTool callback
+// supplies a structured `toolName`/`toolInput`, so most patterns died
+// with pty.js. We keep these here because /artifacts and other code
+// paths still parse the rawText of pre-Phase-9 menu broadcasts persisted
+// in rec.chat (legacy chat rows survive the migration).
+const PERMISSION_TOOL_RE =
+  /^(?:Allow|Run|Approve)?\s*(Bash|Edit|Write|Read|Multi ?Edit|Glob|Grep|Web ?Fetch|Web ?Search|Notebook ?Edit|Todo ?Write|Task|Agent|SlashCommand)\b/i;
+
+// Input/target line — claude shows the command/path on its own line
+// prefixed by `>` (plain) or `❯` (highlighted cursor). The capture is
+// the rest of the line. First such line in the dialog body wins.
+const PERMISSION_INPUT_RE = /^\s*[>❯]\s+(.+)$/;
 
 // Conservative default — the user explicitly chose this baseline. Common
 // safe-by-design tools plus a handful of build / test / git Bash families.
@@ -144,7 +164,7 @@ function extractPermissionTarget(rawText) {
     const m = line.trim().match(PERMISSION_TOOL_RE);
     // Normalise display-form tool names to their canonical no-space API
     // form ("Web Search" → "WebSearch") so they match the allow/deny
-    // pattern syntax. See PERMISSION_TOOL_RE in pty-patterns.js.
+    // pattern syntax.
     if (m) { tool = m[1].replace(/\s+/g, ''); break; }
   }
   if (!tool) return null;
@@ -161,11 +181,11 @@ function extractPermissionTarget(rawText) {
   return { tool, input };
 }
 
-// Object.assign rather than `module.exports = {…}` so pty.js (which captures
-// `const permissions = require('./permissions')` early in a circular chain
-// via sessions.js → pty.js → permissions.js) sees the populated exports
-// object. Replacing module.exports would leave pty.js holding the empty
-// pre-cycle reference.
+// Object.assign rather than `module.exports = {…}` so attach.js (which
+// captures `const permissions = require('./permissions')` early in a
+// circular chain via sessions.js → attach.js → permissions.js) sees the
+// populated exports object. Replacing module.exports would leave the
+// other side of the cycle holding the empty pre-cycle reference.
 Object.assign(module.exports, {
   DEFAULT_ALLOW,
   DEFAULT_DENY,

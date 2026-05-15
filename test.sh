@@ -63,7 +63,7 @@ mint_session_via_oauth() {
 
 test_server_js_files() {
   local missing=""
-  for f in src/index.js src/pty.js src/sessions.js src/transcript.js src/auth.js src/btw.js src/oauth.js src/text-utils.js; do
+  for f in src/index.js src/attach.js src/sessions.js src/transcript.js src/auth.js src/btw.js src/oauth.js src/text-utils.js src/agent-session.js; do
     [ -r "server/$f" ] || missing="$missing $f"
   done
   [ -z "$missing" ] && pass "Server JS files readable" || fail "Server JS files (missing:$missing)"
@@ -71,10 +71,10 @@ test_server_js_files() {
 
 test_text_utils() {
   if ! have_node; then skip "text-utils runtime (no host node)"; return; fi
-  # Regression: stripAnsi, tailLines, formatChat live in text-utils.js and
-  # are consumed by both btw.js (prompt build) and pty.js (scrollback feed
-  # for /btw). A regression that swallows ANSI escapes incorrectly or
-  # mis-tails would silently feed the assistant garbage.
+  # Regression: stripAnsi, tailLines, formatChat live in text-utils.js
+  # and are consumed by btw.js (prompt build). The Phase 9 step 2
+  # retirement of PTY dropped the second consumer (scrollback feed) but
+  # the helpers stay because /btw still uses them.
   node -e "
     const u = require('./server/src/text-utils');
     const stripped = u.stripAnsi('\x1b[31mred\x1b[0m\x07plain');
@@ -85,9 +85,10 @@ test_text_utils() {
     if (u.formatChat(null)           !== '(empty)')         throw new Error('formatChat null wrong');
     if (u.formatChat([{user:'a',text:'hi'},{user:'b',text:'there'}]) !== 'a: hi\nb: there')
       throw new Error('formatChat shape wrong');
-    // pty.js still gets them through the module
-    const p = require('./server/src/pty');
-    if (typeof p.spawnClaude !== 'function') throw new Error('pty.js failed to load');
+    // attach.js loads cleanly + exposes the expected agent-mode plumbing.
+    const a = require('./server/src/attach');
+    if (typeof a.attachWebSocket !== 'function') throw new Error('attach.js failed to load');
+    if (typeof a._registerExternalSession !== 'function') throw new Error('attach.js missing _registerExternalSession');
   " && pass "text-utils.js: stripAnsi/tailLines/formatChat" \
     || fail "text-utils.js: stripAnsi/tailLines/formatChat"
 }
@@ -98,153 +99,64 @@ test_frontend_files() {
   done
 }
 
-test_pty_patterns() {
-  # CLAUDE.md rule: every regex that matches claude's PTY/TUI output
-  # lives in server/src/pty-patterns.js. Consumer files reference the
-  # named constants; they don't inline the patterns.
-  test -f server/src/pty-patterns.js && pass "pty-patterns.js exists" || fail "pty-patterns.js missing"
+test_phase9_retirement() {
+  # SDK Phase 9 step 2: the PTY driver (pty.js + menu-interceptor.js +
+  # pty-patterns.js) is deleted. All sessions run as AgentSessions, and
+  # the WS attach + chat plumbing lives in attach.js. These assertions
+  # pin the retirement so a future revert doesn't sneak the PTY back
+  # in.
+  test ! -f server/src/pty.js \
+    && pass "server/src/pty.js deleted (Phase 9)" \
+    || fail "server/src/pty.js still present — PTY driver was supposed to be retired"
+  test ! -f server/src/menu-interceptor.js \
+    && pass "server/src/menu-interceptor.js deleted (Phase 9)" \
+    || fail "server/src/menu-interceptor.js still present"
+  test ! -f server/src/pty-patterns.js \
+    && pass "server/src/pty-patterns.js deleted (Phase 9)" \
+    || fail "server/src/pty-patterns.js still present"
+  test -f server/src/attach.js \
+    && pass "server/src/attach.js exists (agent-mode WS plumbing)" \
+    || fail "server/src/attach.js missing"
+
+  # Permission regexes were inlined into permissions.js when
+  # pty-patterns.js was deleted — verify both are present so the
+  # legacy menu-rawText parser keeps working for pre-Phase-9 chat rows.
+  grep -q "PERMISSION_TOOL_RE" server/src/permissions.js \
+    && pass "permissions.js: PERMISSION_TOOL_RE inlined" \
+    || fail "permissions.js: PERMISSION_TOOL_RE missing"
+  grep -q "PERMISSION_INPUT_RE" server/src/permissions.js \
+    && pass "permissions.js: PERMISSION_INPUT_RE inlined" \
+    || fail "permissions.js: PERMISSION_INPUT_RE missing"
+  ! grep -q "require('./pty-patterns')" server/src/permissions.js \
+    && pass "permissions.js no longer imports pty-patterns" \
+    || fail "permissions.js still imports pty-patterns (deleted)"
+
+  # Importers must all point at attach.js, not pty.js.
+  ! grep -rqE "require\\('\\./pty'\\)" server/src/ \
+    && pass "no server/src/ file imports './pty'" \
+    || fail "some server/src/ file still imports './pty' — chase down and update to './attach'"
+  grep -q "require('./attach')" server/src/index.js \
+    && pass "index.js imports from './attach'" \
+    || fail "index.js does NOT import from './attach'"
+  grep -q "require('./attach')" server/src/sessions.js \
+    && pass "sessions.js imports from './attach'" \
+    || fail "sessions.js does NOT import from './attach'"
+
+  # permissions.extractPermissionTarget still normalises display-form
+  # tool names — agent-mode doesn't go through it (the SDK supplies a
+  # structured toolName), but pre-Phase-9 menu rows persisted in
+  # rec.chat still parse their rawText through this code path on
+  # /artifact replay.
   if have_node; then
     node -e "
-      const p = require('./server/src/pty-patterns');
-      const want = [
-        'MENU_OPT_MARKER_RE','MENU_LABEL_GAP_RE','MENU_QUESTION_TAIL_RE','MENU_QUESTION_VERB_RE',
-        'MENU_KIND_PERMISSION_RE','MENU_KIND_PLAN_RE','TRUST_DIALOG_RE',
-        'PERMISSION_TOOL_RE','PERMISSION_INPUT_RE',
-        'MODE_ACCEPT_RE','MODE_PLAN_RE','MODE_BYPASS_RE',
-        'SPINNER_DURATION_RE','SPINNER_RUNNING_RE',
-        'WELCOME_BANNER_RE','LIMIT_WARNING_RE','TUI_KEY_HINT_RE',
-      ];
-      for (const k of want) {
-        if (!(p[k] instanceof RegExp)) throw new Error('missing pattern export: ' + k);
-      }
-      // Marker pattern: well-formed + claude-malformed YES, decimals NO.
-      const re = p.MENU_OPT_MARKER_RE;
-      re.lastIndex = 0; if (!re.exec(' 1. Yes'))   throw new Error('marker missed \"1. Yes\"');
-      re.lastIndex = 0; if (!re.exec(' 2.Yes'))    throw new Error('marker missed claude-malformed \"2.Yes\"');
-      re.lastIndex = 0; if (re.exec('v1.0'))       throw new Error('marker should NOT match \"v1.0\"');
-      re.lastIndex = 0; if (re.exec('I have 3.5')) throw new Error('marker should NOT match \"3.5\"');
-      // Permission tool: catches both API form AND display form (with space).
-      // Caller (permissions.extractPermissionTarget) trims leading whitespace
-      // first, so we mirror that here.
-      const ptr = p.PERMISSION_TOOL_RE;
-      let m = 'Web Search(\"x\")'.match(ptr);
-      if (!m || !/web ?search/i.test(m[1])) throw new Error('PERMISSION_TOOL_RE missed display-form \"Web Search\": ' + JSON.stringify(m));
-      m = 'WebSearch(\"x\")'.match(ptr);
-      if (!m || !/web ?search/i.test(m[1])) throw new Error('PERMISSION_TOOL_RE missed API-form \"WebSearch\": ' + JSON.stringify(m));
-      m = 'Allow Bash command?'.match(ptr);
-      if (!m || m[1].toLowerCase() !== 'bash') throw new Error('PERMISSION_TOOL_RE missed \"Allow Bash\": ' + JSON.stringify(m));
-      // Trust dialog recognizer.
-      if (!p.TRUST_DIALOG_RE.test('Quick safety check: Is this a project you created or one you trust?')) throw new Error('TRUST_DIALOG_RE missed safety-check phrasing');
-      if (!p.TRUST_DIALOG_RE.test('Do you trust the files in this folder?')) throw new Error('TRUST_DIALOG_RE missed canonical phrasing');
-      // Spinner — DURATION variants (-ing only). Tightened to exclude
-      // past-tense '-ed for Ns' shapes because those linger above the
-      // input prompt AFTER claude is idle and kept the typing dots
-      // alive forever (reported as '✻ Brewed for 1m 25s' stuck on
-      // screen). The -ed shape is captured separately by SPINNER_DONE_RE.
-      const durSamples = ['✻ Working for 12s · esc to interrupt', '✦ Thinking for 3s …',
-                          '✻ Cerebrating for 25s', '· Cerebrating for 1m 5s'];
-      for (const s of durSamples) {
-        if (!p.SPINNER_DURATION_RE.test(s)) throw new Error('SPINNER_DURATION_RE missed: ' + s);
-      }
-      if (p.SPINNER_DURATION_RE.test('We worked for 12 hours')) throw new Error('SPINNER_DURATION_RE matched prose');
-      // Done-with-phase samples must match SPINNER_DONE_RE but NOT the
-      // running/duration regexes (that's the whole point of the split).
-      const doneSamples = ['✻ Baked for 15s', '✻ Brewed for 51s', '✻ Cooked for 13s',
-                           '✻ Churned for 4s', '✻ Brewed for 1m 25s'];
-      for (const s of doneSamples) {
-        if (!p.SPINNER_DONE_RE.test(s)) throw new Error('SPINNER_DONE_RE missed: ' + s);
-        if (p.SPINNER_RUNNING_RE.test(s) || p.SPINNER_DURATION_RE.test(s)) {
-          throw new Error('Done-phase line wrongly matched as running: ' + s);
-        }
-      }
-      // Spinner — RUNNING variants (no duration yet, claude is currently in that phase).
-      const runSamples = ['✽ Moonwalking…', '· Thundering…', '✽ Crunching', '✻ Working'];
-      for (const s of runSamples) {
-        if (!p.SPINNER_RUNNING_RE.test(s)) throw new Error('SPINNER_RUNNING_RE missed: ' + s);
-      }
-      // MODE_ACCEPT_RE must now also recognise the post-plan-confirm 'auto mode'.
-      if (!p.MODE_ACCEPT_RE.test('⏵⏵ auto mode on (shift+tab to cycle)')) throw new Error('MODE_ACCEPT_RE missed \"auto mode\"');
-      if (!p.MODE_ACCEPT_RE.test('⏵⏵ accept edits on')) throw new Error('MODE_ACCEPT_RE missed \"accept edits\"');
-      // Weekly-limit notice surfaced in the status bar.
-      if (!p.LIMIT_WARNING_RE.test('You\\'ve used 76% of your weekly limit · resets May 15, 3am (UTC)')) throw new Error('LIMIT_WARNING_RE missed weekly-limit notice');
-      // TUI key-hint lines (in-dialog instruction text).
-      const hints = ['Enter to confirm · Esc to cancel', 'ctrl-g to edit in Vim · ~/.claude/plans/foo.md',
-                     'shift+tab to approve with this feedback', 'Tab/Arrow keys to navigate', 'esc to interrupt'];
-      for (const h of hints) {
-        if (!p.TUI_KEY_HINT_RE.test(h)) throw new Error('TUI_KEY_HINT_RE missed: ' + h);
-      }
-      if (p.TUI_KEY_HINT_RE.test(' real prose about shift in a story.')) throw new Error('TUI_KEY_HINT_RE matched prose');
-      // Welcome banner.
-      if (!p.WELCOME_BANNER_RE.test('Welcome back Ken!')) throw new Error('WELCOME_BANNER_RE missed \"Welcome back\"');
-      // Question verbs widened.
-      if (!p.MENU_QUESTION_VERB_RE.test('Are you sure you want to continue?')) throw new Error('MENU_QUESTION_VERB_RE missed \"are you sure\"');
-      if (!p.MENU_QUESTION_VERB_RE.test('Would you like me to proceed?')) throw new Error('MENU_QUESTION_VERB_RE missed \"would you like\"');
-      // Permission target normalisation: extractPermissionTarget must
-      // canonicalise \"Web Search\" → \"WebSearch\" so the result feeds
-      // allow/deny patterns directly.
       const perms = require('./server/src/permissions');
       const tgt = perms.extractPermissionTarget('  Web Search(\"weather\")\n  Claude wants to search the web for:\n  weather');
       if (!tgt || tgt.tool !== 'WebSearch') throw new Error('extractPermissionTarget did not normalise \"Web Search\" → \"WebSearch\": ' + JSON.stringify(tgt));
-      // MENU_LABEL_GAP_RE: 6+ consecutive whitespace chars cuts trailing
-      // TUI chrome (box-drawing frame from a side panel) off option labels.
-      // Regression: chat-pane picker showed labels like
-      //   '[1] Single container ┌────────────────────────────┐'
-      // because the wide alignment gap was collapsed by \\s+ → ' ' and
-      // the frame got glued onto the label.
-      const gap = p.MENU_LABEL_GAP_RE;
-      if (!gap.test('foo      bar')) throw new Error('MENU_LABEL_GAP_RE missed 6 spaces');
-      if (gap.test('foo     bar')) throw new Error('MENU_LABEL_GAP_RE matched only 5 spaces (should require >5)');
-      // End-to-end through MenuInterceptor with a fake headless buffer.
-      const { MenuInterceptor } = require('./server/src/menu-interceptor');
-      const optRows = [
-        'What would you like to do?',
-        '❯ 1. Single container          ┌────────────────────────────┐',
-        '  2. Multi container           │  status: ready             │',
-        '  3. Sidecar pattern           └────────────────────────────┘',
-      ];
-      const fakeHeadless = {
-        rows: optRows.length,
-        buffer: { active: {
-          viewportY: 0,
-          getLine: (y) => ({ translateToString: () => optRows[y] || '' }),
-        }},
-      };
-      const mi = new MenuInterceptor();
-      const ev = mi.detectChange(fakeHeadless);
-      if (!ev || ev.kind !== 'newMenu') throw new Error('MenuInterceptor failed to detect chrome-padded menu: ' + JSON.stringify(ev));
-      const labels = ev.menu.options.map((o) => o.label);
-      const expected = ['Single container', 'Multi container', 'Sidecar pattern'];
-      for (let i = 0; i < expected.length; i++) {
-        if (labels[i] !== expected[i]) {
-          throw new Error('Option ' + (i + 1) + ' label not trimmed at gap. got=' + JSON.stringify(labels[i]) + ' want=' + JSON.stringify(expected[i]));
-        }
-      }
-    " && pass "pty-patterns: required constants + enriched matchers" \
-      || fail "pty-patterns: required constants + enriched matchers"
+    " && pass "permissions: 'Web Search' → 'WebSearch' canonicalisation" \
+      || fail "permissions: display-form tool name not canonicalised"
   else
-    skip "pty-patterns runtime (no host node)"
+    skip "permissions canonicalisation (no host node)"
   fi
-  # Consumers must require from pty-patterns and not inline the same
-  # regexes locally — otherwise the centralisation is decorative.
-  grep -q "require('./pty-patterns')" server/src/menu-interceptor.js \
-    && pass "menu-interceptor imports from pty-patterns" \
-    || fail "menu-interceptor imports from pty-patterns"
-  grep -q "require('./pty-patterns')" server/src/permissions.js \
-    && pass "permissions imports from pty-patterns" \
-    || fail "permissions imports from pty-patterns"
-  grep -q "require('./pty-patterns')" server/src/pty.js \
-    && pass "pty imports from pty-patterns" \
-    || fail "pty imports from pty-patterns"
-  # No inline TUI regex copies left in the three migrated files.
-  ! grep -qE "approve\.\*tool|approve\.\*bash" server/src/menu-interceptor.js \
-    && pass "menu-interceptor no longer inlines kind-classifier regex" \
-    || fail "menu-interceptor no longer inlines kind-classifier regex"
-  ! grep -qE "Bash\|Edit\|Write\|Read\|MultiEdit" server/src/permissions.js \
-    && pass "permissions no longer inlines tool-name regex" \
-    || fail "permissions no longer inlines tool-name regex"
-  ! grep -qE "accept edits\|auto-accept" server/src/pty.js \
-    && pass "pty no longer inlines status-bar mode regex" \
-    || fail "pty no longer inlines status-bar mode regex"
 }
 
 test_vendor_assets() {
@@ -263,7 +175,7 @@ test_vendor_assets() {
 test_npm_deps() {
   if ! have_node; then skip "npm deps (no host node)"; return; fi
   (cd server && node -e "
-    ['express','ws','marked','highlight.js','@homebridge/node-pty-prebuilt-multiarch','ansi-to-html'].forEach(p => {
+    ['express','ws','marked','highlight.js','ansi-to-html','@anthropic-ai/claude-agent-sdk'].forEach(p => {
       try { require.resolve(p); } catch { throw new Error('Missing npm dep: ' + p); }
     });
   ") && pass "npm deps resolve" || fail "npm deps"
@@ -381,21 +293,13 @@ test_best_practices_template() {
   grep -q "msg.kind === 'chat-clear'" web/public/app.js \
     && pass "app.js: state-update handles chat-clear kind" \
     || fail "app.js: state-update handles chat-clear kind"
-  # Diagnostic logs for the user-filed plan item "app inactive → new
-  # output missed on resume". Static greps guard against an accidental
-  # refactor removing them before we've collected enough data.
-  grep -q '\[ws-attach\]' server/src/pty.js \
-    && pass "pty.js: [ws-attach] diagnostic log present" \
-    || fail "pty.js: [ws-attach] diagnostic log present"
-  grep -q '\[diag-resume\]' web/public/app.js \
-    && pass "app.js: [diag-resume] visibility log present" \
-    || fail "app.js: [diag-resume] visibility log present"
-  grep -q '\[ws-open\]' web/public/app.js \
-    && pass "app.js: [ws-open] lifecycle log present" \
-    || fail "app.js: [ws-open] lifecycle log present"
-  grep -q '\[ws-close\]' web/public/app.js \
-    && pass "app.js: [ws-close] lifecycle log present" \
-    || fail "app.js: [ws-close] lifecycle log present"
+  # Agent-mode WS attach diagnostic. The [diag-resume] / [ws-attach]
+  # client-side instrumentation was retired with the PTY xterm strip
+  # (Phase 9 step 2); the server-side [agent-attach] log survives so
+  # the diag loop can still attribute resume-vs-fresh attaches.
+  grep -q '\[agent-attach\]' server/src/attach.js \
+    && pass "attach.js: [agent-attach] diagnostic log present" \
+    || fail "attach.js: [agent-attach] diagnostic log present"
   if have_node; then
     if node test/slash-clear.test.js >/dev/null 2>&1; then
       pass "test/slash-clear.test.js (4 cases)"
@@ -405,15 +309,15 @@ test_best_practices_template() {
   else
     skip "test/slash-clear.test.js (no host node)"
   fi
-  # Chat-routing rewrite (2026-05-14): plain text → PTY by default;
+  # Chat-routing rewrite (2026-05-14): plain text → agent by default;
   # @<known-user> → chat-only mention with highlight. The static greps
   # below + the regression test guard the invariants of that routing.
-  grep -q "_detectMentionTarget" server/src/pty.js \
-    && pass "pty.js: _detectMentionTarget helper present" \
-    || fail "pty.js: _detectMentionTarget helper present"
-  grep -q "meta = { kind: 'mention'" server/src/pty.js \
-    && pass "pty.js: mention messages stamped with meta.kind=mention" \
-    || fail "pty.js: mention messages stamped with meta.kind=mention"
+  grep -q "_detectMentionTarget" server/src/attach.js \
+    && pass "attach.js: _detectMentionTarget helper present" \
+    || fail "attach.js: _detectMentionTarget helper present"
+  grep -q "meta = { kind: 'mention'" server/src/attach.js \
+    && pass "attach.js: mention messages stamped with meta.kind=mention" \
+    || fail "attach.js: mention messages stamped with meta.kind=mention"
   if grep -q "names: \['m'\]" server/src/slashcmds.js; then
     fail "slashcmds: /m should have been removed but is still registered"
   else
@@ -436,18 +340,12 @@ test_best_practices_template() {
   grep -q "chat-text-resolved" web/public/styles.css \
     && pass "styles.css: chat-text-resolved muted style present" \
     || fail "styles.css: chat-text-resolved muted style present"
-  # Menu-pick queue-and-retry: handles the post-deploy window where a
-  # user clicks a chat-pane menu row before the headless scan has
-  # hydrated session.pendingMenu. Silent-drop paths now log explicitly.
-  grep -q "_queueMenuPick" server/src/pty.js \
-    && pass "pty.js: _queueMenuPick helper present" \
-    || fail "pty.js: _queueMenuPick helper present"
-  grep -q "_retryQueuedMenuPick" server/src/pty.js \
-    && pass "pty.js: _retryQueuedMenuPick wired into scan()'s newMenu" \
-    || fail "pty.js: _retryQueuedMenuPick wired into scan()'s newMenu"
-  grep -q "silent-drop:" server/src/pty.js \
-    && pass "pty.js: handleMenuPick silent-drop paths now log" \
-    || fail "pty.js: handleMenuPick silent-drop paths now log"
+  # Agent-mode menu-pick silent-drop paths log so the diag loop can
+  # diagnose stale clicks landing on a session whose pending callback
+  # has already been resolved (e.g. server restart, user double-click).
+  grep -q "silent-drop:" server/src/attach.js \
+    && pass "attach.js: handleMenuPick silent-drop paths log" \
+    || fail "attach.js: handleMenuPick silent-drop paths log"
   # Plan-item ids switched to per-layer counters (fr-1, td-1, bug-1)
   # in 2026-05-15. Legacy hex ids still valid but no longer generated.
   # /merge collapses N items into the lowest-numbered canonical;
@@ -541,12 +439,12 @@ test_best_practices_template() {
   grep -q "@anthropic-ai/claude-agent-sdk" server/package.json \
     && pass "server/package.json: claude-agent-sdk listed as dep" \
     || fail "server/package.json: claude-agent-sdk listed as dep"
-  grep -q "_registerExternalSession" server/src/pty.js \
-    && pass "pty.js: _registerExternalSession helper exported" \
-    || fail "pty.js: _registerExternalSession helper exported"
-  grep -q "_attachAgentWebSocket" server/src/pty.js \
-    && pass "pty.js: agent-mode WS attach branch present" \
-    || fail "pty.js: agent-mode WS attach branch present"
+  grep -q "_registerExternalSession" server/src/attach.js \
+    && pass "attach.js: _registerExternalSession helper exported" \
+    || fail "attach.js: _registerExternalSession helper exported"
+  grep -q "_attachAgentWebSocket" server/src/attach.js \
+    && pass "attach.js: agent-mode WS attach handler present" \
+    || fail "attach.js: agent-mode WS attach handler present"
   grep -q "_handleAgentFrame" web/public/app.js \
     && pass "app.js: agent-event frame handler wired" \
     || fail "app.js: agent-event frame handler wired"
@@ -572,12 +470,12 @@ test_best_practices_template() {
   grep -q "_handleAskUserQuestion\|_handlePermissionRequest" server/src/agent-session.js \
     && pass "agent-session.js: AskUserQuestion + permission menu builders present" \
     || fail "agent-session.js: AskUserQuestion + permission menu builders present"
-  grep -q "session.resolveMenuPick" server/src/pty.js \
-    && pass "pty.js: handleMenuPick routes to agent sessions" \
-    || fail "pty.js: handleMenuPick routes to agent sessions"
-  grep -q "menuMod.handleSessionMenu" server/src/pty.js \
-    && pass "pty.js: _registerExternalSession wires 'menu' to menuMod" \
-    || fail "pty.js: _registerExternalSession wires 'menu' to menuMod"
+  grep -q "session.resolveMenuPick" server/src/attach.js \
+    && pass "attach.js: handleMenuPick routes to agent sessions" \
+    || fail "attach.js: handleMenuPick routes to agent sessions"
+  grep -q "menuMod.handleSessionMenu" server/src/attach.js \
+    && pass "attach.js: _registerExternalSession wires 'menu' to menuMod" \
+    || fail "attach.js: _registerExternalSession wires 'menu' to menuMod"
   # Phase 3: structured event renderer for agent-mode sessions.
   grep -q "agent-card-claude\|agent-card-tool\|agent-card-result" web/public/styles.css \
     && pass "styles.css: agent-card-* event-card styles present" \
@@ -708,26 +606,22 @@ test_best_practices_template() {
   grep -q "interrupt()\|_abortController.abort" server/src/agent-session.js \
     && pass "agent-session.js: interrupt()/AbortController wired" \
     || fail "agent-session.js: interrupt()/AbortController wired"
-  grep -q "session.mode === 'agent'" server/src/pty.js \
-    && pass "pty.js: handleChatPostfixes branches on session.mode='agent'" \
-    || fail "pty.js: handleChatPostfixes branches on session.mode='agent'"
   grep -q "session.mode === 'agent'" server/src/slashcmds.js \
     && pass "slashcmds.js: handleDecide routes to resolveMenuPick for agent" \
     || fail "slashcmds.js: handleDecide routes to resolveMenuPick for agent"
-  # Phase 5 + Phase 9: ensureLiveSession respawns a fresh AgentSession
-  # seeded with rec.sdkSessionId. Phase 9 widened the gate from
-  # `rec.mode === 'agent'` to `rec.mode !== 'pty'` so legacy unset-mode
-  # records auto-migrate (covered by the Phase-9 assertions further
-  # down).
-  grep -q "rec.mode !== 'pty'" server/src/sessions.js \
-    && pass "sessions.js: ensureLiveSession agent-mode branch present (Phase 9 gate)" \
-    || fail "sessions.js: ensureLiveSession agent-mode branch present"
+  # Phase 5 / Phase 9: ensureLiveSession respawns a fresh AgentSession
+  # seeded with rec.sdkSessionId. Phase 9 step 2 dropped the PTY branch
+  # entirely so the gate now just checks `rec.mode !== 'agent'` and
+  # migrates the record in place.
+  grep -q "rec.mode !== 'agent'" server/src/sessions.js \
+    && pass "sessions.js: ensureLiveSession migrates legacy records to agent" \
+    || fail "sessions.js: ensureLiveSession agent-mode migrator missing"
   grep -q "resumeSdkSessionId" server/src/agent-session.js \
     && pass "agent-session.js: resumeSdkSessionId seed accepted" \
     || fail "agent-session.js: resumeSdkSessionId seed accepted"
-  grep -q "\\[agent-resume\\]\\|\\[agent-attach\\]" server/src/pty.js \
-    && pass "pty.js: [agent-attach]/[agent-resume] diagnostic logs present" \
-    || fail "pty.js: [agent-attach]/[agent-resume] diagnostic logs present"
+  grep -q "\\[agent-resume\\]\\|\\[agent-attach\\]" server/src/attach.js \
+    && pass "attach.js: [agent-attach]/[agent-resume] diagnostic logs present" \
+    || fail "attach.js: [agent-attach]/[agent-resume] diagnostic logs present"
   # Phase 7: runClaudeP (btw) + callClaudeCli (extractor) ported off
   # the `claude -p` subprocess and onto the in-process SDK query().
   if grep -q "spawn('claude'" server/src/btw.js; then
@@ -899,38 +793,25 @@ test_conv_view_js() {
 }
 
 test_at_myco_chat_handler() {
-  grep -q '@myco' server/src/pty.js && pass "@myco handler" || fail "@myco handler"
-  grep -q 'session.write' server/src/pty.js && pass "PTY write for @myco" || fail "PTY write"
-  # Regression: the @myco prompt MUST be submitted with a bare \r so Claude
-  # Code's input editor fires submit. We split the text and the \r into two
-  # PTY writes (text first, then a deferred \r) — bundling them caused the
-  # editor to treat it as multi-line-paste-with-Enter-inside and never submit.
-  # See the chat→pty branch around session.write(input) + setTimeout → '\r'.
-  grep -qF "session.write('\\r')" server/src/pty.js \
-    && pass "@myco submits with bare \\r (deferred)" \
-    || fail "@myco submits with bare \\r (deferred)"
-  grep -qF "input + '\\n\\r'" server/src/pty.js \
-    && fail "@myco still uses '\\n\\r' (regression — should be bare \\r)" \
-    || pass "@myco no longer uses '\\n\\r'"
-  # Regression: chat prefix is generalised. Any @<word> prefix routes
-  # the message body to claude UNLESS <word> matches a known username
-  # (so @kkrazy stays a real mention; @generate / @claude / @myco all
-  # route to PTY). Demo010 surfaced the old "@myco only" miss.
-  grep -q 'CHAT_TO_PTY_PREFIX_RE' server/src/pty.js \
-    && pass "pty.js: generalised @<word> prefix" \
-    || fail "pty.js: generalised @<word> prefix"
-  grep -q '_isKnownChatUser' server/src/pty.js \
-    && pass "pty.js: known-user check guards mention routing" \
-    || fail "pty.js: known-user check guards mention routing"
-  # Regression: the @myco capture regex must use [\s\S] so multi-line chat
-  # messages (now reachable via the discussion textarea + Ctrl/⌘+Enter)
-  # don't get truncated to the first line by the `.` shorthand.
-  # The chat-to-PTY regex must use [\s\S] (not .) so a multi-line
-  # @<word> message — reachable via the discussion textarea — captures
-  # all lines, not just the first.
-  grep -qF '[\s\S]+' server/src/pty.js \
-    && pass "chat-to-PTY regex captures multi-line input" \
-    || fail "chat-to-PTY regex captures multi-line input"
+  # Phase 9 step 2: @myco / @<word> routing now lives in attach.js's
+  # handleChatPostfixes. session.write() pushes to the AgentSession's
+  # streaming-input queue (no PTY \r).
+  grep -q '@myco' server/src/attach.js && pass "@myco handler" || fail "@myco handler"
+  grep -q 'session.write' server/src/attach.js && pass "session.write for @myco" || fail "session.write present"
+  # Generalised @<word> prefix: any @<unknown-word> routes to the agent.
+  # @<known-user> is the only chat-only path (mention with highlight).
+  grep -q 'CHAT_ALIAS_PREFIX_RE' server/src/attach.js \
+    && pass "attach.js: generalised @<word> alias prefix" \
+    || fail "attach.js: generalised @<word> alias prefix"
+  grep -q '_isKnownChatUser' server/src/attach.js \
+    && pass "attach.js: known-user check guards mention routing" \
+    || fail "attach.js: known-user check guards mention routing"
+  # Multi-line capture: the alias prefix regex must use [\s\S] (not .)
+  # so a multi-line @<word> message reachable via the discussion
+  # textarea captures all lines, not just the first.
+  grep -qF '[\s\S]+' server/src/attach.js \
+    && pass "chat-alias regex captures multi-line input" \
+    || fail "chat-alias regex captures multi-line input"
   # Plain chat (no @myco prefix, no /btw) must NOT trigger the assistant.
   # Regression guard: the old shouldAskAssistant treated any '?'-ending
   # message as an assistant trigger, making every question look like claude
@@ -952,27 +833,24 @@ test_at_myco_chat_handler() {
 }
 
 test_viewer_ws_handler_wired() {
-  grep -q 'attachViewerWebSocket' server/src/pty.js && pass "attachViewerWebSocket" || fail "attachViewerWebSocket"
+  grep -q 'attachViewerWebSocket' server/src/attach.js && pass "attachViewerWebSocket" || fail "attachViewerWebSocket"
   grep -q 'attachViewerWebSocket' server/src/index.js && pass "viewer WS routing" || fail "viewer WS routing"
 }
 
 test_new_session_readonly() {
-  # Regression: a freshly spawned session has no JSONL transcript for
-  # ~5 seconds while Claude initialises. Two bugs used to make this
-  # awkward — pty.js attachWebSocket (owner) resolved the transcript
-  # path ONCE at attach, so new owners never got transcript-init /
-  # transcript-delta; and openSession landed owners on an empty xterm
-  # instead of the readonly conv pane. The fixes wire both ends:
+  # Regression: a freshly spawned agent session has no JSONL transcript
+  # for ~5 seconds while claude initialises. Two bugs used to make this
+  # awkward — the original attachWebSocket resolved the transcript path
+  # ONCE at attach, so new owners never got transcript-init /
+  # transcript-delta; and openSession landed owners on an empty
+  # terminal-wrap instead of the readonly conv pane. The fixes wire
+  # both ends:
   #   - server: shared streamTranscriptToWs() polls until the JSONL
-  #     appears, then init+watch (used by owner AND viewer paths).
+  #     appears, then init+watch (used by the viewer path).
   #   - client: doSpawn passes { startInReadonly: true } to openSession.
-  grep -q 'function streamTranscriptToWs' server/src/pty.js \
-    && pass "pty.js: streamTranscriptToWs helper" \
-    || fail "pty.js: streamTranscriptToWs helper"
-  # attachWebSocket and attachViewerWebSocket should BOTH call the helper.
-  test "$(grep -c 'const stopTranscript = streamTranscriptToWs(' server/src/pty.js)" = "2" \
-    && pass "pty.js: both attach paths use streamTranscriptToWs" \
-    || fail "pty.js: both attach paths use streamTranscriptToWs"
+  grep -q 'function streamTranscriptToWs' server/src/attach.js \
+    && pass "attach.js: streamTranscriptToWs helper" \
+    || fail "attach.js: streamTranscriptToWs helper"
   # Regression: streamTranscriptToWs does readNewMessages(0) for the
   # init send AND watchTranscript for live updates. Without passing
   # bytesRead as startByte to watchTranscript, the watcher's own
@@ -980,9 +858,9 @@ test_new_session_readonly() {
   # transcript a second time — every message renders TWICE on the
   # client until the user scrolls past them. The fix passes startByte
   # so the watcher picks up exactly where the init read finished.
-  grep -q 'startByte: bytesRead' server/src/pty.js \
-    && pass "pty.js: watchTranscript receives startByte to avoid replay" \
-    || fail "pty.js: watchTranscript receives startByte to avoid replay"
+  grep -q 'startByte: bytesRead' server/src/attach.js \
+    && pass "attach.js: watchTranscript receives startByte to avoid replay" \
+    || fail "attach.js: watchTranscript receives startByte to avoid replay"
   grep -q 'opts.startByte' server/src/transcript.js \
     && pass "transcript.js: watchTranscript honors startByte opt" \
     || fail "transcript.js: watchTranscript honors startByte opt"
@@ -1094,12 +972,12 @@ test_new_session_readonly() {
   grep -qF 'sendMenuPick(n, hash)' web/public/app.js \
     && pass "app.js: modal option click uses sendMenuPick(n, hash)" \
     || fail "app.js: modal option click uses sendMenuPick(n, hash)"
-  grep -q "msg.t === 'menu-pick'" server/src/pty.js \
-    && pass "pty.js: handles menu-pick WS frame" \
-    || fail "pty.js: handles menu-pick WS frame"
-  grep -q 'function handleMenuPick' server/src/pty.js \
-    && pass "pty.js: handleMenuPick helper" \
-    || fail "pty.js: handleMenuPick helper"
+  grep -q "msg.t === 'menu-pick'" server/src/attach.js \
+    && pass "attach.js: handles menu-pick WS frame" \
+    || fail "attach.js: handles menu-pick WS frame"
+  grep -q 'function handleMenuPick' server/src/attach.js \
+    && pass "attach.js: handleMenuPick helper" \
+    || fail "attach.js: handleMenuPick helper"
   # Negative guard: the callout must not fall back to a chat /decide send.
   grep -q 'sendChatMessage(\`/decide' web/public/app.js \
     && fail "app.js: callout still sends /decide via chat (regression)" \
@@ -1182,9 +1060,9 @@ test_new_session_readonly() {
   # corresponding chat entry in rec.chat so a page refresh / WS
   # reconnect (which reloads chat-history from disk) keeps the
   # picker disabled with the picked option highlighted.
-  grep -q '_markMenuChatAnswered' server/src/pty.js \
-    && pass "pty.js: menu-pick persists answered on rec.chat" \
-    || fail "pty.js: menu-pick persists answered on rec.chat"
+  grep -q '_markMenuChatAnswered' server/src/attach.js \
+    && pass "attach.js: menu-pick persists answered on rec.chat" \
+    || fail "attach.js: menu-pick persists answered on rec.chat"
   grep -q 'm.meta.answered' web/public/app.js \
     && pass "app.js: client honors persisted meta.answered" \
     || fail "app.js: client honors persisted meta.answered"
@@ -1222,12 +1100,11 @@ test_new_session_readonly() {
   grep -qF '.claude-typing-label' web/public/styles.css \
     && pass "css: claude-typing-label has overflow-ellipsis rules" \
     || fail "css: claude-typing-label not styled"
-  grep -q "this\\.emit('claude-status'" server/src/pty.js \
-    && pass "pty.js: emits claude-status on headless change" \
-    || fail "pty.js: emits claude-status on headless change"
-  grep -q "_extractStatusLine" server/src/pty.js \
-    && pass "pty.js: _extractStatusLine reads spinner from headless" \
-    || fail "pty.js: _extractStatusLine reads spinner from headless"
+  # Phase 9 step 2: AgentSession doesn't scrape a spinner line (no
+  # headless xterm). The claude-status WS frame still fires from
+  # _sendAttachSnapshot for compatibility (carries text=null, status=
+  # null) so the client clears its strip on attach. The client-side
+  # handler stays.
   grep -q "msg.t === 'claude-status'" web/public/app.js \
     && pass "app.js: handles claude-status WS frame" \
     || fail "app.js: handles claude-status WS frame"
@@ -1364,28 +1241,14 @@ test_new_session_readonly() {
   grep -Pzoq "\.artifact-main-view\s+\.artifact-body[\s\S]{0,400}max-width:\s*880px" web/public/styles.css \
     && pass "styles.css: artifact-body centered + max-width 880px (Phase 3)" \
     || fail "styles.css: artifact-body not centered"
-  grep -Pzoq "#chatpane-resize\s*\{\s*display:\s*none" web/public/styles.css \
-    && pass "styles.css: legacy chatpane-resize handle hidden (Phase 3)" \
-    || fail "styles.css: chatpane-resize still visible"
-  # SDK Phase 9 (step 1): spawnSession rejects new mode='pty' requests.
-  # The legacy PTY path still works for EXISTING rec.mode='pty' records
-  # via ensureLiveSession until the actual code deletion lands, but
-  # the spawn-modal checkbox is hidden + new spawns are agent-only.
+  # SDK Phase 9: spawnSession + ensureLiveSession both reject mode=pty;
+  # there's no PTY driver to fall through to.
   grep -q "PTY mode is retired (Phase 9)" server/src/sessions.js \
     && pass "sessions.js: spawnSession rejects mode=pty (Phase 9)" \
     || fail "sessions.js: spawnSession still accepts mode=pty"
   ! grep -q 'spawn-mode-label\|"spawn-mode-pty" type="checkbox"' web/public/index.html \
     && pass "index.html: PTY-checkbox label retired from spawn modal" \
     || fail "index.html: PTY-checkbox label still in spawn modal"
-  grep -q "rec.mode !== 'pty'" server/src/sessions.js \
-    && pass "sessions.js: ensureLiveSession treats unset/missing mode as agent" \
-    || fail "sessions.js: ensureLiveSession still falls through to PTY for unset mode"
-  # Migration helper script for legacy rec.mode='pty' (or unset)
-  # records. Idempotent; dry-run friendly. Lives at the repo root next
-  # to migrate-plan-ids.js.
-  test -x migrate-pty-to-agent.js \
-    && pass "migrate-pty-to-agent.js script present + executable" \
-    || fail "migrate-pty-to-agent.js missing or not executable"
   grep -Pzoq "_migrateLegacyMemory\(rec\.absCwd\)[\s\S]{0,800}spawnAgent" server/src/sessions.js \
     && pass "sessions.js: ensureLiveSession invokes _migrateLegacyMemory before spawnAgent" \
     || fail "sessions.js: ensureLiveSession does not run the memory migration"
@@ -1623,7 +1486,7 @@ run_static_checks() {
   test_vendor_assets
   test_npm_deps
   test_text_utils
-  test_pty_patterns
+  test_phase9_retirement
   test_cache_busters
   test_pwa_icon
   test_best_practices_template
@@ -1662,41 +1525,18 @@ test_mermaid_diagrams() {
 }
 
 test_readonly_viewer() {
-  grep -q 'attachViewerWebSocket' server/src/pty.js && pass "viewer WS handler exported" || fail "viewer WS handler"
-  grep -q 'readOnly' server/src/pty.js && pass "readOnly flag in pty" || fail "readOnly flag"
-  grep -q "t: 'viewer-mode'" server/src/pty.js && pass "viewer-mode signal sent" || fail "viewer-mode signal"
+  grep -q 'attachViewerWebSocket' server/src/attach.js && pass "viewer WS handler exported" || fail "viewer WS handler"
+  grep -q "t: 'viewer-mode'" server/src/attach.js && pass "viewer-mode signal sent" || fail "viewer-mode signal"
   grep -q 'viewer-mode' web/public/app.js && pass "viewer-mode handled in client" || fail "viewer-mode client"
-  # Server must drop write-side messages (PTY input/resize) for viewers
-  grep -Pzoq '(?s)readOnly\s*\)\s*return.*?session\.write|session\.write.*?readOnly' server/src/pty.js \
-    && pass "viewer drops PTY writes" \
-    || fail "viewer drops PTY writes"
-  # Read-only viewers stay on the structured-transcript pane (clean record of
-  # user/assistant/tool messages) and ALSO see a docked live terminal-tail
-  # panel that surfaces Claude's interactive prompts (which never make it
-  # into the JSONL). Owner login flows in via the viewer-mode message.
-  grep -q "t: 'viewer-mode'"      server/src/pty.js     && pass "server emits viewer-mode"          || fail "server emits viewer-mode"
-  grep -q "owner: ownerLogin"     server/src/pty.js     && pass "viewer-mode carries owner login"   || fail "viewer-mode carries owner login"
-  # Server-side headless xterm is still kept for auto-mode detection in
-  # handleChatPostfixes — but we no longer ship per-snapshot WS frames or
-  # render a "live terminal" panel in the viewer pane.
-  grep -q "@xterm/headless"       server/src/pty.js     && pass "pty.js uses headless xterm"        || fail "pty.js uses headless xterm"
-  grep -q "getVisibleText"        server/src/pty.js     && pass "PtySession.getVisibleText defined" || fail "PtySession.getVisibleText defined"
-  ! grep -q "t: 'terminal-snapshot'" server/src/pty.js  && pass "terminal-snapshot WS frame removed" || fail "terminal-snapshot WS frame still emitted"
+  # Read-only viewer pane. Owner login flows in via the viewer-mode
+  # message. With PTY retired, viewers see structured agent events +
+  # transcript only — no live terminal panel.
+  grep -q "t: 'viewer-mode'"      server/src/attach.js  && pass "server emits viewer-mode"          || fail "server emits viewer-mode"
+  grep -q "owner: ownerLogin"     server/src/attach.js  && pass "viewer-mode carries owner login"   || fail "viewer-mode carries owner login"
   grep -q "id=\"readonly-banner\"" web/public/index.html && pass "html: #readonly-banner"           || fail "html: #readonly-banner"
   ! grep -q "id=\"terminal-tail\"" web/public/index.html && pass "html: #terminal-tail removed"     || fail "html: #terminal-tail still present"
   grep -q "function applyReadOnly"        web/public/app.js && pass "applyReadOnly() defined"        || fail "applyReadOnly() defined"
   ! grep -q "applyTerminalSnapshot"       web/public/app.js && pass "applyTerminalSnapshot removed"  || fail "applyTerminalSnapshot still referenced"
-  # Special-key shortcuts let viewers answer y/n/Enter/Esc prompts without
-  # ever typing into the (rejected) terminal directly.
-  grep -qE "SPECIAL_KEYS|'enter':|enter:" server/src/pty.js && pass "special key tokens recognized" || fail "special key tokens recognized"
-  # Auto-mode: chat-injected @myco messages should land Claude Code in
-  # auto-accept-edits mode so file edits / tool calls don't pause for
-  # permission. The toggle is detected from the headless terminal tail.
-  grep -q 'function autoAcceptToggleBytes' server/src/pty.js && pass "autoAcceptToggleBytes() defined" || fail "autoAcceptToggleBytes() defined"
-  grep -q 'function detectClaudeMode'      server/src/pty.js && pass "detectClaudeMode() defined"      || fail "detectClaudeMode() defined"
-  grep -q 'shift-tab'                      server/src/pty.js && pass "shift-tab special key registered" || fail "shift-tab special key registered"
-  # Shift+Tab byte sequence (\x1b[Z) is the toggle Claude Code listens for.
-  grep -qF 'SHIFT_TAB'                     server/src/pty.js && pass "shift-tab byte sequence wired"    || fail "shift-tab byte sequence wired"
 }
 
 test_chat_window() {
@@ -1747,11 +1587,11 @@ test_chat_window() {
   # the next 'open' event. Mobile background-suspend is the common trigger.
   grep -q 'outboundChat'        web/public/app.js && pass "chat outbound queue" || fail "chat outbound queue"
   grep -q '_flushOutboundChat'  web/public/app.js && pass "flushOutboundChat helper" || fail "flushOutboundChat helper"
-  grep -q 'this Claude session has exited' server/src/pty.js \
-    && pass "server warns when @myco hits dead PTY" \
-    || fail "server warns when @myco hits dead PTY"
-  grep -q "t: 'chat'" server/src/pty.js && pass "chat WS frame format" || fail "chat WS frame"
-  grep -q "t: 'chat-history'" server/src/pty.js && pass "chat-history replay" || fail "chat-history replay"
+  grep -q 'this Claude session has exited' server/src/attach.js \
+    && pass "server warns when chat hits a dead session" \
+    || fail "server warns when chat hits a dead session"
+  grep -q "t: 'chat'" server/src/attach.js && pass "chat WS frame format" || fail "chat WS frame"
+  grep -q "t: 'chat-history'" server/src/attach.js && pass "chat-history replay" || fail "chat-history replay"
   grep -q "msg.t === 'chat-history'" web/public/app.js && pass "chat-history client handler" || fail "chat-history client handler"
   # The standalone chatpane-close × element was removed — #btn-chat
   # itself now toggles open/closed via its .active class. The optional-
@@ -1790,9 +1630,9 @@ test_chat_window() {
   grep -qF 'list.children[i].replaceWith(newEl)' web/public/app.js \
     && pass "app.js: appendChatMessage re-renders DOM on uuid-dedup upgrade" \
     || fail "app.js: uuid-dedup upgrade no longer re-renders — stale chat rows will persist until refresh"
-  grep -qF "[persist-chat-emit]" server/src/pty.js \
-    && pass "pty.js: persistAssistantTextToChat logs WS listener count" \
-    || fail "pty.js: [persist-chat-emit] diagnostic missing — can't diagnose silent-broadcast"
+  grep -qF "[persist-chat-emit]" server/src/attach.js \
+    && pass "attach.js: persistAssistantTextToChat logs WS listener count" \
+    || fail "attach.js: [persist-chat-emit] diagnostic missing — can't diagnose silent-broadcast"
   grep -qF '_resetChatUnread' web/public/app.js \
     && pass "app.js: chat-unread badge resets on setChatPane(true)" \
     || fail "app.js: chat-unread reset missing"
@@ -1999,28 +1839,19 @@ test_chat_window() {
   # Regression: extractor prompts must tell Claude to spot-check the
   # actual codebase via Read/Glob/Grep, not just rely on chat + transcript.
   grep -q "Read, Glob, Grep" server/src/extractor.js && pass "extractor prompts mention code-inspection tools" || fail "extractor prompts mention code-inspection tools"
-  # Regression: Claude is spawned with --permission-mode acceptEdits so we
-  # don't need a fragile runtime Shift+Tab auto-toggle to nudge it into
-  # accept mode (that detection could misread state and toggle INTO plan).
-  grep -q "'--permission-mode', 'acceptEdits'" server/src/pty.js \
-    && pass "claude spawned with --permission-mode acceptEdits" \
-    || fail "claude spawned with --permission-mode acceptEdits"
-  grep -q 'auto-toggle on discussion' server/src/pty.js \
-    && fail "the runtime auto-toggle came back (we removed it for spawn-time mode set)" \
-    || pass "runtime auto-toggle removed (acceptEdits is set at spawn)"
-  # Regression: --dangerously-skip-permissions was removed because Claude
-  # CLI refuses it when running as root. Tool-permission dialogs now flow
-  # through MenuInterceptor → permissions.decide → auto-allow / auto-deny.
-  grep -q "'--dangerously-skip-permissions'" server/src/pty.js \
-    && fail "--dangerously-skip-permissions came back (claude CLI refuses it under root)" \
-    || pass "--dangerously-skip-permissions removed (refused under root)"
+  # Phase 9 step 2: PTY spawn is gone. The agent SDK consumes
+  # permissionMode via the spawn options in agent-session.js; the
+  # canUseTool callback + PreToolUse hook handle tool-permission gates.
+  grep -q "permissionMode:" server/src/agent-session.js \
+    && pass "agent-session: permissionMode option present" \
+    || fail "agent-session: permissionMode option missing"
   test -f server/src/permissions.js && pass "permissions.js exists" || fail "permissions.js missing"
   test -f server/src/menu.js && pass "menu.js exists" || fail "menu.js missing"
-  # Menu dialogs flow PTY → menu.handleSessionMenu → permissions.decide.
-  # The dispatch lives in menu.js (factored out of pty.js); pty.js just
-  # wires the EventEmitter hook.
+  # Menu dialogs flow AgentSession.canUseTool → menu.handleSessionMenu
+  # → permissions.decide. The dispatch lives in menu.js; attach.js
+  # wires the EventEmitter hook in _registerExternalSession.
   grep -q "permissions.decide" server/src/menu.js && pass "menu.js uses permissions.decide" || fail "menu.js uses permissions.decide"
-  grep -q "menuMod.handleSessionMenu" server/src/pty.js && pass "pty.js delegates menu events to menu.js" || fail "pty.js delegates menu events to menu.js"
+  grep -q "menuMod.handleSessionMenu" server/src/attach.js && pass "attach.js delegates menu events to menu.js" || fail "attach.js delegates menu events to menu.js"
   grep -q "extractPermissionTarget" server/src/permissions.js && pass "permissions exports extractPermissionTarget" || fail "permissions exports extractPermissionTarget"
   grep -q "names: \['allow'" server/src/slashcmds.js && pass "/allow command registered" || fail "/allow missing"
   grep -q "names: \['deny'" server/src/slashcmds.js && pass "/deny command registered" || fail "/deny missing"
@@ -2044,12 +1875,12 @@ test_chat_window() {
   grep -q "names: \['cancel'\]" server/src/slashcmds.js && pass "/cancel command registered" || fail "/cancel command missing"
   grep -q 'function handleTaskList' server/src/slashcmds.js && pass "handleTaskList usage reply" || fail "handleTaskList usage reply missing"
   grep -q 'function handleTaskSkip' server/src/slashcmds.js && pass "handleTaskSkip usage reply" || fail "handleTaskSkip usage reply missing"
-  grep -qF "text.match(/^\/tasks?\s*$/i)" server/src/pty.js \
-    && pass "pty.js: /task rewrites to @myco /task" \
-    || fail "pty.js: /task rewrite missing"
-  grep -qF "text.match(/^\/(skip|cancel)\s+(\d+)\s*$/i)" server/src/pty.js \
-    && pass "pty.js: /skip + /cancel rewrite to @myco" \
-    || fail "pty.js: /skip + /cancel rewrite missing"
+  grep -qF "text.match(/^\/tasks?\s*$/i)" server/src/attach.js \
+    && pass "attach.js: /task rewrites to @myco /task" \
+    || fail "attach.js: /task rewrite missing"
+  grep -qF "text.match(/^\/(skip|cancel)\s+(\d+)\s*$/i)" server/src/attach.js \
+    && pass "attach.js: /skip + /cancel rewrite to @myco" \
+    || fail "attach.js: /skip + /cancel rewrite missing"
   grep -qF '/^\/tasks?\s*$/i' web/public/app.js \
     && pass "app.js: typing-dots arm recognizes /task" \
     || fail "app.js: typing-dots arm /task missing"
@@ -2146,25 +1977,12 @@ test_chat_window() {
   else
     skip "permissions runtime (no host node)"
   fi
-  # Regression: TUI-menu interception is wired so plan-mode dialogs (and
-  # any other numbered menu Claude displays) reach the web GUI via chat.
-  test -f server/src/menu-interceptor.js && pass "menu-interceptor.js exists" || fail "menu-interceptor.js missing"
-  grep -q "MenuInterceptor" server/src/pty.js && pass "PtySession uses MenuInterceptor" || fail "PtySession uses MenuInterceptor"
-  grep -q "broadcastMenuToChat" server/src/pty.js && pass "pty has broadcastMenuToChat" || fail "pty has broadcastMenuToChat"
+  # Phase 9 step 2: TUI menu-interception is gone (no PTY to scrape).
+  # The agent SDK's canUseTool callback synthesizes menus directly in
+  # AgentSession and routes them through menu.handleSessionMenu →
+  # permissions.decide for auto-allow/auto-deny.
+  grep -q "broadcastMenuToChat" server/src/attach.js && pass "attach.js re-exports broadcastMenuToChat" || fail "attach.js missing broadcastMenuToChat export"
   grep -q "names: \['decide'" server/src/slashcmds.js && pass "/decide command registered" || fail "/decide command missing"
-  # Intensive coverage: 65 cases across MenuInterceptor parse + state machine,
-  # permissions.matchesPattern / decide / extractPermissionTarget, and the
-  # @myco-shortcut routing when a TUI menu is pending. Lives in a dedicated
-  # file because the case list is too long for an inline `node -e` block.
-  if have_node; then
-    if node test/menu-broadcast.test.js >/dev/null 2>&1; then
-      pass "test/menu-broadcast.test.js (65 cases)"
-    else
-      fail "test/menu-broadcast.test.js — re-run with 'node test/menu-broadcast.test.js' to see failures"
-    fi
-  else
-    skip "test/menu-broadcast.test.js (no host node)"
-  fi
   # Regression for the subagent-jsonl bug that hung mycobeta sessions:
   # `<project>/subagents/agent-*.jsonl` must NEVER be returned by
   # findNewestJsonl, and isClaudeSessionId must reject non-UUID names so
@@ -2178,36 +1996,11 @@ test_chat_window() {
   else
     skip "test/find-newest-jsonl.test.js (no host node)"
   fi
-  # Regression for the menu-pick race condition: when two menus are
-  # broadcast in quick succession (parallel tool calls, rapid dialog
-  # turnover) the user's click on the older callout must NOT answer
-  # the newer menu in the TUI. Hash-validated picks land on the right
-  # row; stale picks drop the PTY write.
-  if have_node; then
-    if node test/menu-pick-race.test.js >/dev/null 2>&1; then
-      pass "test/menu-pick-race.test.js (14 cases)"
-    else
-      fail "test/menu-pick-race.test.js — re-run with 'node test/menu-pick-race.test.js' to see failures"
-    fi
-  else
-    skip "test/menu-pick-race.test.js (no host node)"
-  fi
-  # Regression: multi-select dialog detection. Claude code renders
-  # "<n>. [ ] label" / "<n>. [x] label" for toggleable options; each
-  # digit press flips one checkbox and Enter submits. Parser must mark
-  # menu.multi=true, strip "[ ]"/"[x]" from labels, expose per-option
-  # {checkbox, checked}, leave non-checkbox lines (e.g. final "Done")
-  # alone, and keep the hash stable across checked-state changes so the
-  # chat row keeps its identity across toggle clicks.
-  if have_node; then
-    if node test/menu-multiselect.test.js >/dev/null 2>&1; then
-      pass "test/menu-multiselect.test.js (21 cases)"
-    else
-      fail "test/menu-multiselect.test.js — re-run with 'node test/menu-multiselect.test.js' to see failures"
-    fi
-  else
-    skip "test/menu-multiselect.test.js (no host node)"
-  fi
+  # Phase 9 step 2: PTY-only test files (menu-pick-race + menu-multiselect)
+  # were retired with the PTY driver — those tests exercised wizard
+  # detection, queued-pick retries, and CR/no-CR PTY writes that don't
+  # exist in agent mode. The agent-session.test.js below covers the
+  # SDK-driven menu round-trip equivalent.
   # Regression: parseLine() in transcript.js used to recognise only 4 of
   # the 40+ JSONL `type` values claude code emits. The expanded parser
   # surfaces thinking content, plan/auto-mode transitions, framework
@@ -2234,32 +2027,6 @@ test_chat_window() {
   else
     skip "test/state-update.test.js (no host node)"
   fi
-  # Regression: the PTY mode-change observer must emit ONLY on
-  # transitions, not on every periodic safety scan. First scan
-  # establishes baseline silently — otherwise every owner reconnect
-  # would produce a spurious "entered default" pill on the viewer.
-  if have_node; then
-    if node test/pty-mode-change.test.js >/dev/null 2>&1; then
-      pass "test/pty-mode-change.test.js (6 cases)"
-    else
-      fail "test/pty-mode-change.test.js — re-run with 'node test/pty-mode-change.test.js' to see failures"
-    fi
-  else
-    skip "test/pty-mode-change.test.js (no host node)"
-  fi
-  # Each new TUI regex must be exported from pty-patterns.js and (when
-  # applicable) consumed by pty.js. Sentinels here so a future revert
-  # to inlined regex shapes trips the static check.
-  for re in TOOL_INVOCATION_RE CORNER_BLOCK_RE STATUS_TOKEN_TRAILER_RE STATUS_INTERRUPT_RE EFFORT_CHIP_RE; do
-    grep -qF "$re" server/src/pty-patterns.js \
-      && pass "pty-patterns.js: $re defined" \
-      || fail "pty-patterns.js: $re missing — readonly viewer status decomposition will lose this dimension"
-  done
-  for re in STATUS_TOKEN_TRAILER_RE STATUS_INTERRUPT_RE EFFORT_CHIP_RE; do
-    grep -qF "$re" server/src/pty.js \
-      && pass "pty.js: imports $re for _extractStatus" \
-      || fail "pty.js: $re not consumed — status chip will be empty"
-  done
   # Each new transcript role / JSONL type must be wired in both the
   # parser (server) and the renderer (client). Sentinels protect both
   # ends of the pipeline.
@@ -2273,14 +2040,13 @@ test_chat_window() {
       && pass "app.js: renders $role" \
       || fail "app.js: $role render branch missing"
   done
-  # Mode-change WS frame must be wired in both attach handlers (owner +
-  # viewer) so the readonly viewer also receives live transition pills.
-  grep -qF "session.on('mode-change'" server/src/pty.js \
-    && pass "pty.js: mode-change WS handler wired" \
-    || fail "pty.js: mode-change handler missing — viewer pills will lag by JSONL flush latency"
+  # Mode-change is no longer scraped from a PTY status bar (Phase 9 step
+  # 2). The mode-snapshot WS frame sent from _sendAttachSnapshot covers
+  # the attach-time case; the client's _onLiveModeChange handler stays
+  # so legacy chat rows with a mode-change meta still re-render.
   grep -qF "_onLiveModeChange" web/public/app.js \
     && pass "app.js: _onLiveModeChange handler defined" \
-    || fail "app.js: _onLiveModeChange missing — live mode-change frames will be dropped"
+    || fail "app.js: _onLiveModeChange missing — legacy mode-change frames will be dropped"
   # Regression: claude code re-execs into a new sessionId when the user
   # hits /resume in the TUI. The polled rec.claudeSessionId only fires
   # at mycod-spawn time, so it gets stuck on the original id while the
@@ -2305,142 +2071,36 @@ test_chat_window() {
   grep -qF 'readActiveClaudeSessionForCwd(rec.absCwd)' server/src/transcript.js \
     && pass "transcript.js: resolveTranscriptPath consults the live tracker first" \
     || fail "transcript.js: resolveTranscriptPath still relies only on rec.claudeSessionId — re-exec'd sessions will lose assistant text"
-  # Regression: streamTranscriptToWs used to call resolveTranscriptPath
-  # ONCE at attach time and pin the watcher to that file. Even with the
-  # live-tracker fix, a mid-connection claude /resume re-exec writes to
-  # a NEW <id>.jsonl while the watcher keeps reading the stale path.
-  # Symptom: transcript view and chat sidebar both freeze at the
-  # pre-re-exec content — only a page refresh recovers (re-runs
-  # resolveTranscriptPath at the fresh attach). The fix polls
-  # resolveTranscriptPath every 3s and rebinds when it changes.
-  grep -qF '[transcript-rebind]' server/src/pty.js \
-    && pass "pty.js: streamTranscriptToWs rebinds watcher when live jsonl path changes" \
-    || fail "pty.js: streamTranscriptToWs no longer rebinds — mid-session re-execs lose transcript-delta"
-  grep -qF 'MENU_CHECKBOX_RE' server/src/pty-patterns.js \
-    && pass "pty-patterns.js: MENU_CHECKBOX_RE defined" \
-    || fail "pty-patterns.js: MENU_CHECKBOX_RE missing — multi-select detection won't work"
-  grep -qF 'function handleMenuToggle' server/src/pty.js \
-    && pass "pty.js: handleMenuToggle defined" \
-    || fail "pty.js: handleMenuToggle missing"
-  grep -qF 'function handleMenuSubmit' server/src/pty.js \
-    && pass "pty.js: handleMenuSubmit defined" \
-    || fail "pty.js: handleMenuSubmit missing"
-  grep -qF "msg.t === 'menu-toggle'" server/src/pty.js \
-    && pass "pty.js: WS frame menu-toggle wired" \
-    || fail "pty.js: WS frame menu-toggle not wired"
-  grep -qF "msg.t === 'menu-submit'" server/src/pty.js \
-    && pass "pty.js: WS frame menu-submit wired" \
-    || fail "pty.js: WS frame menu-submit not wired"
-  # menu-toggle MUST send digit only (no CR) — sending '\r' here would
-  # submit prematurely and fail the multi-select.
-  if awk '/^function handleMenuToggle\(/,/^}$/' server/src/pty.js | grep -qF 'session.write(String(n));'; then
-    pass "pty.js: handleMenuToggle writes digit only (no CR)"
-  else
-    fail "pty.js: handleMenuToggle writes wrong byte sequence (should be just the digit)"
-  fi
-  # And it must NOT include the CR-suffix form used by single-select.
-  if awk '/^function handleMenuToggle\(/,/^}$/' server/src/pty.js | grep -qF "session.write(String(n) + '\\r')"; then
-    fail "pty.js: handleMenuToggle includes CR — would submit on every checkbox click"
-  else
-    pass "pty.js: handleMenuToggle has no CR (matches multi-select toggle semantics)"
-  fi
-  # handleMenuPick must SKIP the trailing CR when the plan-mode
-  # interview wizard tab bar is visible — the wizard auto-commits on
-  # digit alone and the CR leaks to the next screen, landing on Cancel
-  # or skipping a question. Verified live on mycobeta demo010
-  # (2026-05-13): a 4-question wizard had its Q2 (Database) silently
-  # skipped because Q1's "\r" advanced past it, and the final
-  # question's "\r" landed on the Submit tab's Cancel → wizard
-  # returned "user rejected". Sentinel the gate function so a future
-  # refactor doesn't reintroduce the always-CR shape.
-  grep -qF '_isWizardActive(session)' server/src/pty.js \
-    && pass "pty.js: handleMenuPick gates trailing CR on _isWizardActive" \
-    || fail "pty.js: handleMenuPick no longer wizard-aware — extra CR will leak"
-  grep -qF 'function _isWizardActive' server/src/pty.js \
-    && pass "pty.js: _isWizardActive helper defined" \
-    || fail "pty.js: _isWizardActive missing — wizard gate broken"
-  # Regression: the plan-mode interview wizard has TWO variants. SIMPLE
-  # auto-commits on digit (drop trailing CR — R-02). RICH expands each
-  # option inline ("n to add notes", "Tab to switch questions") and
-  # requires Enter to commit (KEEP trailing CR). Verified mycobeta
-  # demo010 (2026-05-13): "Which architecture" rich-wizard click sent
-  # bare "1" → cursor moved, wizard never advanced. Now distinguished
-  # by WIZARD_RICH_FOOTER_RE.
-  grep -qF 'WIZARD_RICH_FOOTER_RE' server/src/pty-patterns.js \
-    && pass "pty-patterns.js: WIZARD_RICH_FOOTER_RE defined" \
-    || fail "pty-patterns.js: WIZARD_RICH_FOOTER_RE missing — rich wizard picks won't commit"
-  grep -qF 'function _detectWizard' server/src/pty.js \
-    && pass "pty.js: _detectWizard distinguishes simple vs rich wizard" \
-    || fail "pty.js: _detectWizard missing — simple/rich variants not separated"
-  # INTERACTION_RULES.md is the single-source-of-truth for claude code
-  # TUI ⇄ myco contract — every rule maps to a regex/handler + a test +
-  # a sentinel in this file. When you discover a new failure mode on
-  # mycobeta, add a numbered rule there so future-you (and the next
-  # AI working in this repo) doesn't repeat the diagnostic from scratch.
+  # Transcript watcher rebind: a mid-connection claude /resume re-exec
+  # writes to a NEW <id>.jsonl while the watcher would otherwise keep
+  # reading the stale path. The poll in streamTranscriptToWs detects
+  # the path change and rebinds. (Lives in attach.js post Phase 9.)
+  grep -qF '[transcript-rebind]' server/src/attach.js \
+    && pass "attach.js: streamTranscriptToWs rebinds watcher when live jsonl path changes" \
+    || fail "attach.js: streamTranscriptToWs no longer rebinds — mid-session re-execs lose transcript-delta"
+  # Agent-mode menu plumbing: handleMenuToggle / handleMenuSubmit /
+  # WS frame routing all live in attach.js. The PTY-only navigation
+  # (CR-or-not, wizard variants, Submit-row arrow burst) is gone — the
+  # SDK's canUseTool callback handles the answer directly.
+  grep -qF 'function handleMenuToggle' server/src/attach.js \
+    && pass "attach.js: handleMenuToggle defined" \
+    || fail "attach.js: handleMenuToggle missing"
+  grep -qF 'function handleMenuSubmit' server/src/attach.js \
+    && pass "attach.js: handleMenuSubmit defined" \
+    || fail "attach.js: handleMenuSubmit missing"
+  grep -qF "msg.t === 'menu-toggle'" server/src/attach.js \
+    && pass "attach.js: WS frame menu-toggle wired" \
+    || fail "attach.js: WS frame menu-toggle not wired"
+  grep -qF "msg.t === 'menu-submit'" server/src/attach.js \
+    && pass "attach.js: WS frame menu-submit wired" \
+    || fail "attach.js: WS frame menu-submit not wired"
+  # INTERACTION_RULES.md still documents the high-level menu/permission
+  # contract. The PTY-specific R-NN rules are now historical (Phase 9
+  # step 2 retired the PTY), but the file stays in tree as project
+  # archaeology.
   [ -f server/src/INTERACTION_RULES.md ] \
-    && pass "INTERACTION_RULES.md present (single source of truth for TUI rules)" \
-    || fail "server/src/INTERACTION_RULES.md missing — future rule changes risk regressing R-01..R-12 silently"
-  grep -qF 'R-01' server/src/INTERACTION_RULES.md 2>/dev/null \
-    && pass "INTERACTION_RULES.md uses stable R-NN numbering" \
-    || fail "INTERACTION_RULES.md: rule numbering scheme broken"
-  # handleMenuToggle must flip opt.checked exactly ONCE per click.
-  # _toggleMenuChatCheckbox mutates the persisted record (which shares
-  # the same object reference as pending.options[i] because
-  # broadcastMenuToChat doesn't clone). Re-applying `opt.checked =
-  # !opt.checked` in handleMenuToggle ITSELF used to double-flip — net
-  # zero — so the chat picker's UI never moved and the menu-multi
-  # diagnostic always logged the initial state. Verified live on
-  # mycobeta demo010 (2026-05-13): "select 2 of 4" logged "unchecked"
-  # for both clicks. Sentinel the lone _toggleMenuChatCheckbox call
-  # AND the absence of an opt.checked toggle inside handleMenuToggle.
-  if awk '/^function handleMenuToggle\(/,/^}$/' server/src/pty.js | grep -qE '^[[:space:]]*opt\.checked\s*=\s*!opt\.checked'; then
-    fail "pty.js: handleMenuToggle re-flips opt.checked AFTER _toggleMenuChatCheckbox — net zero, chat UI lies, server/TUI diverge"
-  else
-    pass "pty.js: handleMenuToggle flips opt.checked exactly once (no double-flip)"
-  fi
-  # menu-submit must navigate to the "Submit" row before pressing Enter —
-  # claude's multi-select dialog has a separate Submit element below
-  # the numbered options. Plain CR on the cursor's current position
-  # just operates on a checkbox row. Earlier the navigation used a
-  # blind 12-arrow over-send which wrapped on some Ink builds (cursor
-  # ended back at option 1, Enter submitted option 1 only). Current
-  # impl reads the headless to find the exact cursor→Submit distance
-  # AND paces arrows ~30ms apart so the TUI processes them serially.
-  grep -qF '_findSubmitNavCount' server/src/pty.js \
-    && pass "pty.js: handleMenuSubmit reads headless to compute exact nav distance" \
-    || fail "pty.js: handleMenuSubmit no longer computes precise nav count"
-  if awk '/^function handleMenuSubmit\(/,/^}$/' server/src/pty.js | grep -qF 'setTimeout(tick'; then
-    pass "pty.js: handleMenuSubmit paces arrows with setTimeout (no rapid-burst)"
-  else
-    fail "pty.js: handleMenuSubmit sends arrows as a burst — TUI may debounce them into one event"
-  fi
-  # Regex now lives in pty-patterns.js (per CLAUDE.md: all TUI-output
-  # regexes belong in one place). Pre-fix the cursor scan latched onto
-  # the FIRST `❯` in the viewport — which could be the wizard
-  # breadcrumb's step pointer, NOT the option cursor. Inflated
-  # cursor→Submit by 10+ rows and the paced down-arrow burst wrapped
-  # the cursor in claude's TUI.
-  grep -qF 'MULTI_SELECT_CURSOR_RE' server/src/pty-patterns.js \
-    && pass "pty-patterns.js: MULTI_SELECT_CURSOR_RE defined" \
-    || fail "pty-patterns.js: MULTI_SELECT_CURSOR_RE missing — Submit nav may latch onto stray ❯"
-  grep -qF 'MULTI_SELECT_CURSOR_RE' server/src/pty.js \
-    && pass "pty.js: handleMenuSubmit anchors cursor on a checkbox-bearing line" \
-    || fail "pty.js: handleMenuSubmit not using MULTI_SELECT_CURSOR_RE — stray ❯ will overshoot Submit"
-  grep -qF 'SUBMIT_ROW_RE' server/src/pty-patterns.js \
-    && pass "pty-patterns.js: SUBMIT_ROW_RE defined" \
-    || fail "pty-patterns.js: SUBMIT_ROW_RE missing"
-  grep -qF 'SUBMIT_ROW_RE' server/src/pty.js \
-    && pass "pty.js: SUBMIT_ROW_RE locates the Submit/Done row" \
-    || fail "pty.js: SUBMIT_ROW_RE missing — footer hint text may be mistaken for Submit"
-  # Plan-mode interview wizard labels its per-question submit row "Next",
-  # not "Submit". Verified 2026-05-13 on mycobeta demo010 — the Features
-  # multi-select's submit row was an indented "Next" below option 5
-  # "Type something". Without `next` in the alternation, the nav burst
-  # fell back to the 6-row default, the cursor wrapped past Next, and
-  # claude received Enter on a checkbox row — interpreted as decline.
-  grep -qE "submit\|done\|continue\|finish\|ok\|next" server/src/pty-patterns.js \
-    && pass "pty-patterns.js: SUBMIT_ROW_RE includes 'next' label (per-question wizard submit row)" \
-    || fail "pty-patterns.js: SUBMIT_ROW_RE missing 'next' — wizard multi-select submit will land on the wrong row"
+    && pass "INTERACTION_RULES.md present (historical TUI rules archive)" \
+    || fail "server/src/INTERACTION_RULES.md missing"
   grep -qF 'function sendMenuToggle' web/public/app.js \
     && pass "app.js: sendMenuToggle defined" \
     || fail "app.js: sendMenuToggle missing"
@@ -2510,15 +2170,15 @@ test_chat_window() {
   else
     skip "test/persist-assistant-chat.test.js (no host node)"
   fi
-  grep -qF 'function persistAssistantTextToChat' server/src/pty.js \
-    && pass "pty.js: persistAssistantTextToChat defined" \
-    || fail "pty.js: persistAssistantTextToChat missing"
-  grep -qF "persistAssistantTextToChat(sessionId, newMsgs)" server/src/pty.js \
-    && pass "pty.js: transcript watcher mirrors assistant text into rec.chat" \
-    || fail "pty.js: transcript watcher does not mirror assistant text"
-  grep -qF 'meta: { transcriptUuid: m.uuid, fromTranscript: true }' server/src/pty.js \
-    && pass "pty.js: persisted chat rows carry meta.transcriptUuid for dedup" \
-    || fail "pty.js: persisted chat rows missing meta.transcriptUuid"
+  grep -qF 'function persistAssistantTextToChat' server/src/attach.js \
+    && pass "attach.js: persistAssistantTextToChat defined" \
+    || fail "attach.js: persistAssistantTextToChat missing"
+  grep -qF "persistAssistantTextToChat(sessionId, newMsgs)" server/src/attach.js \
+    && pass "attach.js: transcript watcher mirrors assistant text into rec.chat" \
+    || fail "attach.js: transcript watcher does not mirror assistant text"
+  grep -qF 'meta: { transcriptUuid: m.uuid, fromTranscript: true }' server/src/attach.js \
+    && pass "attach.js: persisted chat rows carry meta.transcriptUuid for dedup" \
+    || fail "attach.js: persisted chat rows missing meta.transcriptUuid"
   # Client dedup: when chat-history already has a row with the same
   # uuid, the live transcript-delta path skips it so we don't render
   # the same reply twice on a reconnect.
@@ -2569,67 +2229,10 @@ test_chat_window() {
   grep -qF 'clearInterval(safetyPollTimer)' server/src/transcript.js \
     && pass "transcript.js: safety poll cleared on unsubscribe" \
     || fail "transcript.js: safety poll not cleared on unsubscribe"
-  # Regression: SPINNER_RUNNING_RE used to match both -ing and -ed
-  # verbs, so done-with-phase lines ("✻ Brewed for 1m 25s") kept the
-  # typing indicator alive long after claude went idle. Reported by
-  # the user as the dots refusing to stop. New regexes require -ing
-  # (active) and split out SPINNER_DONE_RE for the past tense shape.
-  if have_node; then
-    if node test/spinner-regex.test.js >/dev/null 2>&1; then
-      pass "test/spinner-regex.test.js (19 cases)"
-    else
-      fail "test/spinner-regex.test.js — re-run with 'node test/spinner-regex.test.js' to see failures"
-    fi
-  else
-    skip "test/spinner-regex.test.js (no host node)"
-  fi
-  grep -qF 'SPINNER_DONE_RE' server/src/pty-patterns.js \
-    && pass "pty-patterns.js: SPINNER_DONE_RE exported for past-tense phase lines" \
-    || fail "pty-patterns.js: SPINNER_DONE_RE not defined"
-  if have_node; then
-    node -e "
-      const { SPINNER_RUNNING_RE, SPINNER_DURATION_RE } = require('./server/src/pty-patterns');
-      const stuck = '✻ Brewed for 1m 25s';
-      if (SPINNER_RUNNING_RE.test(stuck) || SPINNER_DURATION_RE.test(stuck)) {
-        process.exit(1);
-      }
-    " >/dev/null 2>&1 \
-      && pass "pty-patterns: '✻ Brewed for 1m 25s' no longer treated as running" \
-      || fail "pty-patterns: stuck-indicator regex still matches done-phase summary"
-  fi
-  # Fix 1: periodic safety scan. The 250ms data-event debounce alone
-  # misses rapid back-to-back menus because it keeps resetting during
-  # a busy turn — a fixed-cadence scan guarantees no menu lives on
-  # screen longer than ~750ms without being hashed.
-  grep -qF 'setInterval(() => this._checkMenu(), 750)' server/src/pty.js \
-    && pass "pty.js: periodic 750ms menu safety scan" \
-    || fail "pty.js: periodic menu safety scan missing"
-  grep -qF '_periodicMenuScan' server/src/pty.js \
-    && pass "pty.js: periodic-scan timer field exists for cleanup" \
-    || fail "pty.js: _periodicMenuScan field missing"
-  grep -qF 'clearInterval(this._periodicMenuScan)' server/src/pty.js \
-    && pass "pty.js: periodic-scan timer cleared on pty exit" \
-    || fail "pty.js: periodic-scan timer not cleared on exit"
-  # Status emit is decoupled from menu-detect debounce (250ms) so that
-  # spinner/mode/token updates land on a tight 100ms trailing throttle.
-  # Pre-decouple, claude-status emits rode on _checkMenu's debounce —
-  # which during a busy turn kept resetting and never fired, so only
-  # the 750ms periodic scan got status out. On a 220ms-RTT mycobeta
-  # link that compounded to ~1s perceived lag per status step.
-  grep -qF '_emitStatusIfChanged' server/src/pty.js \
-    && pass "pty.js: status emit extracted into _emitStatusIfChanged helper" \
-    || fail "pty.js: _emitStatusIfChanged helper missing — status still coupled to menu debounce"
-  grep -qF '_statusThrottle' server/src/pty.js \
-    && pass "pty.js: separate _statusThrottle timer field" \
-    || fail "pty.js: _statusThrottle field missing — onData not driving its own status emit"
-  if awk '/this\.pty\.onData/,/^    \}\);/' server/src/pty.js | grep -qF '_statusThrottle = setTimeout'; then
-    pass "pty.js: onData schedules status emit on _statusThrottle"
-  else
-    fail "pty.js: onData not driving _statusThrottle — far-region status will still lag the menu debounce"
-  fi
-  grep -qF 'clearTimeout(this._statusThrottle)' server/src/pty.js \
-    && pass "pty.js: _statusThrottle cleared on pty exit (no leaked timer)" \
-    || fail "pty.js: _statusThrottle not cleared on exit"
+  # Phase 9 step 2 retired the PTY status-line scraper (spinner
+  # regexes, periodic _checkMenu scan, status throttle). Agent mode
+  # reports status via SDK system_init / iteration_start events
+  # instead — validated by the agent-session.test.js below.
   # Quick wire-level checks for the hash field carrying end-to-end.
   # Phase 2.5: hash now stamps onto the modal's option buttons via
   # btn.dataset.hash = m.hash, not the retired inline picker.
@@ -2639,16 +2242,13 @@ test_chat_window() {
   grep -qF 'optBtn.dataset.hash' web/public/app.js \
     && pass "app.js: modal click handler reads hash from option button" \
     || fail "app.js: modal click handler not reading hash"
-  # Regression (2026-05-15): the bare-digit chat shortcut for agent
-  # mode was calling session.resolveMenuPick directly, which only
-  # resolved the SDK's canUseTool promise but never marked the chat
-  # row answered. The chat row stayed in the modal queue forever and
-  # the next permission broadcast piled on top of a zombie. Route
+  # Regression (2026-05-15): the bare-digit chat shortcut routes
   # through handleMenuPick (which calls _markMenuChatAnswered first,
-  # THEN resolves the SDK promise) so both sides converge.
-  grep -Pzoq "(?i)bare-digit menu pick[\s\S]{0,2000}handleMenuPick\(sessionId" server/src/pty.js \
-    && pass "pty.js: bare-digit chat shortcut routes through handleMenuPick" \
-    || fail "pty.js: bare-digit chat shortcut bypasses handleMenuPick"
+  # THEN resolves the SDK promise) so the chat row gets stamped AND
+  # the SDK promise settles in one pass.
+  grep -Pzoq "(?i)bare-digit menu pick[\s\S]{0,2000}handleMenuPick\(sessionId" server/src/attach.js \
+    && pass "attach.js: bare-digit chat shortcut routes through handleMenuPick" \
+    || fail "attach.js: bare-digit chat shortcut bypasses handleMenuPick"
   # Companion regression: when claude broadcasts a NEW canUseTool
   # menu, mark any older still-unanswered rows superseded so they
   # don't haunt the modal queue.
@@ -2682,17 +2282,17 @@ test_chat_window() {
     || fail "app.js: menu frames silent-drop during reconnect"
   # The agent-mode WS handler (_attachAgentWebSocket) must handle the
   # menu-pick / menu-toggle / menu-submit frames. Without these branches
-  # every modal click on an agent-mode session is silently dropped at
-  # the WS boundary — verified live on mycobeta test006 2026-05-15.
-  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-pick'" server/src/pty.js \
-    && pass "pty.js: agent WS handles menu-pick frame" \
-    || fail "pty.js: agent WS missing menu-pick handler"
-  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-toggle'" server/src/pty.js \
-    && pass "pty.js: agent WS handles menu-toggle frame" \
-    || fail "pty.js: agent WS missing menu-toggle handler"
-  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-submit'" server/src/pty.js \
-    && pass "pty.js: agent WS handles menu-submit frame" \
-    || fail "pty.js: agent WS missing menu-submit handler"
+  # every modal click is silently dropped at the WS boundary — verified
+  # live on mycobeta test006 2026-05-15.
+  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-pick'" server/src/attach.js \
+    && pass "attach.js: agent WS handles menu-pick frame" \
+    || fail "attach.js: agent WS missing menu-pick handler"
+  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-toggle'" server/src/attach.js \
+    && pass "attach.js: agent WS handles menu-toggle frame" \
+    || fail "attach.js: agent WS missing menu-toggle handler"
+  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-submit'" server/src/attach.js \
+    && pass "attach.js: agent WS handles menu-submit frame" \
+    || fail "attach.js: agent WS missing menu-submit handler"
   # Multi-select AskUserQuestion: agent-session must mark each option
   # as a checkbox so the modal renders toggle buttons instead of
   # single-pick. Submit gathers all checked options and resolves with
@@ -2706,273 +2306,36 @@ test_chat_window() {
   grep -Pzoq "isMulti[^}]{0,300}checkbox: true" server/src/agent-session.js \
     && pass "agent-session: multi-select options flagged checkbox=true" \
     || fail "agent-session: multi-select options missing checkbox flag"
-  # Agent-mode toggle must NOT also call session.resolveMenuToggle —
-  # that would double-flip the option (the chat row's options array
-  # is the same object reference as the AgentSession's pending entry).
-  # Verified live on test006 2026-05-15: "checkbox is unchecked
-  # immediately after click on".
-  grep -Pzoq "session\.mode === 'agent'[\s\S]{0,400}_toggleMenuChatCheckbox" server/src/pty.js \
-    && pass "pty.js: handleMenuToggle has agent-mode branch (single flip via chat-checkbox)" \
-    || fail "pty.js: handleMenuToggle missing agent-mode single-flip branch"
-  grep -Pzoq "session\.mode === 'agent'[\s\S]{0,400}resolveMenuSubmit" server/src/pty.js \
-    && pass "pty.js: handleMenuSubmit has agent-mode branch" \
-    || fail "pty.js: handleMenuSubmit missing agent-mode branch"
+  # handleMenuToggle's only effect is _toggleMenuChatCheckbox (which
+  # flips opt.checked on the persisted chat row — and because the chat
+  # row's options array is the same object reference as the
+  # AgentSession's pending entry, the SDK side sees the flip too on
+  # submit). A second flip via session.resolveMenuToggle would double-
+  # apply and cancel the click — verified live test006 2026-05-15.
+  grep -qF "_toggleMenuChatCheckbox" server/src/attach.js \
+    && pass "attach.js: handleMenuToggle single-flips via _toggleMenuChatCheckbox" \
+    || fail "attach.js: handleMenuToggle missing single-flip path"
+  grep -qF "resolveMenuSubmit" server/src/attach.js \
+    && pass "attach.js: handleMenuSubmit resolves via AgentSession.resolveMenuSubmit" \
+    || fail "attach.js: handleMenuSubmit missing resolveMenuSubmit call"
   grep -qF "sendMenuPick(n, hash)" web/public/app.js \
     && pass "app.js: sendMenuPick accepts hash arg" \
     || fail "app.js: sendMenuPick signature missing hash"
-  grep -qF 'function handleMenuPick(sessionId, session, n, hash)' server/src/pty.js \
-    && pass "pty.js: handleMenuPick accepts hash" \
-    || fail "pty.js: handleMenuPick signature missing hash"
-  grep -qF 'pending.hash !== hash' server/src/pty.js \
-    && pass "pty.js: handleMenuPick validates hash against pendingMenu" \
-    || fail "pty.js: handleMenuPick hash validation missing"
-  grep -qF '_markMenuChatAnswered' server/src/pty.js \
-    && pass "pty.js: renamed persist helper (_markMenuChatAnswered)" \
-    || fail "pty.js: persist helper not renamed"
-  if have_node; then
-    node -e "
-      const { MenuInterceptor } = require('./server/src/menu-interceptor');
-      function fake(text) {
-        const lines = text.split('\n');
-        return { rows: lines.length, buffer: { active: { viewportY: 0, getLine: (y) => ({ translateToString: () => lines[y] || '' }) }}};
-      }
-      const i = new MenuInterceptor();
-      const plan = 'The plan is ready.\nWhat would you like to do?\n❯ 1. Yes, proceed with this plan\n  2. No, keep planning';
-      const r = i.detectChange(fake(plan));
-      if (!r || r.kind !== 'newMenu') throw new Error('expected newMenu, got ' + JSON.stringify(r));
-      if (r.menu.kind !== 'plan') throw new Error('expected kind=plan, got ' + r.menu.kind);
-      if (r.menu.options.length !== 2) throw new Error('expected 2 options, got ' + r.menu.options.length);
-      const r2 = i.detectChange(fake(plan));
-      if (!r2 || r2.kind !== 'sameMenu') throw new Error('expected sameMenu on repeat, got ' + JSON.stringify(r2));
-      const r3 = i.detectChange(fake('boring text no menu'));
-      if (!r3 || r3.kind !== 'cleared') throw new Error('expected cleared, got ' + JSON.stringify(r3));
-    " && pass "MenuInterceptor parses plan dialog + dedupes + clears" \
-      || fail "MenuInterceptor parses plan dialog + dedupes + clears"
-  else
-    skip "MenuInterceptor parser (no host node)"
-  fi
-  # Regression: Claude Code's trust-folder dialog on first-run renders
-  # near the TOP of a tall alt-screen (~33+ rows on Android phones). The
-  # interceptor used to scan only the bottom 16 rows and miss it entirely,
-  # leaving the user stuck on "Waiting for session to start…" because no
-  # menu broadcast ever fired. _scan now walks the entire visible
-  # viewport.
-  if have_node; then
-    node -e "
-      const { MenuInterceptor } = require('./server/src/menu-interceptor');
-      // Trust dialog at rows 5-19 of a 40-row terminal — options at
-      // rows 17-18, well above the old bottom-16 (rows 24-39) window.
-      const rows = 40;
-      const lines = new Array(rows).fill('');
-      lines[5]  = ' Accessing workspace:';
-      lines[7]  = ' /wks/kkrazy/Demo003';
-      lines[9]  = ' Quick safety check: Is this a project you trust?';
-      lines[12] = ' Claude Code will be able to read, edit, and execute files here.';
-      lines[14] = ' Security guide';
-      lines[16] = ' ❯ 1. Yes, I trust this folder';
-      lines[17] = '   2. No, exit';
-      lines[19] = ' Enter to confirm';
-      const fake = {
-        rows,
-        buffer: { active: { viewportY: 0, getLine: (y) => lines[y] != null ? ({ translateToString: () => lines[y] }) : null }},
-      };
-      const r = (new MenuInterceptor()).detectChange(fake);
-      if (!r || r.kind !== 'newMenu') throw new Error('trust dialog at top: expected newMenu, got ' + JSON.stringify(r));
-      if (r.menu.options.length !== 2) throw new Error('trust dialog options: expected 2, got ' + r.menu.options.length);
-      if (!/trust this folder/i.test(r.menu.options[0].label)) throw new Error('option 1 label wrong: ' + r.menu.options[0].label);
-    " && pass "MenuInterceptor finds trust dialog at top of tall viewport" \
-      || fail "MenuInterceptor finds trust dialog at top of tall viewport"
-  else
-    skip "MenuInterceptor trust-dialog (no host node)"
-  fi
-  # Regression: claude code's WebSearch-permission dialog renders option 2
-  # WITHOUT a space after the dot ("2.Yes, and don't ask again for Web
-  # Search"). The previous /(?=\s)/ lookahead rejected this marker, the
-  # scanner found only one option (n=1), and the menu was missed entirely.
-  # The fix is /(?!\d)/ — still blocks decimals like "3.5" but allows a
-  # letter to immediately follow the dot.
-  if have_node; then
-    node -e "
-      const { MenuInterceptor } = require('./server/src/menu-interceptor');
-      const lines = [];
-      lines.push(' Tool use');
-      lines.push('');
-      lines.push('   Web Search(\"Shenzhen weather\")');
-      lines.push('   Claude wants to search the web for: Shenzhen weather');
-      lines.push('');
-      lines.push(' Do you want to proceed?');
-      lines.push(' ❯ 1. Yes');                                       // option 1 (well-formed)
-      lines.push('  2.Yes, and don\\'t ask again for Web Search');   // option 2 (no space after dot)
-      const rows = 20;
-      while (lines.length < rows) lines.push('');
-      const fake = {
-        rows,
-        buffer: { active: { viewportY: 0, getLine: (y) => lines[y] != null ? ({ translateToString: () => lines[y] }) : null }},
-      };
-      const r = (new MenuInterceptor()).detectChange(fake);
-      if (!r || r.kind !== 'newMenu') throw new Error('expected newMenu for malformed 2.Yes, got ' + JSON.stringify(r));
-      if (r.menu.options.length !== 2) throw new Error('expected 2 options, got ' + r.menu.options.length);
-      if (r.menu.options[1].n !== 2) throw new Error('expected option 2, got ' + r.menu.options[1].n);
-      if (!/yes/i.test(r.menu.options[1].label)) throw new Error('option 2 label wrong: ' + r.menu.options[1].label);
-      // Decimals must NOT match — guard against the regex relaxation
-      // accidentally allowing 'i have 3.5 reasons' as a menu marker.
-      const proseLines = [' I have 3.5 reasons to refactor this.', ' Section 2.0 has details.'];
-      while (proseLines.length < rows) proseLines.push('');
-      const fake2 = {
-        rows,
-        buffer: { active: { viewportY: 0, getLine: (y) => proseLines[y] != null ? ({ translateToString: () => proseLines[y] }) : null }},
-      };
-      const r2 = (new MenuInterceptor()).detectChange(fake2);
-      if (r2 && r2.kind === 'newMenu') throw new Error('decimals should NOT match as menu markers: ' + JSON.stringify(r2));
-    " && pass "MenuInterceptor handles missing-space-after-dot + rejects decimals" \
-      || fail "MenuInterceptor handles missing-space-after-dot + rejects decimals"
-  else
-    skip "MenuInterceptor missing-space (no host node)"
-  fi
-  # Regression: claude code's ultraplan-interview dialog has multi-line
-  # option descriptions plus a horizontal divider between option 4 and
-  # option 5. The old "gap ≤ 2 lines between markers" rule rejected it
-  # entirely. After bumping MENU_MAX_OPTION_GAP_LINES and joining
-  # continuation lines, all 6 options should be detected and their
-  # descriptions folded into the label.
-  if have_node; then
-    node -e "
-      const { MenuInterceptor } = require('./server/src/menu-interceptor');
-      const lines = [];
-      lines.push(' What kind of sample task should this plan be for?');
-      lines.push('');
-      lines.push(' ❯ 1. Add a hello-world script');
-      lines.push('      Create a tiny script in the working');
-      lines.push('      directory');
-      lines.push('   2. Add a README stub');
-      lines.push('      Create a minimal README.md');
-      lines.push('   3. No-op demo plan');
-      lines.push('      Don\\'t actually change anything — just');
-      lines.push('      demonstrate the flow');
-      lines.push('   4. Type something.');
-      lines.push('────────────────────────────────────────────');
-      lines.push('   5. Chat about this');
-      lines.push('   6. Skip interview and plan immediately');
-      const rows = 30;
-      while (lines.length < rows) lines.push('');
-      const fake = {
-        rows,
-        buffer: { active: { viewportY: 0, getLine: (y) => lines[y] != null ? ({ translateToString: () => lines[y] }) : null }},
-      };
-      const r = (new MenuInterceptor()).detectChange(fake);
-      if (!r || r.kind !== 'newMenu') throw new Error('ultraplan dialog: expected newMenu, got ' + JSON.stringify(r));
-      if (r.menu.options.length !== 6) throw new Error('expected 6 options, got ' + r.menu.options.length);
-      // Labels are intentionally single-line (we no longer fold the
-      // description continuations — TUI key hints kept bloating
-      // labels with 'shift+tab to approve / ctrl-g to edit in Vim …').
-      // Make sure each option's label is just the first-line text and
-      // doesn't contain a description's text.
-      if (r.menu.options[0].label !== 'Add a hello-world script') throw new Error('option 1 label changed shape: ' + r.menu.options[0].label);
-      if (/working directory/i.test(r.menu.options[0].label)) throw new Error('option 1 leaks description into label');
-      if (r.menu.options[2].label !== 'No-op demo plan') throw new Error('option 3 label changed shape: ' + r.menu.options[2].label);
-      // Options 5 and 6 (across the divider) must still be present.
-      if (!/chat about this/i.test(r.menu.options[4].label)) throw new Error('option 5 missing: ' + r.menu.options[4].label);
-      if (!/skip interview/i.test(r.menu.options[5].label)) throw new Error('option 6 missing: ' + r.menu.options[5].label);
-    " && pass "MenuInterceptor parses ultraplan-style menu (single-line labels + divider)" \
-      || fail "MenuInterceptor parses ultraplan-style menu (single-line labels + divider)"
-  else
-    skip "MenuInterceptor ultraplan (no host node)"
-  fi
-  # Regression: a claude assistant plan body that contains numbered
-  # bullet points (1., 2., 3., …) must NOT be detected as a menu, even
-  # if the bullets are contiguously numbered. The signal that
-  # distinguishes a real TUI menu from prose is the `❯` cursor on the
-  # selected option's line. Without this guard, claude's own plans
-  # popped a "🤔 Claude is waiting on a decision" callout asking the
-  # user to "pick" a plan bullet.
-  if have_node; then
-    node -e "
-      const { MenuInterceptor } = require('./server/src/menu-interceptor');
-      // Plan body with numbered bullets, no cursor — must be rejected.
-      const plan = [
-        ' Heres the plan:',
-        '',
-        ' 1. Database — notification schema',
-        ' 2. Message bus — Redis pub/sub',
-        ' 3. Worker consumes events → persists',
-        ' 4. WS Gateway — JWT auth on upgrade',
-        ' 5. Client SDK — exponential backoff reconnect',
-        ' 6. Inbox UI — list + unread badge',
-      ];
-      const rows = 30;
-      while (plan.length < rows) plan.push('');
-      const fakePlan = { rows, buffer: { active: { viewportY: 0,
-        getLine: (y) => plan[y] != null ? ({ translateToString: () => plan[y] }) : null }}};
-      const r = (new MenuInterceptor()).detectChange(fakePlan);
-      if (r && r.kind === 'newMenu') throw new Error('plan bullet body falsely detected as menu: ' + JSON.stringify(r));
-      // Same content with cursor on one bullet → should detect.
-      const planWithCursor = plan.slice();
-      planWithCursor[5] = ' ❯ 4. WS Gateway — JWT auth on upgrade';
-      const fakeMenu = { rows, buffer: { active: { viewportY: 0,
-        getLine: (y) => planWithCursor[y] != null ? ({ translateToString: () => planWithCursor[y] }) : null }}};
-      const r2 = (new MenuInterceptor()).detectChange(fakeMenu);
-      if (!r2 || r2.kind !== 'newMenu') throw new Error('cursor-marked menu rejected: ' + JSON.stringify(r2));
-    " && pass "MenuInterceptor rejects bullet-prose without ❯ cursor" \
-      || fail "MenuInterceptor rejects bullet-prose without ❯ cursor"
-  else
-    skip "MenuInterceptor cursor-guard (no host node)"
-  fi
-  # Regression (demo010 04:24): assistant turn renders a plan body
-  # containing numbered bullets (1..6) followed by claude code's real
-  # plan-confirmation menu (1..4 with ❯ cursor). Old code collected
-  # ALL options [1..6, 1..4] and bailed at the 6→1 discontinuity, so
-  # the active menu was never broadcast. Splitting into runs and
-  # picking the cursored one fixes it.
-  if have_node; then
-    node -e "
-      const { MenuInterceptor } = require('./server/src/menu-interceptor');
-      const lines = [];
-      // Plan body — numbered prose, NO cursor:
-      lines.push(' 1. Database — notification schema');
-      lines.push(' 2. Message bus — Redis pub/sub');
-      lines.push(' 3. Worker — consumes events');
-      lines.push(' 4. WS Gateway — JWT auth');
-      lines.push(' 5. Client SDK — reconnect/backoff');
-      lines.push(' 6. Inbox UI — list + unread badge');
-      lines.push('');
-      lines.push(' ---');
-      lines.push(' Files to Create / Modify');
-      lines.push('');
-      lines.push(' - .github/workflows/ci.yml');
-      lines.push('');
-      lines.push(' Claude has written up a plan and is ready to execute. Would you like to proceed?');
-      lines.push('');
-      // Real menu — cursored:
-      lines.push(' ❯ 1. Yes, and use auto mode');
-      lines.push('   2. Yes, manually approve edits');
-      lines.push('   3. No, refine with Ultraplan on Claude Code on the web');
-      lines.push('   4. Tell Claude what to change');
-      lines.push('      shift+tab to approve with this feedback');
-      const rows = 50;
-      while (lines.length < rows) lines.push('');
-      const fake = { rows, buffer: { active: { viewportY: 0,
-        getLine: (y) => lines[y] != null ? ({ translateToString: () => lines[y] }) : null }}};
-      const r = (new MenuInterceptor()).detectChange(fake);
-      if (!r || r.kind !== 'newMenu') throw new Error('expected newMenu for cursored bottom run, got ' + JSON.stringify(r));
-      if (r.menu.options.length !== 4) throw new Error('expected 4 options (the real menu), got ' + r.menu.options.length + ': ' + JSON.stringify(r.menu.options.map(o=>o.n)));
-      if (r.menu.options[0].n !== 1) throw new Error('expected first option n=1, got ' + r.menu.options[0].n);
-      if (!/auto mode/i.test(r.menu.options[0].label)) throw new Error('option 1 label wrong: ' + r.menu.options[0].label);
-      // The plan bullets must not appear in the labels.
-      for (const o of r.menu.options) {
-        if (/database|redis pub|client sdk|inbox ui/i.test(o.label)) throw new Error('plan bullet leaked into option label: ' + o.label);
-      }
-    " && pass "MenuInterceptor picks cursored run when prose bullets are above" \
-      || fail "MenuInterceptor picks cursored run when prose bullets are above"
-  else
-    skip "MenuInterceptor mixed-runs (no host node)"
-  fi
-  grep -q "handleChatMessage" server/src/pty.js && pass "handleChatMessage in pty.js" || fail "handleChatMessage in pty.js"
+  grep -qF 'function handleMenuPick(sessionId, session, n, hash)' server/src/attach.js \
+    && pass "attach.js: handleMenuPick accepts hash" \
+    || fail "attach.js: handleMenuPick signature missing hash"
+  grep -qF '_markMenuChatAnswered' server/src/attach.js \
+    && pass "attach.js: persist helper present (_markMenuChatAnswered)" \
+    || fail "attach.js: persist helper missing"
+  # Phase 9 step 2 retired MenuInterceptor (no PTY to scrape). Menu
+  # detection now lives inside AgentSession.canUseTool — covered by
+  # agent-session.test.js below.
+  grep -q "handleChatMessage" server/src/attach.js && pass "handleChatMessage in attach.js" || fail "handleChatMessage in attach.js"
   grep -q "handleChatMessage" server/src/index.js && pass "handleChatMessage imported by /run route" || fail "handleChatMessage imported"
-  # Regression: while a TUI menu is pending in the session, an @myco
-  # message must not just blindly inject text on top of it. A pure digit
-  # picks that option; anything else cancels (Esc) the menu first.
-  grep -q "menu pick" server/src/pty.js && pass "@myco digit shortcuts to menu pick" || fail "@myco digit shortcut missing"
-  grep -q "cancelling pending menu" server/src/pty.js && pass "@myco cancels pending menu for new instructions" || fail "@myco menu-cancel missing"
+  # Bare-digit menu pick: while an AgentSession.pendingMenu is open, a
+  # plain "1" / "2" answers it via handleMenuPick (resolves SDK promise
+  # AND stamps the chat row). Verified in attach.js's handleChatPostfixes.
+  grep -q "menu pick" server/src/attach.js && pass "@myco digit shortcuts to menu pick" || fail "@myco digit shortcut missing"
   # Regression: parseStringArray must tolerate code fences + non-JSON.
   if have_node; then
     node -e "

@@ -183,13 +183,14 @@ t('ExitPlanMode jsonl line lands in chat via parseLine → persist', () => {
   assert.strictEqual(chat[0].meta.transcriptUuid, 'plan-end-to-end-uuid');
 });
 
-// The live pty.js implementation IS the contract — verify the source
-// file actually contains the helper and it's wired into the watcher
-// callback. If a future refactor removes either, this test red-flips.
-t('pty.js source has the persistAssistantTextToChat helper', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'pty.js'), 'utf8');
+// The live attach.js implementation IS the contract — verify the
+// source file actually contains the helper and it's wired into the
+// watcher callback. If a future refactor removes either, this test
+// red-flips. (Helper moved from pty.js → attach.js in Phase 9 step 2.)
+t('attach.js source has the persistAssistantTextToChat helper', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'attach.js'), 'utf8');
   assert.ok(/function persistAssistantTextToChat/.test(src),
-    'helper definition missing from pty.js');
+    'helper definition missing from attach.js');
   assert.ok(/persistAssistantTextToChat\(sessionId, newMsgs\)/.test(src),
     'helper not invoked from the transcript watcher callback');
   assert.ok(/meta:\s*\{\s*transcriptUuid:\s*m\.uuid/.test(src),

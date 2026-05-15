@@ -11,7 +11,9 @@ const githubMod = require('./github');
 const slashcmds = require('./slashcmds');
 const oauth = require('./oauth');
 const crypto = require('crypto');
-const { attachWebSocket, attachViewerWebSocket, getSession: getPtySession, handleChatMessage } = require('./pty');
+// SDK Phase 9 step 2: PTY driver is gone. attach.js is the agent-only
+// WS attach + chat plumbing layer.
+const { attachWebSocket, attachViewerWebSocket, getSession: getPtySession, handleChatMessage } = require('./attach');
 const artifactsRoutes = require('./artifacts');
 const {
   isAuthRequired, userFromRequest, userFromToken,

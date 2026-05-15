@@ -4,7 +4,10 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const ptyMod = require('./pty');
+// SDK Phase 9: PTY driver is retired. attach.js owns the WS attach +
+// chat plumbing for AgentSessions; the local name stays `ptyMod` for
+// minimal-diff readability until the next pass through sessions.js.
+const ptyMod = require('./attach');
 
 // ─── workspace ───────────────────────────────────────────────────────────────
 
@@ -446,11 +449,10 @@ async function spawnSession(rawCwd, user = 'default', opts = {}) {
   const rows = clamp(opts.rows, 10, 200, 30);
   const createdAt = new Date().toISOString();
 
-  // SDK Phase 9 (in flight): new sessions are agent-only. Existing
-  // rec.mode='pty' records still respawn via the PTY driver in
-  // ensureLiveSession until pty.js is deleted in Phase 9 step 2;
-  // this code path only governs FRESH spawns. The fleet-wide
-  // env-var rollback hatch is gone — agent is the only spawn mode.
+  // SDK Phase 9 step 2: PTY driver is gone. Agent is the only spawn
+  // mode. The early reject keeps a clear error if some legacy caller
+  // still passes opts.mode='pty'; without it the code would silently
+  // create an agent session and the caller's mental model would drift.
   if (opts.mode === 'pty') {
     throw new Error('PTY mode is retired (Phase 9). New sessions are agent-mode only. Spawn without a mode field.');
   }
@@ -466,16 +468,9 @@ async function spawnSession(rawCwd, user = 'default', opts = {}) {
   // local changes (we never rewrite an existing sentinel block).
   injectBestPracticesIntoClaudeMd(absCwd);
 
-  if (mode === 'agent') {
-    const { spawnAgent } = require('./agent-session');
-    const session = spawnAgent(id, { cwd: absCwd, cols, rows });
-    ptyMod._registerExternalSession(id, session);
-    return { id, cwd: record.cwd, mode };
-  }
-
-  const spawnedAt = Date.now();
-  ptyMod.spawnClaude(id, { cwd: absCwd, cols, rows });
-  captureClaudeSessionId(id, absCwd, spawnedAt);
+  const { spawnAgent } = require('./agent-session');
+  const session = spawnAgent(id, { cwd: absCwd, cols, rows });
+  ptyMod._registerExternalSession(id, session);
   return { id, cwd: record.cwd, mode };
 }
 
@@ -537,96 +532,57 @@ async function ensureLiveSession(sessionId) {
   const rec = getSessionRecord(sessionId);
   if (!rec) throw new Error(`unknown session: ${sessionId}`);
 
-  // SDK Phase 9: any session that isn't explicitly mode='pty' runs as
-  // an agent session. Legacy records with rec.mode unset are migrated
-  // in place — their pre-Phase-8 claudeSessionId becomes the
-  // sdkSessionId so the SDK's resume picks up the same JSONL
-  // transcript (the SDK + claude-cli share the
-  // ~/.claude/projects/<enc>/<uuid>.jsonl storage).
-  if (rec.mode !== 'pty') {
-    if (rec.mode !== 'agent') {
-      rec.mode = 'agent';
-      if (!rec.sdkSessionId && rec.claudeSessionId) rec.sdkSessionId = rec.claudeSessionId;
-      saveStore();
-      console.log(`[ensureLive] migrated ${sessionId} mode=(unset)→agent sdk=${(rec.sdkSessionId || '').slice(0,8) || 'none'}`);
-    }
-    // One-shot lazy migration of the SDK's auto-memory dir from the
-    // pre-2026-05-15 default ($HOME/.claude/projects/<encoded-cwd>/
-    // memory/) into the per-session folder (<absCwd>/.claude/memory/).
-    // Runs before spawnAgent so the SDK's first read finds the
-    // migrated files. Idempotent — once the destination exists we
-    // skip. No-op for sessions that never had legacy memory or for
-    // brand-new sessions whose memory was always per-session.
-    try {
-      const migrated = _migrateLegacyMemory(rec.absCwd);
-      if (migrated) console.log(`[ensureLive] migrated ${migrated} memory file(s) into ${rec.absCwd}/.claude/memory/ for ${sessionId}`);
-    } catch (err) {
-      console.error(`[ensureLive] memory migration failed for ${sessionId}: ${err.message}`);
-    }
-    const { spawnAgent } = require('./agent-session');
-    const session = spawnAgent(sessionId, {
-      cwd: rec.absCwd,
-      resumeSdkSessionId: rec.sdkSessionId || null,
-    });
-    ptyMod._registerExternalSession(sessionId, session);
-    console.log(`[ensureLive] respawned agent for ${sessionId} cwd=${rec.absCwd} resume=${rec.sdkSessionId || 'none'}`);
-    // Zombie menu cleanup. A respawned AgentSession has a fresh
-    // _pendingPermissions Map (no in-flight canUseTool callbacks
-    // carry across a server restart). Any chat row still flagged
-    // kind=menu without answered/superseded refers to a promise
-    // that no live receiver could resolve — clicking it would just
-    // log `handled=false` and the modal queue would keep showing
-    // it forever. Stamp them all .superseded so the user's chat
-    // is a clean slate after a deploy.
-    try {
-      if (typeof ptyMod._supersedeStaleMenus === 'function') {
-        ptyMod._supersedeStaleMenus(sessionId);
-        console.log(`[ensureLive] swept stale chat menus for respawned agent ${sessionId}`);
-      }
-    } catch (err) {
-      console.error(`[ensureLive] supersede sweep failed: ${err.message}`);
-    }
-    return session;
+  // SDK Phase 9 step 2: every session is an AgentSession. Legacy records
+  // (rec.mode unset, rec.mode='pty') are migrated in place — their
+  // pre-Phase-8 claudeSessionId becomes the sdkSessionId so the SDK's
+  // resume picks up the same JSONL transcript (the SDK + claude-cli
+  // share the ~/.claude/projects/<enc>/<uuid>.jsonl storage).
+  if (rec.mode !== 'agent') {
+    rec.mode = 'agent';
+    if (!rec.sdkSessionId && rec.claudeSessionId) rec.sdkSessionId = rec.claudeSessionId;
+    saveStore();
+    console.log(`[ensureLive] migrated ${sessionId} mode=(unset)→agent sdk=${(rec.sdkSessionId || '').slice(0,8) || 'none'}`);
   }
-
-  // Only capture transcript session ID on first connect (no cached ID yet).
-  // After that, the spawn + captureClaudeSessionId handles updates.
-  if (!rec.claudeSessionId) {
-    try {
-      const dir = path.join(projectsDir(), encodeCwdForClaude(rec.absCwd));
-      const newest = await findNewestJsonl(dir);
-      if (newest) {
-        let id = newest.file.replace(/\.jsonl$/, '');
-        if (id === 'transcript') {
-          const m = newest.full.match(/\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i);
-          id = m ? m[1] : id;
-        }
-        if (isClaudeSessionId(id)) {
-          rec.claudeSessionId = id;
-          saveStore();
-          console.log(`[ensureLive] captured claudeSessionId=${id} for ${sessionId}`);
-        }
-      }
-    } catch {}
+  // One-shot lazy migration of the SDK's auto-memory dir from the
+  // pre-2026-05-15 default ($HOME/.claude/projects/<encoded-cwd>/
+  // memory/) into the per-session folder (<absCwd>/.claude/memory/).
+  // Runs before spawnAgent so the SDK's first read finds the migrated
+  // files. Idempotent — once the destination exists we skip.
+  try {
+    const migrated = _migrateLegacyMemory(rec.absCwd);
+    if (migrated) console.log(`[ensureLive] migrated ${migrated} memory file(s) into ${rec.absCwd}/.claude/memory/ for ${sessionId}`);
+  } catch (err) {
+    console.error(`[ensureLive] memory migration failed for ${sessionId}: ${err.message}`);
   }
-
-  // Resume the last Claude session if we have an ID
-  const resumeId = rec.claudeSessionId || null;
-
-  // Top up the project's CLAUDE.md before resume. Idempotent (no-op
-  // if the sentinel already exists). Catches the case where the
-  // project was set up before this feature shipped, or someone hand-
-  // deleted the block — claude reads CLAUDE.md on every (re)spawn so
-  // the resumed session picks up the fresh content.
+  // Top up the project's CLAUDE.md before resume. Idempotent (no-op if
+  // the sentinel already exists). Catches the case where the project
+  // was set up before this feature shipped, or someone hand-deleted the
+  // block — claude reads CLAUDE.md on every (re)spawn so the resumed
+  // session picks up the fresh content.
   injectBestPracticesIntoClaudeMd(rec.absCwd);
-
-  console.log(`[ensureLive] spawning claude for ${sessionId} cwd=${rec.absCwd} resume=${resumeId || 'none'}`);
-  return ptyMod.spawnClaude(sessionId, {
+  const { spawnAgent } = require('./agent-session');
+  const session = spawnAgent(sessionId, {
     cwd: rec.absCwd,
-    resumeId,
-    cols: 120,
-    rows: 30,
+    resumeSdkSessionId: rec.sdkSessionId || null,
   });
+  ptyMod._registerExternalSession(sessionId, session);
+  console.log(`[ensureLive] respawned agent for ${sessionId} cwd=${rec.absCwd} resume=${rec.sdkSessionId || 'none'}`);
+  // Zombie menu cleanup. A respawned AgentSession has a fresh
+  // _pendingPermissions Map (no in-flight canUseTool callbacks carry
+  // across a server restart). Any chat row still flagged kind=menu
+  // without answered/superseded refers to a promise that no live
+  // receiver can resolve — clicking it would just log handled=false and
+  // the modal queue would keep showing it forever. Stamp them all
+  // .superseded so the user's chat is a clean slate after a deploy.
+  try {
+    if (typeof ptyMod._supersedeStaleMenus === 'function') {
+      ptyMod._supersedeStaleMenus(sessionId);
+      console.log(`[ensureLive] swept stale chat menus for respawned agent ${sessionId}`);
+    }
+  } catch (err) {
+    console.error(`[ensureLive] supersede sweep failed: ${err.message}`);
+  }
+  return session;
 }
 
 function deleteSession(sessionId) {

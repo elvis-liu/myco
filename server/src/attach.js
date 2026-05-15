@@ -1,0 +1,789 @@
+// SDK Phase 9 step 2: agent-only attach + chat plumbing.
+//
+// Replaces the legacy server/src/pty.js. Everything PTY-specific
+// (PtySession, spawnClaude, headless xterm, menu-interceptor, wizard
+// detection, replay buffer, PTY-flavored attachWebSocket /
+// attachViewerWebSocket) is gone. Sessions are uniformly agent-mode
+// (AgentSession from ./agent-session.js); this module is just the WS
+// transport + chat routing layer on top.
+//
+// Public surface (consumed by index.js, sessions.js, menu.js,
+// slashcmds.js, tests):
+//   sessions Map (sessionId → session object) — registered via
+//     _registerExternalSession when sessions.spawnSession spins up
+//     an AgentSession.
+//   getSession(id), killSession(id), _registerExternalSession(id, s)
+//   attachWebSocket(session, ws, opts)  — owner connection
+//   attachViewerWebSocket(session, ws, opts) — read-only share-link
+//   handleChatMessage(sessionId, session, user, text)
+//   handleMenuPick / handleMenuToggle / handleMenuSubmit — chat-pane
+//     modal popup click handlers, route the click to the AgentSession's
+//     resolveMenuPick/Toggle/Submit (no PTY navigation).
+//   _detectMentionTarget — chat-routing test hook.
+//   _supersedeStaleMenus — menu.js + sessions.js zombie cleanup.
+
+// Late-bound: sessions.js requires this module, so destructuring at load
+// time would capture undefined values from the partial export.
+const sessionsMod = require('./sessions');
+const { askAssistant, shouldAskAssistant, ASSISTANT_USER } = require('./btw');
+const menuMod = require('./menu');
+const slashcmds = require('./slashcmds');
+const transcriptMod = require('./transcript');
+const authMod = require('./auth');
+// Late-bound: requiring artifacts.js at module load time pulled
+// extractor.js into the partial-load window of the
+// sessions.js ↔ attach.js cycle. extractor.js destructures
+// { projectsDir, encodeCwdForClaude, getChatHistory } from sessions —
+// which at that point hadn't yet evaluated its module.exports
+// assignment, so the destructured names were undefined. Resolve lazily
+// inside _sendAttachSnapshot via this getter so the require runs AFTER
+// all cycle modules have finished loading.
+let _artifactsMod = null;
+function getArtifactsMod() {
+  if (!_artifactsMod) _artifactsMod = require('./artifacts');
+  return _artifactsMod;
+}
+
+// "@<word> <body>" chat messages — legacy alias for "talk to claude".
+// Originally PTY-routed via "@myco"/"@claude"; with PTY gone the prefix
+// is still stripped so chat habits keep working but the body is just
+// forwarded to AgentSession.write().
+const CHAT_ALIAS_PREFIX_RE = /^@([A-Za-z][\w-]{0,30})\s+([\s\S]+)/;
+
+const CHAT_TEXT_LIMIT = 4000;
+const ASSISTANT_SCROLLBACK_LINES = 40;
+const ASSISTANT_CHAT_CONTEXT = 20;
+
+// sessionId → AgentSession (or any session-shaped object registered via
+// _registerExternalSession). Module-level Map so getSession/attachWebSocket
+// /state-update plumbing all hit the same store.
+const sessions = new Map();
+
+function _isKnownChatUser(word) {
+  if (!word) return false;
+  const w = word.toLowerCase();
+  try {
+    for (const u of authMod.listUsernames()) {
+      if (String(u || '').toLowerCase() === w) return true;
+    }
+  } catch {}
+  try {
+    const allow = authMod.loadAllowlist();
+    if (allow && typeof allow.has === 'function') {
+      for (const u of allow) {
+        if (String(u || '').toLowerCase() === w) return true;
+      }
+    }
+  } catch {}
+  return false;
+}
+
+// Return the canonical username if `text` starts with `@<known-user>`
+// (optionally followed by a body). Used by handleChatMessage to short-
+// circuit chat-only mentions so they're stamped + persisted without
+// being forwarded to claude.
+//
+// Matches `@kkrazy`, `@kkrazy hi there`, `@kkrazy, …` (trailing punct OK).
+// Does NOT match `@myco` / `@claude` / any other non-username @<word> —
+// those keep routing to claude for backwards-compat power-user habits.
+function _detectMentionTarget(text) {
+  const m = String(text || '').match(/^@([A-Za-z][\w-]{0,30})\b/);
+  if (!m) return null;
+  return _isKnownChatUser(m[1]) ? m[1] : null;
+}
+
+function getSession(sessionId) {
+  return sessions.get(sessionId) || null;
+}
+
+// Register a session object (currently always AgentSession from
+// server/src/agent-session.js). Lets the WS attach + state-update + chat
+// plumbing find it via the module-local `sessions` map and wires the
+// session's 'menu' event into menuMod.handleSessionMenu so canUseTool
+// fires propagate into chat-pane menu cards.
+function _registerExternalSession(sessionId, session) {
+  sessions.set(sessionId, session);
+  if (typeof session.on === 'function') {
+    session.on('menu', (menu) => menuMod.handleSessionMenu(sessionId, session, menu));
+    session.on('exit', () => {
+      setTimeout(() => {
+        const cur = sessions.get(sessionId);
+        if (cur === session) sessions.delete(sessionId);
+      }, 250);
+    });
+  }
+  return session;
+}
+
+function killSession(sessionId) {
+  const s = sessions.get(sessionId);
+  if (s) { try { s.kill(); } catch {} sessions.delete(sessionId); }
+}
+
+// Handle a `{t:'menu-pick', n, hash?}` frame from the client — the
+// modal-popup button click. In agent-mode the resolveMenuPick callback
+// on the AgentSession settles the pending SDK canUseTool promise; we
+// ALSO stamp the chat row's meta.answered + meta.pickedN so a refresh
+// shows the picker as resolved.
+function handleMenuPick(sessionId, session, n, hash) {
+  if (!Number.isFinite(n) || n < 1 || n > 9) return;
+  _markMenuChatAnswered(sessionId, n, hash);
+  if (!session || !session.alive) {
+    console.log(`[menu-pick] ${sessionId} silent-drop: session not alive (n=${n})`);
+    return;
+  }
+  if (typeof session.resolveMenuPick === 'function' && hash) {
+    const handled = session.resolveMenuPick(hash, n);
+    console.log(`[menu-pick] ${sessionId} hash=${hash.slice(-12)} n=${n} handled=${handled}`);
+    return;
+  }
+  console.log(`[menu-pick] ${sessionId} silent-drop: no resolveMenuPick (n=${n} hash=${hash || 'none'})`);
+}
+
+// Multi-select toggle: flip checkbox <n>'s checked flag. The
+// AgentSession's pending.options array is the SAME object reference as
+// the chat row's menu.options, so _toggleMenuChatCheckbox's single
+// in-place mutation propagates to both the persisted record AND the
+// live pending entry that resolveMenuSubmit reads from later. No
+// double-flip — see the 2026-05-15 test006 regression note in the old
+// pty.js for the symptom this guards against.
+function handleMenuToggle(sessionId, session, n, hash) {
+  if (!Number.isFinite(n) || n < 1 || n > 9) return;
+  if (!session || !session.alive) return;
+  if (hash) {
+    _toggleMenuChatCheckbox(sessionId, n, hash);
+    console.log(`[menu-toggle] ${sessionId} hash=${hash.slice(-12)} n=${n}`);
+  }
+}
+
+// Multi-select submit: AgentSession.resolveMenuSubmit gathers checked
+// options + settles the SDK promise with comma-separated labels (the
+// documented multi-select answer format).
+function handleMenuSubmit(sessionId, session, hash) {
+  if (!session || !session.alive) return;
+  if (typeof session.resolveMenuSubmit === 'function' && hash) {
+    _markMenuChatAnswered(sessionId, 0, hash, /*submit*/ true);
+    const handled = session.resolveMenuSubmit(hash);
+    console.log(`[menu-submit] ${sessionId} hash=${hash.slice(-12)} handled=${handled}`);
+    return;
+  }
+  console.log(`[menu-submit] ${sessionId} silent-drop: no resolveMenuSubmit (hash=${hash || 'none'})`);
+}
+
+// Mirror assistant text from the transcript stream into rec.chat so
+// the chat pane survives a refresh / new tab / readonly attach.
+// Idempotent via meta.transcriptUuid: each jsonl entry has a stable
+// `uuid`, so multiple WS connections persisting the same stream
+// (owner + viewer + reconnects) only land each row once.
+function persistAssistantTextToChat(sessionId, newMsgs) {
+  if (!Array.isArray(newMsgs) || !newMsgs.length) return;
+  const store = sessionsMod.loadStore();
+  const rec = store.sessions[sessionId];
+  if (!rec) return;
+  if (!Array.isArray(rec.chat)) rec.chat = [];
+  const seen = new Set();
+  for (const c of rec.chat) {
+    if (c && c.meta && c.meta.transcriptUuid) seen.add(c.meta.transcriptUuid);
+  }
+  const session = sessions.get(sessionId);
+  let mirrored = 0, skipped = 0;
+  for (const m of newMsgs) {
+    if (!m || m.role !== 'assistant') continue;
+    if (!m.text || !m.text.trim()) { skipped++; continue; }
+    if (!m.uuid) { skipped++; continue; }
+    if (seen.has(m.uuid)) { skipped++; continue; }
+    seen.add(m.uuid);
+    const reply = {
+      user: 'claude',
+      text: m.text.trim(),
+      ts: m.ts || new Date().toISOString(),
+      meta: { transcriptUuid: m.uuid, fromTranscript: true },
+    };
+    sessionsMod.appendChatMessage(sessionId, reply);
+    let listenerCount = 0;
+    if (session) {
+      listenerCount = session.listenerCount('chat');
+      session.emit('chat', reply);
+    }
+    console.log(`[persist-chat-emit] ${sessionId} uuid=${String(m.uuid).slice(0, 8)} listeners=${listenerCount} textLen=${reply.text.length}`);
+    mirrored++;
+  }
+  if (mirrored > 0) {
+    console.log(`[persist-chat] ${sessionId} mirrored=${mirrored} skipped=${skipped} (rec.chat now ${rec.chat.length})`);
+  }
+}
+
+// Stamp answered + pickedN onto a menu-broadcast chat row. When `hash`
+// is provided, find the row whose `meta.menu.hash` equals it (race-free
+// across multiple unanswered menus). When omitted, fall back to "latest
+// unanswered". For multi-select submit: pass submit=true with n=0; the
+// row gets answered=true with no pickedN, and the chat picker reads the
+// per-option `checked` flags on the persisted menu to render the
+// "✓ Submitted with [a, c]" summary.
+function _markMenuChatAnswered(sessionId, n, hash, submit) {
+  if (!sessionId) return;
+  try {
+    const store = sessionsMod.loadStore();
+    const rec = store.sessions[sessionId];
+    if (!rec || !Array.isArray(rec.chat)) return;
+    for (let i = rec.chat.length - 1; i >= 0; i--) {
+      const m = rec.chat[i];
+      if (!m || !m.meta || m.meta.kind !== 'menu') continue;
+      if (hash) {
+        const mh = m.meta.menu && m.meta.menu.hash;
+        if (mh !== hash) continue;
+        if (m.meta.answered) return;
+      } else {
+        if (m.meta.answered) return;
+      }
+      if (!submit) {
+        const opts = (m.meta.menu && m.meta.menu.options) || [];
+        if (!opts.some((o) => o.n === n)) return;
+        m.meta.pickedN = n;
+      } else {
+        m.meta.submitted = true;
+      }
+      m.meta.answered = true;
+      sessionsMod.saveStore();
+      _emitMenuStateUpdate(sessionId, m);
+      console.log(`[menu-pick] ${sessionId} stamped answered=true ${submit ? 'submitted' : `pickedN=${n}`}${hash ? ' (byHash)' : ''}`);
+      return;
+    }
+  } catch (err) {
+    console.error(`[menu-pick] persist failed for ${sessionId}: ${err.message}`);
+  }
+}
+
+// Walk the chat history and stamp every unanswered, unsuperseded menu
+// row with meta.superseded = true. Called from menu.js before
+// broadcasting a fresh menu, and from sessions.ensureLiveSession after
+// respawning an agent — any chat row still flagged kind=menu without
+// answered/superseded refers to a canUseTool promise that no live
+// receiver can resolve, so we collapse it to a one-line resolved card.
+function _supersedeStaleMenus(sessionId) {
+  if (!sessionId) return;
+  try {
+    const store = sessionsMod.loadStore();
+    const rec = store.sessions[sessionId];
+    if (!rec || !Array.isArray(rec.chat)) return;
+    let changed = false;
+    for (let i = rec.chat.length - 1; i >= 0; i--) {
+      const m = rec.chat[i];
+      if (!m || !m.meta || m.meta.kind !== 'menu') continue;
+      if (m.meta.answered) continue;
+      if (m.meta.superseded) continue;
+      m.meta.superseded = true;
+      changed = true;
+      _emitMenuStateUpdate(sessionId, m);
+    }
+    if (changed) sessionsMod.saveStore();
+  } catch (err) {
+    console.error(`[menu-supersede] failed for ${sessionId}: ${err.message}`);
+  }
+}
+
+// Push a menu row's updated meta to every attached client. The chat
+// pane locates the row by transcriptUuid (the stable per-message id
+// stamped at broadcast time) and re-renders that single row in place.
+function _emitMenuStateUpdate(sessionId, m) {
+  if (!m || !m.meta) return;
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  const hash = (m.meta.menu && m.meta.menu.hash) || null;
+  const listenerCount = typeof session.listenerCount === 'function'
+    ? session.listenerCount('state-update') : 0;
+  console.log(`[state-update] ${sessionId} kind=menu pickedN=${m.meta.pickedN} answered=${!!m.meta.answered} superseded=${!!m.meta.superseded} listeners=${listenerCount} hash=${hash ? hash.slice(0, 60) : 'null'}`);
+  session.emit('state-update', {
+    kind: 'menu',
+    messageUuid: m.meta.transcriptUuid || null,
+    hash,
+    meta: m.meta,
+  });
+}
+
+// Flip the `checked` flag on option <n> of the multi-select chat row
+// matching `hash`. No "answered" stamp — the row stays interactive
+// until the user hits Submit. Persisted so a reconnect/refresh sees the
+// most recent UI state.
+function _toggleMenuChatCheckbox(sessionId, n, hash) {
+  if (!sessionId) return;
+  try {
+    const store = sessionsMod.loadStore();
+    const rec = store.sessions[sessionId];
+    if (!rec || !Array.isArray(rec.chat)) return;
+    for (let i = rec.chat.length - 1; i >= 0; i--) {
+      const m = rec.chat[i];
+      if (!m || !m.meta || m.meta.kind !== 'menu') continue;
+      const mh = m.meta.menu && m.meta.menu.hash;
+      if (hash && mh !== hash) continue;
+      if (m.meta.answered) return;
+      const opts = (m.meta.menu && m.meta.menu.options) || [];
+      const opt = opts.find((o) => o.n === n);
+      if (!opt || !opt.checkbox) return;
+      opt.checked = !opt.checked;
+      sessionsMod.saveStore();
+      _emitMenuStateUpdate(sessionId, m);
+      return;
+    }
+  } catch (err) {
+    console.error(`[menu-toggle] persist failed for ${sessionId}: ${err.message}`);
+  }
+}
+
+// Wire transcript messages from a session's JSONL file to a websocket.
+// Handles the new-session race: a freshly spawned claude takes ~5s to
+// write its first JSONL line, so resolveTranscriptPath returns null on
+// the initial attach. We send transcript-waiting, then poll every 3s
+// until the path resolves, then stream transcript-init followed by
+// transcript-delta on every appended message.
+//
+// Returns a cleanup function the caller wires onto ws.on('close').
+function streamTranscriptToWs(sessionId, ws) {
+  let pollTimer = null;
+  let unwatch = null;
+  let closed = false;
+  let watchingPath = null;
+  const session = sessions.get(sessionId);
+
+  function startWatching(filePath) {
+    watchingPath = filePath;
+    transcriptMod.readNewMessages(filePath, 0).then(({ messages, bytesRead }) => {
+      if (closed || ws.readyState !== ws.OPEN) return;
+      ws.send(JSON.stringify({ t: 'transcript-init', messages, bytes: bytesRead }));
+      persistAssistantTextToChat(sessionId, messages);
+      if (session && typeof session.ingestTranscriptForToolProgress === 'function') {
+        session.ingestTranscriptForToolProgress(messages);
+      }
+      unwatch = transcriptMod.watchTranscript(filePath, (newMsgs) => {
+        if (!closed && ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({ t: 'transcript-delta', messages: newMsgs }));
+        }
+        persistAssistantTextToChat(sessionId, newMsgs);
+        if (session && typeof session.ingestTranscriptForToolProgress === 'function') {
+          session.ingestTranscriptForToolProgress(newMsgs);
+        }
+      }, { startByte: bytesRead });
+    }).catch(() => {});
+  }
+
+  const initialPath = transcriptMod.resolveTranscriptPath(sessionId);
+  if (initialPath) {
+    startWatching(initialPath);
+  } else {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'transcript-waiting' }));
+  }
+
+  pollTimer = setInterval(() => {
+    if (closed || ws.readyState !== ws.OPEN) {
+      clearInterval(pollTimer); pollTimer = null; return;
+    }
+    const p = transcriptMod.resolveTranscriptPath(sessionId);
+    if (!p || p === watchingPath) return;
+    console.log(`[transcript-rebind] ${sessionId} ${watchingPath || '(none)'} -> ${p}`);
+    if (unwatch) { try { unwatch(); } catch {} unwatch = null; }
+    startWatching(p);
+  }, 3000);
+
+  return function cleanup() {
+    closed = true;
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (unwatch) { try { unwatch(); } catch {} unwatch = null; }
+  };
+}
+
+// Owner WS attach. Streams the AgentSession's structured SDK events as
+// `agent-event` frames, replays the per-session event ring on attach so
+// reconnects see prior context, and routes chat / menu frames back into
+// handleChatMessage / handleMenuPick(Toggle|Submit).
+function attachWebSocket(session, ws, opts = {}) {
+  return _attachAgentWebSocket(session, ws, opts);
+}
+
+function _attachAgentWebSocket(session, ws, opts = {}) {
+  const user = opts.user || null;
+  const sessionId = session.sessionId;
+
+  if (Array.isArray(session.buffer) && session.buffer.length) {
+    ws.send(JSON.stringify({ t: 'agent-replay', events: session.buffer }));
+  }
+  console.log(`[agent-attach] ${sessionId} user=${user || 'unknown'} mode=agent replay-events=${(session.buffer || []).length} sdk-session=${session.sdkSessionId || 'none'}`);
+  if (session.sdkSessionId && !session._iterating && (!session.buffer || !session.buffer.length)) {
+    console.log(`[agent-resume] ${sessionId} ready to resume sdk-session=${session.sdkSessionId} on next user message`);
+  }
+
+  const history = sessionsMod.getChatHistory(sessionId);
+  if (history.length) {
+    ws.send(JSON.stringify({ t: 'chat-history', messages: history }));
+  }
+
+  if (session._initSnapshot) {
+    ws.send(JSON.stringify({ t: 'agent-init', snapshot: session._initSnapshot }));
+  }
+
+  _sendAttachSnapshot(session, ws);
+
+  const onAgentEvent = (event) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'agent-event', event }));
+  };
+  const onChat = (message) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'chat', message }));
+  };
+  const onStateUpdate = (payload) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'state-update', ...payload }));
+  };
+  const onExit = (code) => {
+    if (ws.readyState !== ws.OPEN) return;
+    ws.send(JSON.stringify({ t: 'exit', code }));
+  };
+
+  session.on('agent-event', onAgentEvent);
+  session.on('chat', onChat);
+  session.on('state-update', onStateUpdate);
+  session.on('exit', onExit);
+
+  ws.on('message', (raw) => {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.t === 'ping') {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'pong' }));
+      return;
+    }
+    if (msg.t === 'chat' && typeof msg.text === 'string' && user) {
+      const text = msg.text.trim();
+      if (text) handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT));
+      return;
+    }
+    if (msg.t === 'menu-pick' && Number.isFinite(msg.n)) {
+      const hashTag = typeof msg.hash === 'string' ? msg.hash.slice(-12) : 'no-hash';
+      console.log(`[ws-frame] ${sessionId} t=menu-pick n=${msg.n} hash=${hashTag} user=${user || '(anon)'}`);
+      if (user) handleMenuPick(sessionId, session, msg.n | 0, typeof msg.hash === 'string' ? msg.hash : null);
+      return;
+    }
+    if (msg.t === 'menu-toggle' && Number.isFinite(msg.n)) {
+      const hashTag = typeof msg.hash === 'string' ? msg.hash.slice(-12) : 'no-hash';
+      console.log(`[ws-frame] ${sessionId} t=menu-toggle n=${msg.n} hash=${hashTag}`);
+      if (user) handleMenuToggle(sessionId, session, msg.n | 0, typeof msg.hash === 'string' ? msg.hash : null);
+      return;
+    }
+    if (msg.t === 'menu-submit') {
+      const hashTag = typeof msg.hash === 'string' ? msg.hash.slice(-12) : 'no-hash';
+      console.log(`[ws-frame] ${sessionId} t=menu-submit hash=${hashTag}`);
+      if (user) handleMenuSubmit(sessionId, session, typeof msg.hash === 'string' ? msg.hash : null);
+      return;
+    }
+    if (msg.t === 'resize' && Number.isFinite(msg.cols) && Number.isFinite(msg.rows)) {
+      session.resize(msg.cols, msg.rows);
+    }
+  });
+
+  ws.on('close', () => {
+    session.off('agent-event', onAgentEvent);
+    session.off('chat', onChat);
+    session.off('state-update', onStateUpdate);
+    session.off('exit', onExit);
+  });
+}
+
+// Send the per-session state snapshot to a freshly-attached WS. Used
+// for BOTH attachWebSocket (owner) and attachViewerWebSocket. Lets every
+// chat-pane / readonly view land at parity with the live session without
+// waiting for the next on-change emit.
+//
+// Frame order matches the live channels so the client's existing
+// handlers can replay them transparently:
+//   1. claude-status — spinner + token chips + interrupt badge. Always
+//      sent; status===null means "idle, clear the strip."
+//   2. mode-snapshot — current mode pill (agent sessions stay 'default'
+//      unless the SDK reports otherwise via _lastMode).
+//   3. artifacts-init — full plan/test/arch artifacts so the artifact
+//      tabs are instant on switch + always in sync. Read priority is
+//      <project>/_myco_/<type>.<ext> (canonical, shared via git) then
+//      in-memory rec.artifacts as fallback — same priority the GET
+//      /artifact route uses (artifacts.js).
+//   4. tool-progress state-update — in-flight openToolCalls so the
+//      "waiting on Tool · 47s" indicator paints immediately on attach.
+function _sendAttachSnapshot(session, ws) {
+  if (!ws || ws.readyState !== ws.OPEN) return;
+  try {
+    const status = session._lastStatus || null;
+    const text = status && status.text ? status.text : null;
+    ws.send(JSON.stringify({ t: 'claude-status', text, status }));
+  } catch {}
+  try {
+    ws.send(JSON.stringify({ t: 'mode-snapshot', mode: session._lastMode || 'default' }));
+  } catch {}
+  try {
+    const sessionId = session.sessionId;
+    const rec = sessionsMod.getSessionRecord(sessionId);
+    if (!rec) return;
+    const artifacts = {};
+    for (const type of ['plan', 'test', 'arch']) {
+      const fromFile = getArtifactsMod().__test.readArtifactFromFile(rec, type);
+      const inMem = rec.artifacts && rec.artifacts[type];
+      const picked = fromFile || inMem || null;
+      if (picked) artifacts[type] = picked;
+    }
+    ws.send(JSON.stringify({ t: 'artifacts-init', artifacts }));
+  } catch (err) {
+    console.error(`[attach-snapshot] artifacts-init failed: ${err.message}`);
+  }
+  try {
+    if (session.openToolCalls && session.openToolCalls.size >= 0) {
+      const now = Date.now();
+      const open = [];
+      for (const [id, info] of session.openToolCalls) {
+        open.push({
+          id,
+          name: info.name,
+          summary: info.summary,
+          sinceMs: Math.max(0, now - new Date(info.ts).getTime()),
+        });
+      }
+      ws.send(JSON.stringify({ t: 'state-update', kind: 'tool-progress', open }));
+    }
+  } catch {}
+}
+
+// Read-only share-link attach. Streams chat history + transcript +
+// snapshot + state mutations, but does NOT forward agent-event frames
+// (those carry tool inputs that may be sensitive). Viewers can post
+// chat and pick menu rows — chat is the collaborative steering channel.
+function attachViewerWebSocket(session, ws, opts = {}) {
+  const user = opts.user || null;
+  const sessionId = session.sessionId;
+
+  const history = sessionsMod.getChatHistory(sessionId);
+  if (history.length) {
+    ws.send(JSON.stringify({ t: 'chat-history', messages: history }));
+  }
+  _sendAttachSnapshot(session, ws);
+
+  const onChat = (message) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'chat', message }));
+  };
+  const onStateUpdate = (payload) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'state-update', ...payload }));
+  };
+  session.on('chat', onChat);
+  session.on('state-update', onStateUpdate);
+
+  const ownerLogin = sessionsMod.getSessionRecord(sessionId)?.user || null;
+  ws.send(JSON.stringify({ t: 'viewer-mode', owner: ownerLogin }));
+
+  const stopTranscript = streamTranscriptToWs(sessionId, ws);
+
+  function handleViewerInbound(raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.t === 'ping' && ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ t: 'pong' }));
+    }
+    if (msg.t === 'chat' && typeof msg.text === 'string' && user) {
+      const text = msg.text.trim();
+      if (text) handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT));
+    }
+    if (msg.t === 'menu-pick' && Number.isFinite(msg.n) && user) {
+      handleMenuPick(sessionId, session, msg.n | 0, typeof msg.hash === 'string' ? msg.hash : null);
+    }
+    if (msg.t === 'menu-toggle' && Number.isFinite(msg.n) && user) {
+      handleMenuToggle(sessionId, session, msg.n | 0, typeof msg.hash === 'string' ? msg.hash : null);
+    }
+    if (msg.t === 'menu-submit' && user) {
+      handleMenuSubmit(sessionId, session, typeof msg.hash === 'string' ? msg.hash : null);
+    }
+  }
+
+  ws.on('message', handleViewerInbound);
+  ws.on('close', () => {
+    session.off('chat', onChat);
+    session.off('state-update', onStateUpdate);
+    stopTranscript();
+  });
+}
+
+// Route an inbound chat frame.
+//   * `@<known-user> <body>` — stamp meta, persist, no agent forward.
+//   * `/<slash-cmd>` — dispatch via slashcmds. Unknown slash commands
+//     bounce back with an explanatory chat note instead of being
+//     forwarded as a literal claude message (the agent would just
+//     reply "Unknown command: /foo").
+//   * `/btw <text>` / "@myco do…" with shouldAskAssistant → runs the
+//     side-channel claude-cli via btw.askAssistant (no agent forward).
+//   * Special key tokens (esc, ctrl-c) → AgentSession.interrupt(). Other
+//     keys (enter, tab, …) have no SDK equivalent; we bounce them.
+//   * Bare digit `1`-`9` while a pendingMenu is open → handleMenuPick
+//     so the SDK promise resolves AND the chat row is stamped.
+//   * EVERYTHING ELSE → session.write(body) so claude consumes it.
+function handleChatMessage(sessionId, session, user, text) {
+  const message = {
+    user,
+    text,
+    ts: new Date().toISOString(),
+  };
+  const mentionTarget = _detectMentionTarget(text);
+  if (mentionTarget && user !== ASSISTANT_USER) {
+    message.meta = { kind: 'mention', mentionUser: mentionTarget };
+  }
+  sessionsMod.appendChatMessage(sessionId, message);
+  session.emit('chat', message);
+
+  if (user === ASSISTANT_USER) return;
+  if (mentionTarget) return;
+
+  // /task, /skip, /cancel — internal task-list controls. Rewrite to the
+  // "@myco /task" form that the agent's CLAUDE.md teaches it to parse.
+  const taskList = text.match(/^\/tasks?\s*$/i);
+  if (taskList) text = '@myco /task';
+  const taskAction = text.match(/^\/(skip|cancel)\s+(\d+)\s*$/i);
+  if (taskAction) text = `@myco /${taskAction[1].toLowerCase()} ${taskAction[2]}`;
+
+  if (text.startsWith('/')) {
+    const rec = sessionsMod.loadStore().sessions[sessionId];
+    const absCwd = rec && rec.absCwd;
+    const ctx = {
+      user,
+      sessionId,
+      absCwd,
+      session,
+      reply: (replyText, opts = {}) => {
+        const replyMsg = {
+          user: ASSISTANT_USER,
+          text: String(replyText || ''),
+          ts: new Date().toISOString(),
+        };
+        if (opts && opts.meta) replyMsg.meta = opts.meta;
+        sessionsMod.appendChatMessage(sessionId, replyMsg);
+        session.emit('chat', replyMsg);
+      },
+    };
+    slashcmds.dispatch(ctx, text).then((handled) => {
+      if (handled) return;
+      handleChatPostfixes(sessionId, session, user, text, message);
+    });
+    return;
+  }
+
+  handleChatPostfixes(sessionId, session, user, text, message);
+}
+
+// Non-slash routing fallthrough — separate function so the slash path
+// can chain into it after dispatch() returns false.
+function handleChatPostfixes(sessionId, session, user, text, message) {
+  if (shouldAskAssistant(text)) {
+    runAssistant(sessionId, session, message).catch((err) => {
+      console.error(`[chat-assistant] ${err.message}`);
+    });
+    return;
+  }
+  // Strip a leading @<non-user-word> alias prefix so "@myco hi" / "@claude
+  // hi" keeps working — _detectMentionTarget already ruled out real users
+  // before we got here.
+  const aliasPrefix = text.match(CHAT_ALIAS_PREFIX_RE);
+  const body = aliasPrefix ? aliasPrefix[2] : text;
+  if (!session.alive) {
+    session.emit('chat', {
+      user: ASSISTANT_USER,
+      text: '(this Claude session has exited — reopen the session to continue)',
+      ts: new Date().toISOString(),
+    });
+    return;
+  }
+  const input = String(body || '').trim();
+  if (!input) return;
+
+  if (input.startsWith('/')) {
+    session.emit('chat', {
+      user: ASSISTANT_USER,
+      text: '(unknown chat command `/' + input.split(/\s+/)[0].slice(1) + '` — `/help` lists what\'s available)',
+      ts: new Date().toISOString(),
+    });
+    return;
+  }
+
+  // Special-key tokens. Only the interrupt-style keys map cleanly to
+  // SDK semantics (AbortSignal). Enter/space/tab don't exist as
+  // concepts in the SDK stream — they get logged + ignored with an
+  // explanatory chat note so the user understands.
+  const key = input.toLowerCase();
+  if (key === 'esc' || key === 'escape' || key === 'ctrl-c' || key === '^c') {
+    console.log(`[chat→agent] ${user}: <interrupt:${input}>`);
+    if (typeof session.interrupt === 'function') session.interrupt();
+    session.emit('chat', {
+      user: ASSISTANT_USER,
+      text: '(interrupt sent — the in-flight Claude turn was aborted. Type your next message to continue from where the conversation left off.)',
+      ts: new Date().toISOString(),
+    });
+    return;
+  }
+  const noopKeys = new Set(['enter', 'return', 'space', 'tab', 'shift-tab', 'shift+tab']);
+  if (noopKeys.has(key)) {
+    console.log(`[chat→agent] ${user}: <key-noop:${input}> (SDK has no terminal-key equivalent)`);
+    session.emit('chat', {
+      user: ASSISTANT_USER,
+      text: `(\`${input}\` has no meaning in an agent-mode session — claude consumes messages, not keystrokes. Type a question / instruction instead, or \`esc\` to interrupt.)`,
+      ts: new Date().toISOString(),
+    });
+    return;
+  }
+
+  // Bare-digit menu pick for the most recently broadcast menu. Delegate
+  // to handleMenuPick so we get BOTH effects:
+  //   (1) session.resolveMenuPick — unblocks the SDK's canUseTool
+  //       promise so claude can proceed
+  //   (2) _markMenuChatAnswered — stamps the chat row's meta.pickedN +
+  //       meta.answered and emits a state-update to all clients
+  const asDigit = /^[1-9]$/.test(input) ? parseInt(input, 10) : NaN;
+  if (Number.isFinite(asDigit) && session.pendingMenu) {
+    const hash = session.pendingMenu.hash;
+    if (hash) {
+      console.log(`[chat→agent] ${user}: menu pick ${asDigit} (chat shorthand, hash=${hash.slice(-12)})`);
+      handleMenuPick(sessionId, session, asDigit, hash);
+      return;
+    }
+  }
+
+  // Normal forward — pushes into the SDK streaming-input queue.
+  console.log(`[chat→agent] ${user}: ${input.substring(0, 80)}`);
+  session.write(input);
+}
+
+async function runAssistant(sessionId, session, lastMessage) {
+  const all = sessionsMod.getChatHistory(sessionId);
+  const chatHistory = all.slice(-ASSISTANT_CHAT_CONTEXT - 1, -1);
+  // Agent sessions don't expose a raw PTY scrollback; we pass the
+  // assistant a recent chat tail in lieu of one. The side-channel
+  // claude-cli relies on it being a string, so the empty string is the
+  // safe default.
+  const scrollback = '';
+  const cwd = sessionsMod.loadStore().sessions[sessionId]?.absCwd || null;
+
+  const answer = await askAssistant({ cwd, chatHistory, scrollback, lastMessage });
+  const reply = {
+    user: ASSISTANT_USER,
+    text: answer || '(no response)',
+    ts: new Date().toISOString(),
+  };
+  sessionsMod.appendChatMessage(sessionId, reply);
+  session.emit('chat', reply);
+}
+
+module.exports = {
+  getSession,
+  killSession,
+  attachWebSocket,
+  attachViewerWebSocket,
+  handleChatMessage,
+  _registerExternalSession,
+  handleMenuPick,
+  handleMenuToggle,
+  handleMenuSubmit,
+  _detectMentionTarget,
+  _supersedeStaleMenus,
+  // Re-export menu helpers so callers that historically grabbed them off
+  // ptyMod continue to find them.
+  handleSessionMenu: menuMod.handleSessionMenu,
+  broadcastMenuToChat: menuMod.broadcastMenuToChat,
+};
