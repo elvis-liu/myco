@@ -1180,33 +1180,23 @@ function openSession(id, opts = {}) {
 
   const isMobile = window.innerWidth <= 900;
   if (isShared) {
+    // Shared / read-only viewers still see the structured JSONL
+    // transcript pane — that's still meaningful for sessions started
+    // before Phase 9 retired PTY mode, and harmless for fresh agent
+    // sessions (the conv pane just stays empty when no transcript is
+    // streamed). Owners drop straight into the chatpane below.
     showConversationView();
     const conv = document.getElementById('conv-content');
     if (conv) conv.innerHTML = '<div class="conv-waiting">Connecting…</div>';
-  } else if (isMobile) {
-    // Mobile owner default: skip the readonly-viewer auto-flip entirely
-    // and land in the chat pane. The chat pane fills the whole main
-    // area at ≤900px (per the mobile media query) — it IS the default
-    // view on phones. The xterm is still built so 👁 has a target when
-    // the user explicitly flips to readonly later.
-    _initOwnerXterm();
-  } else {
-    // Desktop owner default: build the xterm so the 👁 toggle has a
-    // target to flip back to, but land on the readonly transcript view
-    // by default. Combined with the default-on chat pane
-    // (state.chatPaneVisible = true on desktop boot), the user sees the
-    // structured transcript on the left and the chat on the right in a
-    // 50/50 split — both surfaces they actually drive interaction from.
-    _initOwnerXterm();
-    showConversationView();
-    state.previewAsViewer = true;
-    document.getElementById('btn-preview-readonly')?.classList.add('active');
   }
-  // Open the chat pane:
-  //   - mobile  (≤900px): unconditionally — chat is the primary view
-  //   - desktop (≥1200px): yes — 50/50 split alongside the transcript
-  //   - tablet  (901–1199): keep closed; user toggles 💬 if wanted
-  if (isMobile || window.innerWidth >= 1200) setChatPane(true);
+  // Phase 9 step 2 (post-deploy fix 2026-05-15): for owners, the
+  // chatpane IS the session view. There's no xterm to flip to, the
+  // JSONL conversation-wrap has nothing to show for agent-mode
+  // sessions (they emit structured events, not raw transcripts), and
+  // the prior tablet-width branch (no auto-open) left users staring
+  // at a blank #conversation-wrap. Always open the chatpane on
+  // owner attach, every width.
+  if (!isShared) setChatPane(true);
 
   // websocket with auto-reconnect. `connect` is closure-bound to `id` and
   // `qs` so reconnect-after-close stays on this session; the `state.ws !==
