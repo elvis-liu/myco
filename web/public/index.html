@@ -191,14 +191,12 @@
         <input id="spawn-cwd" type="text" placeholder="e.g. 'rust experiment' (the actual folder is auto-named after the session id)" autocomplete="off" maxlength="80" title="Friendly label shown in the sessions list. The session always runs in /wks/<you>/<session-id>/." />
       </label>
       <div id="spawn-suggestions"></div>
-      <!-- Driver toggle. Default (unchecked) = Claude Agent SDK
-           since phase 8 of the agent-sdk-research migration. Check to
-           opt into the legacy claude-CLI-in-PTY path (a fallback for
-           anything broken in agent mode). -->
-      <label id="spawn-mode-label" title="Tick to spawn the legacy claude-CLI-in-PTY session. Default is the SDK-driven agent session with structured events + chat-pane menu cards.">
-        <input id="spawn-mode-pty" type="checkbox" />
-        <span>Legacy PTY (claude CLI fallback)</span>
-      </label>
+      <!-- Phase 9 retired the PTY driver toggle. Every new session is
+           agent-mode (Claude Agent SDK). The legacy checkbox is gone
+           from the markup; the JS lookup in app.js stays defensive
+           (optional-chain) for cached pages that still render the
+           old shell. -->
+      <input id="spawn-mode-pty" type="hidden" value="" />
       <div id="spawn-error" hidden></div>
       <div id="spawn-actions">
         <button id="spawn-cancel">Cancel</button>

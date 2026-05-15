@@ -1364,6 +1364,25 @@ test_new_session_readonly() {
   grep -Pzoq "#chatpane-resize\s*\{\s*display:\s*none" web/public/styles.css \
     && pass "styles.css: legacy chatpane-resize handle hidden (Phase 3)" \
     || fail "styles.css: chatpane-resize still visible"
+  # SDK Phase 9 (step 1): spawnSession rejects new mode='pty' requests.
+  # The legacy PTY path still works for EXISTING rec.mode='pty' records
+  # via ensureLiveSession until the actual code deletion lands, but
+  # the spawn-modal checkbox is hidden + new spawns are agent-only.
+  grep -q "PTY mode is being retired (Phase 9)" server/src/sessions.js \
+    && pass "sessions.js: spawnSession rejects mode=pty (Phase 9)" \
+    || fail "sessions.js: spawnSession still accepts mode=pty"
+  ! grep -q 'spawn-mode-label\|"spawn-mode-pty" type="checkbox"' web/public/index.html \
+    && pass "index.html: PTY-checkbox label retired from spawn modal" \
+    || fail "index.html: PTY-checkbox label still in spawn modal"
+  grep -q "rec.mode !== 'pty'" server/src/sessions.js \
+    && pass "sessions.js: ensureLiveSession treats unset/missing mode as agent" \
+    || fail "sessions.js: ensureLiveSession still falls through to PTY for unset mode"
+  # Migration helper script for legacy rec.mode='pty' (or unset)
+  # records. Idempotent; dry-run friendly. Lives at the repo root next
+  # to migrate-plan-ids.js.
+  test -x migrate-pty-to-agent.js \
+    && pass "migrate-pty-to-agent.js script present + executable" \
+    || fail "migrate-pty-to-agent.js missing or not executable"
   grep -Pzoq "_migrateLegacyMemory\(rec\.absCwd\)[\s\S]{0,800}spawnAgent" server/src/sessions.js \
     && pass "sessions.js: ensureLiveSession invokes _migrateLegacyMemory before spawnAgent" \
     || fail "sessions.js: ensureLiveSession does not run the memory migration"

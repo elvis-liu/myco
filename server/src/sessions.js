@@ -458,9 +458,16 @@ async function spawnSession(rawCwd, user = 'default', opts = {}) {
   //                 To force the old default fleet-wide (escape hatch
   //                 if agent mode regresses): set the env var
   //                 MYCO_DEFAULT_MODE=pty on the running container.
-  const explicit = opts.mode === 'pty' || opts.mode === 'agent' ? opts.mode : null;
-  const envDefault = process.env.MYCO_DEFAULT_MODE === 'pty' ? 'pty' : 'agent';
-  const mode = explicit || envDefault;
+  // SDK Phase 9 (in flight): new sessions are agent-only. We still
+  // honour persisted rec.mode='pty' on EXISTING sessions so legacy
+  // ensureLiveSession respawns aren't broken; but the spawn path
+  // rejects fresh PTY requests with a clear error rather than
+  // silently deprecating. The MYCO_DEFAULT_MODE=pty escape hatch is
+  // also gone — there's no fleet-wide rollback to the PTY default.
+  if (opts.mode === 'pty') {
+    throw new Error('PTY mode is being retired (Phase 9). New sessions are agent-mode only. Spawn without {"mode":"pty"}.');
+  }
+  const mode = 'agent';
 
   const record = { id, user, cwd: toRel(absCwd, user), absCwd, label, claudeSessionId: null, createdAt, mode };
   putSession(record);
@@ -543,12 +550,19 @@ async function ensureLiveSession(sessionId) {
   const rec = getSessionRecord(sessionId);
   if (!rec) throw new Error(`unknown session: ${sessionId}`);
 
-  // Agent-mode session (phase 1+ of the agent-sdk-research migration).
-  // The previous AgentSession died (server restart, process exit, etc.) —
-  // respawn one with resume=rec.sdkSessionId so the SDK conversation
-  // continues from where it left off. No JSONL-watcher dance needed —
-  // the SDK owns its own session-id semantics.
-  if (rec.mode === 'agent') {
+  // SDK Phase 9: any session that isn't explicitly mode='pty' runs as
+  // an agent session. Legacy records with rec.mode unset are migrated
+  // in place — their pre-Phase-8 claudeSessionId becomes the
+  // sdkSessionId so the SDK's resume picks up the same JSONL
+  // transcript (the SDK + claude-cli share the
+  // ~/.claude/projects/<enc>/<uuid>.jsonl storage).
+  if (rec.mode !== 'pty') {
+    if (rec.mode !== 'agent') {
+      rec.mode = 'agent';
+      if (!rec.sdkSessionId && rec.claudeSessionId) rec.sdkSessionId = rec.claudeSessionId;
+      saveStore();
+      console.log(`[ensureLive] migrated ${sessionId} mode=(unset)→agent sdk=${(rec.sdkSessionId || '').slice(0,8) || 'none'}`);
+    }
     // One-shot lazy migration of the SDK's auto-memory dir from the
     // pre-2026-05-15 default ($HOME/.claude/projects/<encoded-cwd>/
     // memory/) into the per-session folder (<absCwd>/.claude/memory/).
