@@ -578,6 +578,16 @@ test_best_practices_template() {
   grep -q "menuMod.handleSessionMenu" server/src/pty.js \
     && pass "pty.js: _registerExternalSession wires 'menu' to menuMod" \
     || fail "pty.js: _registerExternalSession wires 'menu' to menuMod"
+  # Phase 3: structured event renderer for agent-mode sessions.
+  grep -q "agent-card-claude\|agent-card-tool\|agent-card-result" web/public/styles.css \
+    && pass "styles.css: agent-card-* event-card styles present" \
+    || fail "styles.css: agent-card-* event-card styles present"
+  grep -q "_AGENT_TOOL_ICONS\|_agentToolIcon" web/public/app.js \
+    && pass "app.js: per-tool icon map present" \
+    || fail "app.js: per-tool icon map present"
+  grep -q "agent-card-md\|agent-card-collapse" web/public/app.js \
+    && pass "app.js: rich event-card renderer present" \
+    || fail "app.js: rich event-card renderer present"
   # dedupePlanItems prompt enrichment: project CLAUDE.md + auto-memory
   # are inlined ahead of the item list so the LLM has project-specific
   # context when judging "same underlying concern".

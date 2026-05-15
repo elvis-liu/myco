@@ -2762,13 +2762,13 @@ function _applyModeSnapshot(mode) {
 //   { kind: 'tool-progress', open: [{ id, name, summary, sinceMs }] }
 //   { kind: 'chat-clear' }   // /clear slash command — wipe local chat
 
-// ── agent-mode session rendering (phase 1) ──────────────────────────────
+// ── agent-mode session rendering (phase 3) ──────────────────────────────
 //
-// Bare-bones event-log pane for SDK-driven sessions. Phase 3 will
-// replace this with a rich structured renderer that treats text /
-// tool_use / tool_result / result events as first-class cards.
-// Today's job: prove the pipeline end-to-end and give users something
-// to look at when they spawn a session with mode='agent'.
+// Rich structured renderer for SDK-driven sessions. Each event type gets
+// a card: text → markdown body, tool_use → collapsed input chip with
+// tool icon, tool_result → bytes count + collapsible body, turn_result
+// → cost/timing banner. Permission requests don't render here — the
+// chat-pane menu cards (phase 2) own that flow.
 function _handleAgentFrame(msg) {
   _ensureAgentLogPane();
   if (msg.t === 'agent-replay' && Array.isArray(msg.events)) {
@@ -2793,47 +2793,113 @@ function _handleAgentFrame(msg) {
 function _ensureAgentLogPane() {
   let pane = document.getElementById('agent-log');
   if (pane) return pane;
-  pane = document.createElement('pre');
+  pane = document.createElement('div');
   pane.id = 'agent-log';
   pane.className = 'agent-log';
-  pane.style.cssText = 'flex:1;overflow:auto;padding:12px;margin:0;background:var(--bg-elev,#0d1117);color:var(--fg,#c9d1d9);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.8rem;white-space:pre-wrap;word-break:break-word;';
   const host = document.getElementById('terminal-wrap') || document.querySelector('main') || document.body;
   host.appendChild(pane);
   return pane;
 }
 
+// Friendly per-tool icons matching the SDK's built-in tool names. Keeps
+// the event log scannable at a glance.
+const _AGENT_TOOL_ICONS = {
+  Read: '📖', Write: '✏️', Edit: '✏️',
+  Bash: '$', Glob: '🔎', Grep: '🔎',
+  WebSearch: '🌐', WebFetch: '🌐',
+  Task: '🤖', AskUserQuestion: '❓',
+  Monitor: '👀',
+};
+
+function _agentToolIcon(name) {
+  return _AGENT_TOOL_ICONS[name] || '🔧';
+}
+
+// Render a single event as a self-contained card and append it to the
+// pane. No re-renders, no DOM diffing — events arrive in order, each
+// card is its own div with its own collapsible content.
 function _appendAgentEvent(ev) {
   const pane = _ensureAgentLogPane();
-  const line = document.createElement('div');
-  line.className = 'agent-log-line agent-log-' + (ev.type || 'unknown');
   const ts = (ev.ts || '').slice(11, 19) || new Date().toISOString().slice(11, 19);
-  let body = '';
+  const card = document.createElement('div');
+  card.className = 'agent-card agent-card-' + (ev.type || 'unknown');
+  const head = document.createElement('div');
+  head.className = 'agent-card-head';
+  head.innerHTML = `<span class="agent-card-ts">${escHtml(ts)}</span>`;
+  card.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'agent-card-body';
+  card.appendChild(body);
+
   if (ev.type === 'system_init') {
-    body = '[init] sdk-session=' + (ev.sdkSessionId || '?').slice(0, 8) + ' model=' + (ev.model || '?') + ' tools=' + (Array.isArray(ev.tools) ? ev.tools.length : 0);
+    head.innerHTML += `<span class="agent-card-kind">▶ session</span>`;
+    body.innerHTML = `<span class="agent-mute">sdk-session=</span><code>${escHtml((ev.sdkSessionId || '').slice(0, 8))}</code>
+      <span class="agent-mute">model=</span><code>${escHtml(ev.model || '?')}</code>
+      <span class="agent-mute">tools=</span><code>${Array.isArray(ev.tools) ? ev.tools.length : 0}</code>`;
   } else if (ev.type === 'agent_init_snapshot') {
-    body = '[reattach] sdk-session=' + (ev.sdkSessionId || '?').slice(0, 8) + ' model=' + (ev.model || '?');
+    head.innerHTML += `<span class="agent-card-kind">⟲ reattach</span>`;
+    body.innerHTML = `<span class="agent-mute">sdk-session=</span><code>${escHtml((ev.sdkSessionId || '').slice(0, 8))}</code>
+      <span class="agent-mute">model=</span><code>${escHtml(ev.model || '?')}</code>`;
   } else if (ev.type === 'turn_start') {
-    body = '[turn] ▶ ' + (ev.prompt || '').slice(0, 120);
+    head.innerHTML += `<span class="agent-card-kind agent-card-turn">▶ turn</span>`;
+    body.innerHTML = `<div class="agent-prompt">${escHtml(ev.prompt || '')}</div>`;
   } else if (ev.type === 'assistant_text') {
-    body = (ev.text || '').slice(0, 800);
+    head.innerHTML += `<span class="agent-card-kind agent-card-claude">claude</span>`;
+    body.className += ' agent-card-md';
+    body.innerHTML = renderMd(ev.text || '');
+    renderMermaidInContainer(body).catch(() => {});
   } else if (ev.type === 'tool_use') {
-    body = '[tool] ' + ev.name + ' ' + JSON.stringify(ev.input || {}).slice(0, 180);
+    const icon = _agentToolIcon(ev.name);
+    const summary = (function () {
+      const i = ev.input || {};
+      if (ev.name === 'Bash') return String(i.command || '').slice(0, 120);
+      if (['Read', 'Edit', 'Write'].includes(ev.name)) return String(i.file_path || '').slice(0, 120);
+      if (['Glob', 'Grep'].includes(ev.name)) return String(i.pattern || i.query || '').slice(0, 120);
+      if (ev.name === 'WebFetch') return String(i.url || '').slice(0, 120);
+      return JSON.stringify(i).slice(0, 120);
+    })();
+    head.innerHTML += `<span class="agent-card-kind agent-card-tool">${escHtml(icon)} ${escHtml(ev.name)}</span>`;
+    body.innerHTML = `<code class="agent-tool-summary">${escHtml(summary)}</code>
+      <details class="agent-card-collapse"><summary>full input</summary><pre>${escHtml(JSON.stringify(ev.input, null, 2))}</pre></details>`;
   } else if (ev.type === 'tool_result') {
-    body = '[result] ' + (ev.isError ? '⚠ ' : '') + (ev.tool_use_id || '').slice(-6) + ' (' + (ev.content || '').length + ' bytes)';
+    const len = (ev.content || '').length;
+    head.innerHTML += `<span class="agent-card-kind agent-card-result${ev.isError ? ' agent-card-error' : ''}">${ev.isError ? '⚠ ' : '✓ '}result</span>
+      <span class="agent-mute">${len} bytes · for=</span><code>${escHtml((ev.tool_use_id || '').slice(-8))}</code>`;
+    // Bash output often contains ANSI; for now we render as preformatted
+    // text. Phase 3+ could add an ANSI-to-HTML step here.
+    const preview = (ev.content || '').slice(0, 800);
+    body.innerHTML = `<pre class="agent-tool-result-preview">${escHtml(preview)}</pre>
+      ${len > 800 ? `<details class="agent-card-collapse"><summary>full output (${len} bytes)</summary><pre>${escHtml(ev.content)}</pre></details>` : ''}`;
   } else if (ev.type === 'turn_result') {
-    const cost = ev.totalCostUsd != null ? ' cost=$' + ev.totalCostUsd.toFixed(4) : '';
-    body = '[done] ' + (ev.subtype || '') + cost;
-  } else if (ev.type === 'permission_denied') {
-    body = '[perm-denied] ' + (ev.toolName || '?') + ' (phase1 auto-deny — phase2 wires interactive UI)';
+    const cost = ev.totalCostUsd != null ? '$' + ev.totalCostUsd.toFixed(4) : '$?';
+    const u = ev.usage || {};
+    head.innerHTML += `<span class="agent-card-kind agent-card-done">■ ${escHtml(ev.subtype || 'done')}</span>
+      <span class="agent-mute">${escHtml(cost)} · in=${u.input_tokens || 0} out=${u.output_tokens || 0} cache-r=${u.cache_read_input_tokens || 0}</span>`;
+    if (ev.result) {
+      body.className += ' agent-card-md';
+      body.innerHTML = renderMd(String(ev.result));
+    } else {
+      body.remove();
+    }
+  } else if (ev.type === 'permission_request' || ev.type === 'permission_resolved') {
+    // These are visible via the chat-pane menu cards — render a one-
+    // line breadcrumb here so the timeline stays complete.
+    const verb = ev.type === 'permission_request' ? 'asked' : (ev.decision || 'resolved');
+    head.innerHTML += `<span class="agent-card-kind agent-card-perm">⊕ permission ${escHtml(verb)}</span>
+      <span class="agent-mute">${escHtml(ev.toolName || '')}</span>`;
+    body.remove();
   } else if (ev.type === 'rate_limit') {
-    body = '[rate-limit]';
+    head.innerHTML += `<span class="agent-card-kind agent-mute">rate-limit info</span>`;
+    body.remove();
   } else if (ev.type === 'fatal') {
-    body = '[fatal] ' + (ev.error || '');
+    head.innerHTML += `<span class="agent-card-kind agent-card-error">⚠ fatal</span>`;
+    body.innerHTML = `<pre>${escHtml(ev.error || '')}</pre>`;
   } else {
-    body = '[' + ev.type + '] ' + JSON.stringify(ev).slice(0, 300);
+    head.innerHTML += `<span class="agent-card-kind agent-mute">${escHtml(ev.type || 'event')}</span>`;
+    body.innerHTML = `<pre>${escHtml(JSON.stringify(ev, null, 2).slice(0, 600))}</pre>`;
   }
-  line.textContent = ts + '  ' + body;
-  pane.appendChild(line);
+
+  pane.appendChild(card);
   pane.scrollTop = pane.scrollHeight;
 }
 

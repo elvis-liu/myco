@@ -3580,3 +3580,103 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 @keyframes conv-spin {
   to { transform: rotate(360deg); }
 }
+
+/* ── agent-mode session pane (phase 3) ───────────────────────────────
+   Replaces the xterm.js terminal for sessions spawned with
+   mode='agent'. Each SDK event renders as its own card so the
+   conversation timeline is scannable. The chat-pane menu cards
+   (phase 2) handle interactive flows — permission cards here are
+   one-line breadcrumbs pointing to the chat.                          */
+.agent-log {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  background: var(--bg-elev, #0d1117);
+  color: var(--fg, #c9d1d9);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.agent-card {
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, .025);
+  border: 1px solid rgba(255, 255, 255, .06);
+  border-radius: 6px;
+}
+.agent-card-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.72rem;
+  color: var(--muted, #8b949e);
+  margin-bottom: 4px;
+}
+.agent-card-ts {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted, #8b949e);
+}
+.agent-card-kind {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .04);
+}
+.agent-card-claude { color: rgba(120, 200, 140, .95); }
+.agent-card-tool   { color: rgba(140, 180, 220, .95); }
+.agent-card-result { color: rgba(180, 200, 160, .85); }
+.agent-card-error  { color: rgba(255, 130, 130, .95); }
+.agent-card-done   { color: rgba(120, 200, 140, 1); }
+.agent-card-turn   { color: rgba(220, 180, 90, .95); }
+.agent-card-perm   { color: rgba(220, 180, 90, .95); }
+.agent-mute        { color: var(--muted, #8b949e); }
+.agent-card-body {
+  font-size: 0.85rem;
+  color: var(--fg, #c9d1d9);
+}
+.agent-card-md p:first-child { margin-top: 0; }
+.agent-card-md p:last-child  { margin-bottom: 0; }
+.agent-card-md pre,
+.agent-card-body pre {
+  background: rgba(0, 0, 0, .35);
+  padding: 8px 10px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  margin: 6px 0;
+}
+.agent-card-md code,
+.agent-tool-summary,
+.agent-card-body code {
+  background: rgba(255, 255, 255, .08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+.agent-prompt {
+  font-style: italic;
+  color: var(--muted, #8b949e);
+}
+.agent-card-collapse {
+  margin-top: 6px;
+  font-size: 0.78rem;
+}
+.agent-card-collapse summary {
+  cursor: pointer;
+  color: var(--muted, #8b949e);
+  user-select: none;
+}
+.agent-card-collapse summary:hover { color: var(--fg, #c9d1d9); }
+.agent-card-collapse pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow: auto;
+}
+.agent-tool-result-preview {
+  margin: 0;
+  max-height: 250px;
+  overflow: auto;
+}
