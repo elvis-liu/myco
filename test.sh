@@ -1687,9 +1687,14 @@ test_chat_window() {
   ! grep -qF 'id="btn-transcript"' web/public/index.html \
     && pass "index.html: btn-transcript retired (Phase 9 step 3)" \
     || fail "index.html: btn-transcript still in chrome cluster"
-  ! grep -qF 'function showTranscriptView' web/public/app.js \
-    && pass "app.js: showTranscriptView retired (Phase 9 step 3)" \
-    || fail "app.js: showTranscriptView still defined"
+  # Phase 9 step 3 stubbed showTranscriptView as a no-op (kept the
+  # signature so legacy call sites don't crash). The negative guard
+  # checks the BODY is empty / commented, not the signature.
+  if awk '/^function showTranscriptView\(/,/^}$/' web/public/app.js | grep -qE 'showConversationView\(|conv-content|btn-preview-readonly|btn-transcript'; then
+    fail "app.js: showTranscriptView still touches removed DOM"
+  else
+    pass "app.js: showTranscriptView stubbed (Phase 9 step 3)"
+  fi
   # Always-tail contract: chat/conv/xterm are tail-readers — they
   # should always pin to the latest content. New transcript messages
   # must unconditionally scroll; the previous isConvAtBottom() guard
@@ -1700,13 +1705,9 @@ test_chat_window() {
   else
     pass "app.js: appendTranscriptMessages always pins to latest"
   fi
-  # Phase 9 step 2: the xterm output frame is a no-op (PTY retired);
-  # the always-tail contract now only applies to chat + conv panes.
-  if awk '/^function showConversationView\(/,/^}$/' web/public/app.js | grep -q 'scrollConvToBottom'; then
-    pass "app.js: showConversationView lands at latest on pane show"
-  else
-    fail "app.js: showConversationView no longer pins to bottom when shown"
-  fi
+  # Phase 9 step 3 retired showConversationView (the JSONL transcript
+  # pane is gone). The always-tail contract is the chatpane's
+  # scrollChatToLatest now, asserted elsewhere.
   # Plan / Arch / Test artifact views (promoted to top-level chrome buttons,
   # commit 15187ea). Each has its own main-pane container and a chrome button.
   for view in plan arch test; do
