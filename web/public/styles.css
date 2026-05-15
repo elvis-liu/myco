@@ -3414,41 +3414,40 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   font-size: 0.88rem;
   line-height: 1.5;
 }
+/* Quiet single-line rows. No card chrome — borders, backgrounds, and
+   nested boxes were making the timeline read like a stack of dialogs.
+   Each event is just text now: timestamp · kind · summary. The body
+   slides in beneath as an indented continuation when expanded; only
+   embedded code/pre blocks keep their own subtle background so a
+   stack trace or tool result stays visually distinct from prose. */
 .agent-card {
-  margin-bottom: 10px;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, .025);
-  border: 1px solid rgba(255, 255, 255, .06);
-  border-radius: 6px;
+  margin: 0;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
 }
 .agent-card-head {
   display: flex;
-  gap: 10px;
-  align-items: center;
-  font-size: 0.72rem;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.78rem;
   color: var(--muted, #8b949e);
-  margin-bottom: 4px;
-  /* Phase 1 aggressive-minimize: the head is the clickable row that
-     toggles expand/collapse. Cards in .agent-card-no-body (perm /
-     rate-limit) opt out via the rule further down. */
   cursor: pointer;
   user-select: none;
 }
 .agent-card-head:hover { color: var(--fg, #c9d1d9); }
-.agent-card-no-body .agent-card-head { cursor: default; }
-.agent-card-no-body .agent-card-head:hover { color: var(--muted, #8b949e); }
-/* Chevron — collapsed/expanded indicator pinned to the right edge of the
-   head row. Suppressed for cards with no body. */
+/* Chevron pinned to the right edge of the head. */
 .agent-card .agent-card-head::after {
   content: '▸';
   margin-left: auto;
   color: var(--muted, #8b949e);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  transition: transform 0.12s ease;
+  opacity: 0.6;
+  transition: opacity 0.12s ease;
 }
-.agent-card.agent-card-expanded .agent-card-head::after { content: '▾'; }
-.agent-card-no-body .agent-card-head::after { display: none; }
+.agent-card.agent-card-expanded .agent-card-head::after { content: '▾'; opacity: 0.9; }
 /* Inline one-liner summary in the head — visible whether the card is
    collapsed or expanded. Truncates with ellipsis instead of wrapping. */
 .agent-card-summary {
@@ -3465,18 +3464,24 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   background: transparent;
   padding: 0;
 }
-/* The body is hidden when the card is collapsed. agent-card-expanded
-   is the toggle class; the absence of it = collapsed. */
+/* The body is hidden when the card is collapsed. */
 .agent-card.agent-card-collapsed .agent-card-body { display: none; }
-/* tool_use input + tool_result preview — same pre styling whether they
-   ended up inline or in a collapsed body. */
+/* Expanded body — indent under the head so the structural relationship
+   is visual, not framing. No background, no border. */
+.agent-card.agent-card-expanded .agent-card-body {
+  padding: 4px 0 4px 14px;
+  border-left: 2px solid rgba(255, 255, 255, .06);
+  margin-top: 2px;
+}
+/* tool_use input + tool_result preview — single subtle background so
+   structured payloads stay visually distinct from surrounding prose. */
 .agent-card-tool-input {
-  background: rgba(0, 0, 0, .35);
-  padding: 8px 10px;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, .03);
+  padding: 6px 8px;
+  border-radius: 3px;
   overflow-x: auto;
-  font-size: 0.78rem;
-  margin: 6px 0;
+  font-size: 0.76rem;
+  margin: 4px 0;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 400px;
@@ -3485,13 +3490,15 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .agent-card-ts {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--muted, #8b949e);
+  font-size: 0.72rem;
 }
 .agent-card-kind {
   font-weight: 600;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  padding: 1px 6px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, .04);
+  /* Drop the chip pill — colour alone is enough to distinguish kinds. */
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .agent-card-claude { color: rgba(120, 200, 140, .95); }
 .agent-card-tool   { color: rgba(140, 180, 220, .95); }
@@ -3509,19 +3516,19 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .agent-card-md p:last-child  { margin-bottom: 0; }
 .agent-card-md pre,
 .agent-card-body pre {
-  background: rgba(0, 0, 0, .35);
-  padding: 8px 10px;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, .03);
+  padding: 6px 8px;
+  border-radius: 3px;
   overflow-x: auto;
-  font-size: 0.78rem;
-  margin: 6px 0;
+  font-size: 0.76rem;
+  margin: 4px 0;
 }
 .agent-card-md code,
 .agent-tool-summary,
 .agent-card-body code {
-  background: rgba(255, 255, 255, .08);
-  padding: 1px 5px;
-  border-radius: 3px;
+  background: rgba(255, 255, 255, .05);
+  padding: 0 4px;
+  border-radius: 2px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.78rem;
 }
@@ -3575,6 +3582,49 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   padding: 0 4px;
 }
 
+/* Chrome batch — consecutive low-info events (turn/iter/hook/perm/etc.)
+   collapse into one compact indicator. Head is a single muted row; the
+   body (when expanded) lists every individual event on its own
+   timestamped line so investigation is still one click away. */
+.agent-card-chrome {
+  opacity: 0.78;
+}
+.agent-card-chrome .agent-card-head {
+  font-size: 0.78rem;
+}
+.agent-chrome-kind-head {
+  letter-spacing: 0.04em;
+}
+.agent-chrome-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0 2px;
+}
+.agent-chrome-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.76rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  line-height: 1.45;
+  color: var(--muted, #8b949e);
+}
+.agent-chrome-row .agent-card-ts {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+.agent-chrome-row .agent-chrome-kind {
+  flex: 0 0 auto;
+  min-width: 110px;
+}
+.agent-chrome-row .agent-chrome-summary {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Phase 2 — agent cards live inside #chat-messages now (single timeline).
    Override the standalone .agent-card margins so the chat-messages flex
    gap controls spacing between every row, whether it's a chat bubble or
@@ -3583,12 +3633,9 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .chat-msg-agent {
   margin: 0;
 }
-#chat-messages .agent-card:hover { background: rgba(255, 255, 255, .04); }
-/* Tool cards next to chat-msgs benefit from a slightly tighter row
-   height — drop the head's bottom margin since the body opens below
-   anyway. */
-#chat-messages .agent-card .agent-card-head { margin-bottom: 0; }
-#chat-messages .agent-card.agent-card-expanded .agent-card-head { margin-bottom: 4px; }
+/* Hover is a subtle text-colour brighten via .agent-card-head:hover —
+   no background fill so the timeline doesn't strobe when the cursor
+   moves down a long event list. */
 
 /* ─── Permission / AskUserQuestion modal ──────────────────────────────
    Phase 1.5: pop a centered modal whenever the chat-pane menu queue is

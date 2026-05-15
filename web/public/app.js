@@ -1201,25 +1201,23 @@ function setChatPane(visible) {
 function updateChatButton() {
   const btn = document.getElementById('btn-chat');
   if (!btn) return;
-  const hasContent = MAIN_PANE_IDS.some((id) => !document.getElementById(id)?.hidden);
-  // Chat button stays visible whenever there's a live session — same
-  // pattern the other chrome toggles use. Open/closed state is shown
-  // via the .active class (CSS swaps the background tint) so the icon
-  // doesn't morph mid-click. The earlier behaviour hid btn-chat while
-  // the chatpane was open, which read as "the 💬 icon became ×"
-  // because the chatpane's own close button sits in roughly the same
-  // viewport corner.
-  btn.hidden = !state.activeId || !hasContent;
+  // Chrome icons follow the active-session signal — no longer gated on
+  // "is some main-pane view currently up". Phase 9 step 3 retired the
+  // always-visible #terminal-wrap that used to keep hasContent=true; the
+  // chatpane is now the default surface and chrome icons need to show
+  // even before files/plan/arch/test gets opened so the user can reach
+  // those views in the first place.
+  const hasSession = !!state.activeId;
+  btn.hidden = !hasSession;
   btn.classList.toggle('active', !!state.chatPaneVisible);
-  // The files toggle is bound to the same active-session condition; its
-  // visibility doesn't depend on the chatpane.
+  // Files / Plan / Arch / Test toggles share the same gate. Each icon
+  // opens its own main-pane view; they're hooked to _myco_/plan.json
+  // (vote / comment / mark / run) and the in-memory artifact cache.
   const fbtn = document.getElementById('btn-files');
-  if (fbtn) fbtn.hidden = !state.activeId || !hasContent;
-  // Plan / Arch / Test toggles: available to everyone with an active session
-  // (owners + viewers can both inspect/refresh extracted artifacts).
+  if (fbtn) fbtn.hidden = !hasSession;
   for (const t of ['plan', 'arch', 'test']) {
     const el = document.getElementById('btn-' + t);
-    if (el) el.hidden = !state.activeId || !hasContent;
+    if (el) el.hidden = !hasSession;
   }
 }
 
@@ -2403,65 +2401,72 @@ function _agentToolIcon(name) {
 // behind a chevron, recoverable in one click. Single source of truth:
 // AGENT_DEFAULT_EXPANDED.
 const AGENT_DEFAULT_EXPANDED = new Set(['assistant_text', 'fatal']);
-const AGENT_NO_BODY = new Set(['permission_request', 'permission_resolved', 'rate_limit']);
-// Phase 1.5 — consecutive same-type cards merge into one row so the
-// timeline focuses on results, not chrome. Chrome events fold with a
-// count badge ("⟲ reattach × 3"); consecutive assistant_text blocks
-// (claude's narration between tool calls) concatenate into one
-// rendered markdown body so you see one continuous reply instead of
-// six fragmented cards. Merging stops as soon as a non-combinable
-// event lands — tool_use, tool_result, permission, anything else
-// interrupts the run and forces a fresh card.
-const AGENT_COMBINE_CONSECUTIVE = new Set([
+
+// Chrome events — low-information rows that aren't the "result" the user
+// came for. The whole point of a chrome run is to get out of the way so
+// the user can focus on claude's text + the tool calls. Any consecutive
+// run of these collapses into a single "▸ N events" badge whose body
+// (when expanded) lists each individual event on its own one-line row
+// with its own timestamp + type + summary. The run breaks as soon as a
+// non-chrome event lands (tool_use, tool_result, turn_result with text,
+// assistant_text, fatal, anything else).
+const AGENT_CHROME_TYPES = new Set([
   'turn_start',
   'iteration_start',
-  'rate_limit',
+  'iteration_aborted',
+  'system_init',
+  'session_ready',
   'agent_init_snapshot',
-  'assistant_text',
+  'hook_allow',
+  'hook_deny',
+  'permission_request',
+  'permission_resolved',
+  'rate_limit',
+  'unknown_event',
 ]);
+
+// assistant_text still concatenates (separate from chrome) so claude's
+// narration between tool calls renders as one continuous markdown blob
+// with mermaid support — see the dedicated merge branch in
+// _appendAgentEvent.
 
 function _appendAgentEvent(ev) {
   const pane = _ensureAgentLogPane();
   const ts = (ev.ts || '').slice(11, 19) || new Date().toISOString().slice(11, 19);
 
-  // Combine-consecutive: if the last card in the pane is the same type
-  // and the type is combinable, merge into it instead of appending. The
-  // existing card's count badge is incremented and its body either
-  // appends a timestamp line (chrome events) or concatenates new claude
-  // text into the markdown render.
-  if (AGENT_COMBINE_CONSECUTIVE.has(ev.type)) {
+  // Chrome batching: consecutive chrome events collapse into one
+  // compact "▸ N events" indicator. Click the indicator to expand and
+  // see each event listed individually.
+  if (AGENT_CHROME_TYPES.has(ev.type)) {
     const prev = pane.lastElementChild;
-    if (prev && prev.dataset && prev.dataset.evType === ev.type) {
+    if (prev && prev.dataset && prev.dataset.evType === '_chrome_batch') {
+      _appendToChromeBatch(prev, ev, ts);
+      pane.scrollTop = pane.scrollHeight;
+      return;
+    }
+    const batch = _createChromeBatch(ev, ts);
+    pane.appendChild(batch);
+    pane.scrollTop = pane.scrollHeight;
+    return;
+  }
+
+  // assistant_text — concatenate consecutive blocks into one rendered
+  // markdown body so claude's narration reads as one continuous reply.
+  if (ev.type === 'assistant_text') {
+    const prev = pane.lastElementChild;
+    if (prev && prev.dataset && prev.dataset.evType === 'assistant_text') {
       const count = (parseInt(prev.dataset.combineCount || '1', 10)) + 1;
       prev.dataset.combineCount = String(count);
-      const badge = prev.querySelector('.agent-card-count');
-      if (badge) badge.textContent = '× ' + count;
-      else {
-        const kindEl = prev.querySelector('.agent-card-kind');
-        if (kindEl) {
-          const b = document.createElement('span');
-          b.className = 'agent-card-count agent-mute';
-          b.textContent = '× ' + count;
-          kindEl.insertAdjacentElement('afterend', b);
-        }
-      }
-      // For claude text blocks, concatenate the new text into the body
-      // and re-render the markdown so the user sees one continuous
-      // reply. Other chrome types keep their first body — incrementing
-      // the count is signal enough.
-      if (ev.type === 'assistant_text') {
-        const body = prev.querySelector('.agent-card-body');
-        if (body) {
-          const merged = (prev.dataset.assistantText || '') + '\n\n' + (ev.text || '');
-          prev.dataset.assistantText = merged;
-          body.innerHTML = renderMd(merged);
-          renderMermaidInContainer(body).catch(() => {});
-          // Also refresh the head summary preview to the latest first line.
-          const summary = prev.querySelector('.agent-card-summary');
-          if (summary) {
-            const firstLine = merged.split('\n').find((l) => l.trim()) || '';
-            summary.textContent = firstLine.slice(0, 120);
-          }
+      const body = prev.querySelector('.agent-card-body');
+      if (body) {
+        const merged = (prev.dataset.assistantText || '') + '\n\n' + (ev.text || '');
+        prev.dataset.assistantText = merged;
+        body.innerHTML = renderMd(merged);
+        renderMermaidInContainer(body).catch(() => {});
+        const summary = prev.querySelector('.agent-card-summary');
+        if (summary) {
+          const firstLine = merged.split('\n').find((l) => l.trim()) || '';
+          summary.textContent = firstLine.slice(0, 120);
         }
       }
       pane.scrollTop = pane.scrollHeight;
@@ -2486,28 +2491,10 @@ function _appendAgentEvent(ev) {
   body.className = 'agent-card-body';
   card.appendChild(body);
 
-  if (ev.type === 'session_ready') {
-    head.innerHTML += `<span class="agent-card-kind agent-mute">○ ready</span>
-      <span class="agent-card-summary agent-mute">Agent-mode session is live${ev.resumedFromSdkSessionId ? ' (resumed)' : ''}</span>`;
-    body.innerHTML = `<span class="agent-mute">Waiting for your first message — type below.</span>${ev.resumedFromSdkSessionId ? `<br><span class="agent-mute">resuming sdk-session=</span><code>${escHtml(String(ev.resumedFromSdkSessionId).slice(0, 8))}</code>` : ''}`;
-  } else if (ev.type === 'system_init') {
-    head.innerHTML += `<span class="agent-card-kind">▶ session</span>
-      <span class="agent-card-summary agent-mute">sdk=<code>${escHtml((ev.sdkSessionId || '').slice(0, 8))}</code> · model=<code>${escHtml(ev.model || '?')}</code></span>`;
-    body.innerHTML = `<span class="agent-mute">tools=</span><code>${Array.isArray(ev.tools) ? ev.tools.length : 0}</code> available`;
-  } else if (ev.type === 'agent_init_snapshot') {
-    head.innerHTML += `<span class="agent-card-kind">⟲ reattach</span>
-      <span class="agent-card-summary agent-mute">sdk=<code>${escHtml((ev.sdkSessionId || '').slice(0, 8))}</code></span>`;
-    body.innerHTML = `<span class="agent-mute">model=</span><code>${escHtml(ev.model || '?')}</code>`;
-  } else if (ev.type === 'turn_start') {
-    const prompt = String(ev.prompt || '').replace(/\s+/g, ' ').slice(0, 120);
-    head.innerHTML += `<span class="agent-card-kind agent-card-turn">▶ turn</span>
-      <span class="agent-card-summary agent-mute">${escHtml(prompt)}</span>`;
-    body.innerHTML = `<div class="agent-prompt">${escHtml(ev.prompt || '')}</div>`;
-  } else if (ev.type === 'iteration_start') {
-    head.innerHTML += `<span class="agent-card-kind agent-mute">⟳ iter</span>
-      <span class="agent-card-summary agent-mute">SDK query() ${ev.resume ? 'resumed' : 'started'}</span>`;
-    body.innerHTML = `<span class="agent-mute">${ev.resume ? 'Resuming a prior sdk-session.' : 'New query iteration began.'}</span>`;
-  } else if (ev.type === 'assistant_text') {
+  // Non-chrome events that survived to here: assistant_text (first
+  // block of a new run — subsequent blocks merge above), tool_use,
+  // tool_result, turn_result, fatal, and the catch-all "unknown" body.
+  if (ev.type === 'assistant_text') {
     const firstLine = String(ev.text || '').split('\n').find((l) => l.trim()) || '';
     head.innerHTML += `<span class="agent-card-kind agent-card-claude">claude</span>
       <span class="agent-card-summary">${escHtml(firstLine.slice(0, 120))}</span>`;
@@ -2541,29 +2528,21 @@ function _appendAgentEvent(ev) {
     } else {
       body.innerHTML = `<span class="agent-mute">(no result text)</span>`;
     }
-  } else if (ev.type === 'permission_request' || ev.type === 'permission_resolved') {
-    const verb = ev.type === 'permission_request' ? 'asked' : (ev.decision || 'resolved');
-    head.innerHTML += `<span class="agent-card-kind agent-card-perm">⊕ permission ${escHtml(verb)}</span>
-      <span class="agent-card-summary agent-mute">${escHtml(ev.toolName || '')}</span>`;
-  } else if (ev.type === 'rate_limit') {
-    head.innerHTML += `<span class="agent-card-kind agent-mute">rate-limit info</span>`;
   } else if (ev.type === 'fatal') {
     head.innerHTML += `<span class="agent-card-kind agent-card-error">⚠ fatal</span>
       <span class="agent-card-summary">${escHtml(String(ev.error || '').split('\n')[0].slice(0, 120))}</span>`;
     body.innerHTML = `<pre>${escHtml(ev.error || '')}</pre>`;
   } else {
+    // Catch-all (any non-chrome type not handled above). Lands as a
+    // minimal card with the JSON payload in the body.
     head.innerHTML += `<span class="agent-card-kind agent-mute">${escHtml(ev.type || 'event')}</span>`;
     body.innerHTML = `<pre>${escHtml(JSON.stringify(ev, null, 2).slice(0, 600))}</pre>`;
   }
 
   // Default state: expanded for prominent types + forced-expand tools
   // (tool_result with isError, turn_result with text), collapsed for
-  // everything else. AGENT_NO_BODY events have no body to toggle.
-  const noBody = AGENT_NO_BODY.has(ev.type);
-  if (noBody) {
-    card.classList.add('agent-card-no-body');
-    body.remove();
-  } else if (AGENT_DEFAULT_EXPANDED.has(ev.type) || card.classList.contains('agent-card-force-expand')) {
+  // everything else.
+  if (AGENT_DEFAULT_EXPANDED.has(ev.type) || card.classList.contains('agent-card-force-expand')) {
     card.classList.add('agent-card-expanded');
   } else {
     card.classList.add('agent-card-collapsed');
@@ -2571,16 +2550,123 @@ function _appendAgentEvent(ev) {
 
   // Click the head to toggle expand. Don't fire if the click landed on
   // a link or nested button inside the head.
-  if (!noBody) {
-    head.addEventListener('click', (e) => {
-      if (e.target.closest('a, button')) return;
-      card.classList.toggle('agent-card-collapsed');
-      card.classList.toggle('agent-card-expanded');
-    });
-  }
+  head.addEventListener('click', (e) => {
+    if (e.target.closest('a, button')) return;
+    card.classList.toggle('agent-card-collapsed');
+    card.classList.toggle('agent-card-expanded');
+  });
 
   pane.appendChild(card);
   pane.scrollTop = pane.scrollHeight;
+}
+
+// Render a one-line summary for a chrome event — what shows up inside
+// the chrome batch's expanded body. Each event gets its own row with
+// timestamp, kind chip, and a brief description.
+function _chromeEventLine(ev, ts) {
+  const row = document.createElement('div');
+  row.className = 'agent-chrome-row';
+  let kind = ev.type || 'event';
+  let summary = '';
+  if (ev.type === 'session_ready') {
+    kind = '○ ready';
+    summary = ev.resumedFromSdkSessionId ? `resumed sdk=${String(ev.resumedFromSdkSessionId).slice(0, 8)}` : 'session live';
+  } else if (ev.type === 'system_init') {
+    kind = '▶ session';
+    summary = `sdk=${(ev.sdkSessionId || '').slice(0, 8)} · model=${ev.model || '?'}`;
+  } else if (ev.type === 'agent_init_snapshot') {
+    kind = '⟲ reattach';
+    summary = `sdk=${(ev.sdkSessionId || '').slice(0, 8)}`;
+  } else if (ev.type === 'turn_start') {
+    kind = '▶ turn';
+    summary = String(ev.prompt || '').replace(/\s+/g, ' ').slice(0, 120);
+  } else if (ev.type === 'iteration_start') {
+    kind = '⟳ iter';
+    summary = ev.resume ? 'resumed' : 'started';
+  } else if (ev.type === 'iteration_aborted') {
+    kind = '⊘ iter aborted';
+    summary = '';
+  } else if (ev.type === 'hook_allow') {
+    kind = '✓ hook allow';
+    summary = ev.toolName || '';
+  } else if (ev.type === 'hook_deny') {
+    kind = '✗ hook deny';
+    summary = ev.toolName || '';
+  } else if (ev.type === 'permission_request') {
+    kind = '⊕ perm asked';
+    summary = ev.toolName || '';
+  } else if (ev.type === 'permission_resolved') {
+    kind = '⊕ perm ' + (ev.decision || 'resolved');
+    summary = ev.toolName || '';
+  } else if (ev.type === 'rate_limit') {
+    kind = 'rate-limit';
+    summary = '';
+  } else {
+    summary = JSON.stringify(ev).slice(0, 120);
+  }
+  row.innerHTML = `<span class="agent-card-ts">${escHtml(ts)}</span>` +
+    `<span class="agent-chrome-kind agent-mute">${escHtml(kind)}</span>` +
+    (summary ? `<span class="agent-chrome-summary agent-mute">${escHtml(summary)}</span>` : '');
+  return row;
+}
+
+// Create a brand-new chrome batch card for an incoming chrome event.
+// The head shows "▸ chrome · 1 event"; click to expand and see the
+// per-event one-liners.
+function _createChromeBatch(ev, ts) {
+  const card = document.createElement('div');
+  card.className = 'agent-card chat-msg-agent agent-card-chrome agent-card-collapsed';
+  card.dataset.evType = '_chrome_batch';
+  card.dataset.chromeCount = '1';
+  card.dataset.firstTs = ts;
+  card.dataset.lastTs = ts;
+  const head = document.createElement('div');
+  head.className = 'agent-card-head';
+  head.innerHTML =
+    `<span class="agent-card-ts">${escHtml(ts)}</span>` +
+    `<span class="agent-card-kind agent-mute agent-chrome-kind-head">▸ chrome</span>` +
+    `<span class="agent-card-count agent-mute">× 1</span>` +
+    `<span class="agent-card-summary agent-mute agent-chrome-last">${escHtml(_chromeShortLabel(ev))}</span>`;
+  card.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'agent-card-body agent-chrome-body';
+  body.appendChild(_chromeEventLine(ev, ts));
+  card.appendChild(body);
+  head.addEventListener('click', (e) => {
+    if (e.target.closest('a, button')) return;
+    card.classList.toggle('agent-card-collapsed');
+    card.classList.toggle('agent-card-expanded');
+  });
+  return card;
+}
+
+// Append a new chrome event into an existing chrome batch card.
+function _appendToChromeBatch(card, ev, ts) {
+  const n = (parseInt(card.dataset.chromeCount || '1', 10)) + 1;
+  card.dataset.chromeCount = String(n);
+  card.dataset.lastTs = ts;
+  const countEl = card.querySelector('.agent-card-count');
+  if (countEl) countEl.textContent = '× ' + n;
+  const summaryEl = card.querySelector('.agent-chrome-last');
+  if (summaryEl) summaryEl.textContent = _chromeShortLabel(ev);
+  const body = card.querySelector('.agent-chrome-body');
+  if (body) body.appendChild(_chromeEventLine(ev, ts));
+}
+
+// Short label for the chrome batch head — names the latest event so
+// the collapsed indicator still tells you what's happening.
+function _chromeShortLabel(ev) {
+  if (ev.type === 'permission_request') return 'perm asked · ' + (ev.toolName || '');
+  if (ev.type === 'permission_resolved') return 'perm ' + (ev.decision || 'resolved') + ' · ' + (ev.toolName || '');
+  if (ev.type === 'hook_allow') return 'hook allow · ' + (ev.toolName || '');
+  if (ev.type === 'hook_deny') return 'hook deny · ' + (ev.toolName || '');
+  if (ev.type === 'turn_start') return 'turn · ' + String(ev.prompt || '').replace(/\s+/g, ' ').slice(0, 60);
+  if (ev.type === 'iteration_start') return ev.resume ? 'iter (resumed)' : 'iter';
+  if (ev.type === 'agent_init_snapshot') return 'reattach';
+  if (ev.type === 'system_init') return 'session init';
+  if (ev.type === 'session_ready') return 'ready';
+  if (ev.type === 'rate_limit') return 'rate-limit';
+  return ev.type || 'event';
 }
 
 // One-line summary for a tool_use head. Each tool gets the slot that
