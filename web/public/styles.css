@@ -3347,13 +3347,19 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 /* Compact resolved-line that REPLACES the option-buttons block once
    the menu is answered. Same selector also handles the "↗ open in
    popup" deferred state on still-active menus. */
+/* Resolved-menu line ('✓ Picked [N] label') — indented under the
+   question bubble + same color/size as surrounding chat text so it
+   reads as a quiet annotation rather than a separate colored row.
+   The green ✓ glyph is still the visual cue that this is the
+   answer. .chat-menu-deferred keeps a yellow tint as the
+   distinguishing affordance for the still-pending state. */
 .chat-menu-resolved {
-  margin-top: 4px;
-  font-size: 0.85rem;
-  color: #3fb950;       /* green for resolved */
+  margin: 4px 0 0 14px;
+  font-size: 0.92rem;
+  color: var(--fg, #c9d1d9);
 }
 .chat-menu-resolved.chat-menu-deferred {
-  color: #f0b440;       /* yellow for "answer me in the popup" */
+  color: #f0b440;
   cursor: pointer;
   user-select: none;
 }
