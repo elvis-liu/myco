@@ -3414,6 +3414,17 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
     0 0 0 1px rgba(210, 153, 34, .18),
     0 2px 10px -2px rgba(210, 153, 34, .28);
   animation: chat-menu-pulse 2.4s ease-in-out infinite;
+  /* Phase 1: pin the active unresolved menu to the visible bottom of
+     the chat scroll so the user can't scroll past it unanswered. The
+     opaque gradient background is the same as above, repeated here so
+     newer chat messages scrolling under it don't bleed through. */
+  position: sticky;
+  bottom: 8px;
+  z-index: 4;
+  /* Without an explicit background-clip the gradient + box-shadow can
+     leave a thin transparent halo at the rounded corners when the
+     element overlaps the row below it during sticky-stick. */
+  background-clip: padding-box;
 }
 @keyframes chat-menu-pulse {
   0%, 100% {
@@ -3632,6 +3643,59 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   font-size: 0.72rem;
   color: var(--muted, #8b949e);
   margin-bottom: 4px;
+  /* Phase 1 aggressive-minimize: the head is the clickable row that
+     toggles expand/collapse. Cards in .agent-card-no-body (perm /
+     rate-limit) opt out via the rule further down. */
+  cursor: pointer;
+  user-select: none;
+}
+.agent-card-head:hover { color: var(--fg, #c9d1d9); }
+.agent-card-no-body .agent-card-head { cursor: default; }
+.agent-card-no-body .agent-card-head:hover { color: var(--muted, #8b949e); }
+/* Chevron — collapsed/expanded indicator pinned to the right edge of the
+   head row. Suppressed for cards with no body. */
+.agent-card .agent-card-head::after {
+  content: '▸';
+  margin-left: auto;
+  color: var(--muted, #8b949e);
+  font-size: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  transition: transform 0.12s ease;
+}
+.agent-card.agent-card-expanded .agent-card-head::after { content: '▾'; }
+.agent-card-no-body .agent-card-head::after { display: none; }
+/* Inline one-liner summary in the head — visible whether the card is
+   collapsed or expanded. Truncates with ellipsis instead of wrapping. */
+.agent-card-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 0.78rem;
+}
+.agent-tool-summary.agent-card-summary {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: transparent;
+  padding: 0;
+}
+/* The body is hidden when the card is collapsed. agent-card-expanded
+   is the toggle class; the absence of it = collapsed. */
+.agent-card.agent-card-collapsed .agent-card-body { display: none; }
+/* tool_use input + tool_result preview — same pre styling whether they
+   ended up inline or in a collapsed body. */
+.agent-card-tool-input {
+  background: rgba(0, 0, 0, .35);
+  padding: 8px 10px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.78rem;
+  margin: 6px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
 }
 .agent-card-ts {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -3680,22 +3744,9 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   font-style: italic;
   color: var(--muted, #8b949e);
 }
-.agent-card-collapse {
-  margin-top: 6px;
-  font-size: 0.78rem;
-}
-.agent-card-collapse summary {
-  cursor: pointer;
-  color: var(--muted, #8b949e);
-  user-select: none;
-}
-.agent-card-collapse summary:hover { color: var(--fg, #c9d1d9); }
-.agent-card-collapse pre {
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 400px;
-  overflow: auto;
-}
+/* Phase 1 retired the per-card <details> elements (.agent-card-collapse).
+   The whole card body is now toggled via the head's click handler and
+   the .agent-card-expanded / .agent-card-collapsed classes above. */
 .agent-tool-result-preview {
   margin: 0;
   max-height: 250px;

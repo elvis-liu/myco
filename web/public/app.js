@@ -2824,6 +2824,20 @@ function _agentToolIcon(name) {
 // Render a single event as a self-contained card and append it to the
 // pane. No re-renders, no DOM diffing — events arrive in order, each
 // card is its own div with its own collapsible content.
+// Phase 1 aggressive-minimize: every card has a head (always visible)
+// and a body (collapsed by default, click head to expand). The head
+// carries enough info to scan the timeline without expanding anything —
+// tool name + one-line summary for tool_use, bytes + status for
+// tool_result, "claude" + first-line preview for assistant_text in its
+// collapsed state, etc. A small set of event types start EXPANDED
+// (claude text replies, fatal errors, turn-result with text content) —
+// those carry the "results" the user came for. Everything else (tool
+// chatter, system init, rate-limit telemetry, turn-start) is collapsed
+// behind a chevron, recoverable in one click. Single source of truth:
+// AGENT_DEFAULT_EXPANDED.
+const AGENT_DEFAULT_EXPANDED = new Set(['assistant_text', 'fatal']);
+const AGENT_NO_BODY = new Set(['permission_request', 'permission_resolved', 'rate_limit']);
+
 function _appendAgentEvent(ev) {
   const pane = _ensureAgentLogPane();
   const ts = (ev.ts || '').slice(11, 19) || new Date().toISOString().slice(11, 19);
@@ -2838,79 +2852,110 @@ function _appendAgentEvent(ev) {
   card.appendChild(body);
 
   if (ev.type === 'session_ready') {
-    head.innerHTML += `<span class="agent-card-kind agent-mute">○ ready</span>`;
-    body.innerHTML = `<span class="agent-mute">Agent-mode session is live and waiting for your first message.
-Type anything in the chat input below.</span>${ev.resumedFromSdkSessionId ? `<br><span class="agent-mute">resuming sdk-session=</span><code>${escHtml(String(ev.resumedFromSdkSessionId).slice(0, 8))}</code>` : ''}`;
+    head.innerHTML += `<span class="agent-card-kind agent-mute">○ ready</span>
+      <span class="agent-card-summary agent-mute">Agent-mode session is live${ev.resumedFromSdkSessionId ? ' (resumed)' : ''}</span>`;
+    body.innerHTML = `<span class="agent-mute">Waiting for your first message — type below.</span>${ev.resumedFromSdkSessionId ? `<br><span class="agent-mute">resuming sdk-session=</span><code>${escHtml(String(ev.resumedFromSdkSessionId).slice(0, 8))}</code>` : ''}`;
   } else if (ev.type === 'system_init') {
-    head.innerHTML += `<span class="agent-card-kind">▶ session</span>`;
-    body.innerHTML = `<span class="agent-mute">sdk-session=</span><code>${escHtml((ev.sdkSessionId || '').slice(0, 8))}</code>
-      <span class="agent-mute">model=</span><code>${escHtml(ev.model || '?')}</code>
-      <span class="agent-mute">tools=</span><code>${Array.isArray(ev.tools) ? ev.tools.length : 0}</code>`;
+    head.innerHTML += `<span class="agent-card-kind">▶ session</span>
+      <span class="agent-card-summary agent-mute">sdk=<code>${escHtml((ev.sdkSessionId || '').slice(0, 8))}</code> · model=<code>${escHtml(ev.model || '?')}</code></span>`;
+    body.innerHTML = `<span class="agent-mute">tools=</span><code>${Array.isArray(ev.tools) ? ev.tools.length : 0}</code> available`;
   } else if (ev.type === 'agent_init_snapshot') {
-    head.innerHTML += `<span class="agent-card-kind">⟲ reattach</span>`;
-    body.innerHTML = `<span class="agent-mute">sdk-session=</span><code>${escHtml((ev.sdkSessionId || '').slice(0, 8))}</code>
-      <span class="agent-mute">model=</span><code>${escHtml(ev.model || '?')}</code>`;
+    head.innerHTML += `<span class="agent-card-kind">⟲ reattach</span>
+      <span class="agent-card-summary agent-mute">sdk=<code>${escHtml((ev.sdkSessionId || '').slice(0, 8))}</code></span>`;
+    body.innerHTML = `<span class="agent-mute">model=</span><code>${escHtml(ev.model || '?')}</code>`;
   } else if (ev.type === 'turn_start') {
-    head.innerHTML += `<span class="agent-card-kind agent-card-turn">▶ turn</span>`;
+    const prompt = String(ev.prompt || '').replace(/\s+/g, ' ').slice(0, 120);
+    head.innerHTML += `<span class="agent-card-kind agent-card-turn">▶ turn</span>
+      <span class="agent-card-summary agent-mute">${escHtml(prompt)}</span>`;
     body.innerHTML = `<div class="agent-prompt">${escHtml(ev.prompt || '')}</div>`;
   } else if (ev.type === 'assistant_text') {
-    head.innerHTML += `<span class="agent-card-kind agent-card-claude">claude</span>`;
+    const firstLine = String(ev.text || '').split('\n').find((l) => l.trim()) || '';
+    head.innerHTML += `<span class="agent-card-kind agent-card-claude">claude</span>
+      <span class="agent-card-summary">${escHtml(firstLine.slice(0, 120))}</span>`;
     body.className += ' agent-card-md';
     body.innerHTML = renderMd(ev.text || '');
     renderMermaidInContainer(body).catch(() => {});
   } else if (ev.type === 'tool_use') {
     const icon = _agentToolIcon(ev.name);
-    const summary = (function () {
-      const i = ev.input || {};
-      if (ev.name === 'Bash') return String(i.command || '').slice(0, 120);
-      if (['Read', 'Edit', 'Write'].includes(ev.name)) return String(i.file_path || '').slice(0, 120);
-      if (['Glob', 'Grep'].includes(ev.name)) return String(i.pattern || i.query || '').slice(0, 120);
-      if (ev.name === 'WebFetch') return String(i.url || '').slice(0, 120);
-      return JSON.stringify(i).slice(0, 120);
-    })();
-    head.innerHTML += `<span class="agent-card-kind agent-card-tool">${escHtml(icon)} ${escHtml(ev.name)}</span>`;
-    body.innerHTML = `<code class="agent-tool-summary">${escHtml(summary)}</code>
-      <details class="agent-card-collapse"><summary>full input</summary><pre>${escHtml(JSON.stringify(ev.input, null, 2))}</pre></details>`;
+    const summary = _agentToolSummary(ev.name, ev.input);
+    head.innerHTML += `<span class="agent-card-kind agent-card-tool">${escHtml(icon)} ${escHtml(ev.name)}</span>
+      <code class="agent-card-summary agent-tool-summary">${escHtml(summary)}</code>`;
+    body.innerHTML = `<pre class="agent-card-tool-input">${escHtml(JSON.stringify(ev.input, null, 2))}</pre>`;
   } else if (ev.type === 'tool_result') {
     const len = (ev.content || '').length;
-    head.innerHTML += `<span class="agent-card-kind agent-card-result${ev.isError ? ' agent-card-error' : ''}">${ev.isError ? '⚠ ' : '✓ '}result</span>
-      <span class="agent-mute">${len} bytes · for=</span><code>${escHtml((ev.tool_use_id || '').slice(-8))}</code>`;
-    // Bash output often contains ANSI; for now we render as preformatted
-    // text. Phase 3+ could add an ANSI-to-HTML step here.
-    const preview = (ev.content || '').slice(0, 800);
-    body.innerHTML = `<pre class="agent-tool-result-preview">${escHtml(preview)}</pre>
-      ${len > 800 ? `<details class="agent-card-collapse"><summary>full output (${len} bytes)</summary><pre>${escHtml(ev.content)}</pre></details>` : ''}`;
+    const icon = ev.isError ? '⚠' : '✓';
+    head.innerHTML += `<span class="agent-card-kind agent-card-result${ev.isError ? ' agent-card-error' : ''}">${icon} result</span>
+      <span class="agent-card-summary agent-mute">${len} bytes · for=<code>${escHtml((ev.tool_use_id || '').slice(-8))}</code></span>`;
+    // Errors get auto-expanded so the user sees the failure inline.
+    if (ev.isError) card.classList.add('agent-card-force-expand');
+    body.innerHTML = `<pre class="agent-tool-result-preview">${escHtml(ev.content || '')}</pre>`;
   } else if (ev.type === 'turn_result') {
     const cost = ev.totalCostUsd != null ? '$' + ev.totalCostUsd.toFixed(4) : '$?';
     const u = ev.usage || {};
     head.innerHTML += `<span class="agent-card-kind agent-card-done">■ ${escHtml(ev.subtype || 'done')}</span>
-      <span class="agent-mute">${escHtml(cost)} · in=${u.input_tokens || 0} out=${u.output_tokens || 0} cache-r=${u.cache_read_input_tokens || 0}</span>`;
+      <span class="agent-card-summary agent-mute">${escHtml(cost)} · in=${u.input_tokens || 0} out=${u.output_tokens || 0} cache-r=${u.cache_read_input_tokens || 0}</span>`;
     if (ev.result) {
       body.className += ' agent-card-md';
       body.innerHTML = renderMd(String(ev.result));
+      card.classList.add('agent-card-force-expand');     // text payload — promote to expanded
     } else {
-      body.remove();
+      body.innerHTML = `<span class="agent-mute">(no result text)</span>`;
     }
   } else if (ev.type === 'permission_request' || ev.type === 'permission_resolved') {
-    // These are visible via the chat-pane menu cards — render a one-
-    // line breadcrumb here so the timeline stays complete.
     const verb = ev.type === 'permission_request' ? 'asked' : (ev.decision || 'resolved');
     head.innerHTML += `<span class="agent-card-kind agent-card-perm">⊕ permission ${escHtml(verb)}</span>
-      <span class="agent-mute">${escHtml(ev.toolName || '')}</span>`;
-    body.remove();
+      <span class="agent-card-summary agent-mute">${escHtml(ev.toolName || '')}</span>`;
   } else if (ev.type === 'rate_limit') {
     head.innerHTML += `<span class="agent-card-kind agent-mute">rate-limit info</span>`;
-    body.remove();
   } else if (ev.type === 'fatal') {
-    head.innerHTML += `<span class="agent-card-kind agent-card-error">⚠ fatal</span>`;
+    head.innerHTML += `<span class="agent-card-kind agent-card-error">⚠ fatal</span>
+      <span class="agent-card-summary">${escHtml(String(ev.error || '').split('\n')[0].slice(0, 120))}</span>`;
     body.innerHTML = `<pre>${escHtml(ev.error || '')}</pre>`;
   } else {
     head.innerHTML += `<span class="agent-card-kind agent-mute">${escHtml(ev.type || 'event')}</span>`;
     body.innerHTML = `<pre>${escHtml(JSON.stringify(ev, null, 2).slice(0, 600))}</pre>`;
   }
 
+  // Default state: expanded for prominent types + forced-expand tools
+  // (tool_result with isError, turn_result with text), collapsed for
+  // everything else. AGENT_NO_BODY events have no body to toggle.
+  const noBody = AGENT_NO_BODY.has(ev.type);
+  if (noBody) {
+    card.classList.add('agent-card-no-body');
+    body.remove();
+  } else if (AGENT_DEFAULT_EXPANDED.has(ev.type) || card.classList.contains('agent-card-force-expand')) {
+    card.classList.add('agent-card-expanded');
+  } else {
+    card.classList.add('agent-card-collapsed');
+  }
+
+  // Click the head to toggle expand. Don't fire if the click landed on
+  // a link or nested button inside the head.
+  if (!noBody) {
+    head.addEventListener('click', (e) => {
+      if (e.target.closest('a, button')) return;
+      card.classList.toggle('agent-card-collapsed');
+      card.classList.toggle('agent-card-expanded');
+    });
+  }
+
   pane.appendChild(card);
   pane.scrollTop = pane.scrollHeight;
+}
+
+// One-line summary for a tool_use head. Each tool gets the slot that
+// answers "what did claude do?" at-a-glance — file path, command,
+// pattern, URL, query. Kept terse (≤120 chars) so the row stays scannable.
+function _agentToolSummary(name, input) {
+  const i = input || {};
+  if (name === 'Bash')                          return '$ ' + String(i.command || '').slice(0, 118);
+  if (['Read', 'Edit', 'Write'].includes(name)) return String(i.file_path || '').slice(0, 120);
+  if (['Glob', 'Grep'].includes(name))          return String(i.pattern || i.query || '').slice(0, 120);
+  if (name === 'WebFetch')                      return String(i.url || '').slice(0, 120);
+  if (name === 'WebSearch')                     return '"' + String(i.query || '').slice(0, 116) + '"';
+  if (name === 'TodoWrite')                     return '(todo list update)';
+  if (name === 'Task')                          return String(i.subagent_type || i.description || '').slice(0, 120);
+  return JSON.stringify(i).slice(0, 120);
 }
 
 function _applyStateUpdate(msg) {

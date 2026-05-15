@@ -585,9 +585,29 @@ test_best_practices_template() {
   grep -q "_AGENT_TOOL_ICONS\|_agentToolIcon" web/public/app.js \
     && pass "app.js: per-tool icon map present" \
     || fail "app.js: per-tool icon map present"
-  grep -q "agent-card-md\|agent-card-collapse" web/public/app.js \
-    && pass "app.js: rich event-card renderer present" \
-    || fail "app.js: rich event-card renderer present"
+  grep -q "agent-card-md" web/public/app.js \
+    && pass "app.js: rich event-card renderer present (markdown body)" \
+    || fail "app.js: rich event-card renderer present (markdown body)"
+  # Phase 1 aggressive-minimize: tool cards collapse by default, click the
+  # head to toggle. Three guards must remain wired so signal doesn't
+  # regress: (1) AGENT_DEFAULT_EXPANDED whitelists ONLY claude text +
+  # fatal as initially open; (2) collapsed cards hide their body via CSS;
+  # (3) tool errors (isError) force-expand so failures aren't hidden.
+  grep -q "AGENT_DEFAULT_EXPANDED" web/public/app.js \
+    && pass "app.js: AGENT_DEFAULT_EXPANDED whitelist" \
+    || fail "app.js: AGENT_DEFAULT_EXPANDED whitelist"
+  grep -q "agent-card-expanded\|agent-card-collapsed" web/public/app.js \
+    && pass "app.js: expand/collapse class toggle" \
+    || fail "app.js: expand/collapse class toggle"
+  grep -q "agent-card-force-expand" web/public/app.js \
+    && pass "app.js: tool errors force-expand" \
+    || fail "app.js: tool errors force-expand"
+  grep -Pzoq "agent-card\.agent-card-collapsed[\s\S]{0,80}agent-card-body[\s\S]{0,40}display:\s*none" web/public/styles.css \
+    && pass "styles.css: collapsed cards hide their body" \
+    || fail "styles.css: collapsed cards hide their body"
+  grep -Pzoq "chat-msg\.chat-msg-menu:not\(\.chat-msg-menu-collapsed\)[\s\S]{0,800}position:\s*sticky" web/public/styles.css \
+    && pass "styles.css: active permission menu is sticky-bottom" \
+    || fail "styles.css: active permission menu is sticky-bottom"
   # Phase 4: streaming-input + interrupt semantics. AgentSession holds a
   # single long-lived query() with an AsyncMessageQueue prompt;
   # interrupt() aborts via AbortController and the next write() resumes.
