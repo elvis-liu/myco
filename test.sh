@@ -2593,6 +2593,25 @@ test_chat_window() {
   grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-submit'" server/src/pty.js \
     && pass "pty.js: agent WS handles menu-submit frame" \
     || fail "pty.js: agent WS missing menu-submit handler"
+  # Multi-select AskUserQuestion: agent-session must mark each option
+  # as a checkbox so the modal renders toggle buttons instead of
+  # single-pick. Submit gathers all checked options and resolves with
+  # the SDK's documented comma-separated answer.
+  grep -q "resolveMenuToggle" server/src/agent-session.js \
+    && pass "agent-session: resolveMenuToggle for multi-select" \
+    || fail "agent-session: missing resolveMenuToggle"
+  grep -q "resolveMenuSubmit" server/src/agent-session.js \
+    && pass "agent-session: resolveMenuSubmit gathers checked" \
+    || fail "agent-session: missing resolveMenuSubmit"
+  grep -Pzoq "isMulti[^}]{0,300}checkbox: true" server/src/agent-session.js \
+    && pass "agent-session: multi-select options flagged checkbox=true" \
+    || fail "agent-session: multi-select options missing checkbox flag"
+  grep -Pzoq "session\.mode === 'agent'[\s\S]{0,400}resolveMenuToggle" server/src/pty.js \
+    && pass "pty.js: handleMenuToggle has agent-mode branch" \
+    || fail "pty.js: handleMenuToggle missing agent-mode branch"
+  grep -Pzoq "session\.mode === 'agent'[\s\S]{0,400}resolveMenuSubmit" server/src/pty.js \
+    && pass "pty.js: handleMenuSubmit has agent-mode branch" \
+    || fail "pty.js: handleMenuSubmit missing agent-mode branch"
   grep -qF "sendMenuPick(n, hash)" web/public/app.js \
     && pass "app.js: sendMenuPick accepts hash arg" \
     || fail "app.js: sendMenuPick signature missing hash"

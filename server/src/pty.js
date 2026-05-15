@@ -737,6 +737,16 @@ function _isWizardActive(session) { return _detectWizard(session).kind !== 'none
 function handleMenuToggle(sessionId, session, n, hash) {
   if (!Number.isFinite(n) || n < 1 || n > 9) return;
   if (!session || !session.alive) return;
+  // Agent-mode (SDK-driven) toggle: no PTY navigation, just flip the
+  // option's .checked state on the AgentSession's pending entry so
+  // Submit can gather the final set. The chat-row's persisted state
+  // is also updated for reconnect visibility.
+  if (session.mode === 'agent' && typeof session.resolveMenuToggle === 'function' && hash) {
+    const handled = session.resolveMenuToggle(hash, n);
+    if (handled) _toggleMenuChatCheckbox(sessionId, n, hash);
+    console.log(`[menu-toggle] ${sessionId} mode=agent hash=${hash.slice(-12)} n=${n} handled=${handled}`);
+    return;
+  }
   const pending = session.pendingMenu;
   if (!pending || !Array.isArray(pending.options) || !pending.multi) return;
   if (hash && pending.hash && pending.hash !== hash) {
@@ -880,6 +890,15 @@ function _findSubmitNavCount(session) {
 }
 function handleMenuSubmit(sessionId, session, hash) {
   if (!session || !session.alive) return;
+  // Agent-mode submit: AgentSession.resolveMenuSubmit gathers checked
+  // options + settles the SDK promise with comma-separated labels
+  // (the documented multi-select answer format). No PTY navigation.
+  if (session.mode === 'agent' && typeof session.resolveMenuSubmit === 'function' && hash) {
+    _markMenuChatAnswered(sessionId, 0, hash, /*submit*/ true);
+    const handled = session.resolveMenuSubmit(hash);
+    console.log(`[menu-submit] ${sessionId} mode=agent hash=${hash.slice(-12)} handled=${handled}`);
+    return;
+  }
   const pending = session.pendingMenu;
   if (!pending || !pending.multi) return;
   if (hash && pending.hash && pending.hash !== hash) {

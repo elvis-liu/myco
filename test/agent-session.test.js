@@ -240,6 +240,44 @@ function collectEvents(session, { until, timeoutMs = 60000 }) {
     s.kill();
   });
 
+  // Regression: AskUserQuestion with multiSelect=true must render
+  // checkboxes (so the modal toggles instead of immediately resolving)
+  // AND resolve via Submit with a comma-separated label string per the
+  // SDK's multi-select answer convention.
+  await t('AskUserQuestion multiSelect=true: toggle + submit returns comma-separated labels', async () => {
+    const s = new AgentSession('test-ask-multi-toggle', { cwd: process.cwd() });
+    const menus = [];
+    s.on('menu', (m) => menus.push(m));
+    const input = {
+      questions: [{
+        question: 'Pick all that apply',
+        header: 'Tags',
+        multiSelect: true,
+        options: [
+          { label: 'Alpha' },
+          { label: 'Beta' },
+          { label: 'Gamma' },
+        ],
+      }],
+    };
+    const pending = s._canUseTool('AskUserQuestion', input, { toolUseID: 'tu_multi_toggle' });
+    assert.strictEqual(menus.length, 1);
+    assert.strictEqual(menus[0].multi, true, 'menu.multi propagated');
+    for (const o of menus[0].options) {
+      assert.strictEqual(o.checkbox, true, 'each option flagged as checkbox');
+      assert.strictEqual(o.checked, false, 'each option starts unchecked');
+    }
+    // Toggle option 1 (Alpha) and option 3 (Gamma) on.
+    assert.strictEqual(s.resolveMenuToggle(menus[0].hash, 1), true);
+    assert.strictEqual(s.resolveMenuToggle(menus[0].hash, 3), true);
+    // Submit gathers Alpha + Gamma → "Alpha, Gamma".
+    assert.strictEqual(s.resolveMenuSubmit(menus[0].hash), true);
+    const resolved = await pending;
+    assert.strictEqual(resolved.behavior, 'allow');
+    assert.deepStrictEqual(resolved.updatedInput.answers, { 'Pick all that apply': 'Alpha, Gamma' });
+    s.kill();
+  });
+
   await t('Permission request (non-AskUserQuestion) → 3-option menu, picks 1/2/3 do allow-once/allow-always/deny', async () => {
     const s = new AgentSession('test-perm-1', { cwd: process.cwd() });
     const menus = [];

@@ -471,21 +471,28 @@ class AgentSession extends EventEmitter {
     const i = shared.askedIdx;
     const q = shared.questions[i] || {};
     const opts = Array.isArray(q.options) ? q.options : [];
+    const isMulti = !!q.multiSelect;
     // Sub-hash distinguishes each question in a multi-question call so
     // the chat row + modal queue can track them separately. Single-
     // question calls still get a -q0 suffix; consumers should treat the
     // hash as opaque.
     const subHash = `agent-${shared.toolUseID}-q${i}`;
+    // For multi-select, mark each option as a checkbox so the modal
+    // renders toggle buttons + a Submit row. The .checked state is
+    // mutated in place by the toggle handler so the chat row can
+    // reflect the current selection set.
+    const menuOpts = opts.map((o, k) => ({
+      n: k + 1,
+      label: String(o.label || ''),
+      description: o.description || '',
+      ...(isMulti ? { checkbox: true, checked: false } : {}),
+    }));
     const menu = {
       kind: 'plan',
       question: q.question || '',
-      options: opts.map((o, k) => ({
-        n: k + 1,
-        label: String(o.label || ''),
-        description: o.description || '',
-      })),
+      options: menuOpts,
       hash: subHash,
-      multi: !!q.multiSelect,
+      multi: isMulti,
       // Sub-question pager hints — surfaced in chat row + modal pager.
       subQuestionIdx: i,
       subQuestionTotal: shared.questions.length,
@@ -495,6 +502,10 @@ class AgentSession extends EventEmitter {
       toolUseID: shared.toolUseID,
       questionIdx: i,
       shared,
+      // Live reference to the options array — toggle handlers mutate
+      // options[k].checked in place; submit gathers the final set.
+      options: menuOpts,
+      multi: isMulti,
     });
     this._emit({
       type: 'permission_request',
@@ -505,9 +516,62 @@ class AgentSession extends EventEmitter {
       optionCount: menu.options.length,
       subQuestionIdx: i,
       subQuestionTotal: shared.questions.length,
+      multi: isMulti,
     });
     this.pendingMenu = menu;
     this.emit('menu', menu);
+  }
+
+  // Multi-select toggle for AskUserQuestion. Flips the n-th option's
+  // .checked state. Idempotent on the hash → no resolve, no SDK
+  // unblock — the user keeps composing until they hit Submit.
+  resolveMenuToggle(hash, n) {
+    const pending = this._pendingPermissions.get(hash);
+    if (!pending || !pending.multi || !Array.isArray(pending.options)) return false;
+    const opt = pending.options.find((o) => o.n === n);
+    if (!opt || !opt.checkbox) return false;
+    opt.checked = !opt.checked;
+    console.log(`[agent-menu] ${this.sessionId} toggle hash=${hash.slice(-12)} n=${n} → ${opt.checked ? 'checked' : 'unchecked'}`);
+    return true;
+  }
+
+  // Multi-select submit for AskUserQuestion. Gathers every .checked
+  // option, joins their labels with ", " (the SDK's documented multi-
+  // select answer format), and settles the SDK promise. If no options
+  // were checked, the answer is the empty string — caller's choice
+  // for the model to interpret as "I didn't pick anything."
+  resolveMenuSubmit(hash) {
+    const pending = this._pendingPermissions.get(hash);
+    if (!pending || pending.kind !== 'ask' || !pending.multi || !pending.shared) return false;
+    this._pendingPermissions.delete(hash);
+    this.pendingMenu = null;
+    const shared = pending.shared;
+    const i = pending.questionIdx;
+    const q = shared.questions[i] || {};
+    const picked = pending.options.filter((o) => o.checked).map((o) => o.label);
+    const joined = picked.join(', ');
+    shared.answers[q.question || ''] = joined;
+    this._emit({
+      type: 'permission_resolved',
+      toolName: 'AskUserQuestion',
+      hash,
+      multi: true,
+      pickedLabels: picked,
+      pickedJoined: joined,
+      subQuestionIdx: i,
+      subQuestionTotal: shared.questions.length,
+    });
+    console.log(`[agent-menu] ${this.sessionId} submit hash=${hash.slice(-12)} answered="${joined}"`);
+    shared.askedIdx = i + 1;
+    if (shared.askedIdx < shared.questions.length) {
+      this._askNextSubQuestion(shared);
+      return true;
+    }
+    shared.resolve({
+      behavior: 'allow',
+      updatedInput: { questions: shared.questions, answers: shared.answers },
+    });
+    return true;
   }
 
   _handlePermissionRequest(toolName, input, ctx, hash, toolUseID) {
