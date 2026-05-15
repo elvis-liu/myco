@@ -68,10 +68,21 @@ function autoRespondToMenu(sessionId, session, menu, optionN, verb, target) {
 }
 
 function broadcastMenuToChat(sessionId, session, menu, target) {
-  // Minimal body — the client renders the inline buttons (see
-  // renderChatMessage), so the message text just needs to set the
-  // scene. Enumerating options here, or telling the user to type
-  // `/decide <n>`, only duplicates what the buttons already show.
+  // Phase 2.5: before broadcasting a new menu, stamp any older
+  // unanswered menus on this session as superseded. In agent mode
+  // the SDK only fires a fresh canUseTool when the prior one has
+  // already been resolved (via session.resolveMenuPick), so any
+  // older "active" row in rec.chat must have been answered out-of-
+  // band — most commonly via the bare-digit chat shortcut that, pre-
+  // 2026-05-15, resolved the SDK promise without stamping the row.
+  // The supersede sweep keeps the modal queue and chat history from
+  // accumulating zombie picks.
+  try {
+    const ptyMod = require('./pty');
+    if (typeof ptyMod._supersedeStaleMenus === 'function') {
+      ptyMod._supersedeStaleMenus(sessionId);
+    }
+  } catch {}
   const lines = [];
   if (target) {
     const summary = `${target.tool}(${target.input || ''})`.slice(0, 200);

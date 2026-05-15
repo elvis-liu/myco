@@ -1745,14 +1745,23 @@ function handleChatPostfixes(sessionId, session, user, text, message) {
           return;
         }
         // Bare-digit menu pick for the most recently broadcast menu.
-        // session.pendingMenu is set by canUseTool (phase 2), cleared by
-        // resolveMenuPick.
+        // Delegate to handleMenuPick so we get BOTH effects:
+        //   (1) session.resolveMenuPick — unblocks the SDK's canUseTool
+        //       promise so claude can proceed
+        //   (2) _markMenuChatAnswered — stamps the chat row's
+        //       meta.pickedN + meta.answered and emits a state-update
+        //       to all clients
+        // Calling session.resolveMenuPick alone (the pre-2026-05-15
+        // shape) left the chat row "active-looking" forever; clients
+        // re-rendered it as still-pending after every refresh, the
+        // modal queue kept it, and follow-up menus piled up behind a
+        // never-clearing stale entry.
         const asDigit = /^[1-9]$/.test(input) ? parseInt(input, 10) : NaN;
         if (Number.isFinite(asDigit) && session.pendingMenu) {
           const hash = session.pendingMenu.hash;
-          if (typeof session.resolveMenuPick === 'function' && hash) {
+          if (hash) {
             console.log(`[chat→agent] ${user}: menu pick ${asDigit} (chat shorthand, hash=${hash.slice(-12)})`);
-            session.resolveMenuPick(hash, asDigit);
+            handleMenuPick(sessionId, session, asDigit, hash);
             return;
           }
         }
@@ -1930,6 +1939,10 @@ module.exports = {
   _detectMentionTarget,
   // Exposed for menu-pick race tests (queue + retry).
   _retryQueuedMenuPick,
+  // Exposed so menu.js can supersede stale chat-row menus when a new
+  // permission/AskUserQuestion broadcast arrives — otherwise the
+  // unmarked older row haunts the modal queue forever.
+  _supersedeStaleMenus,
   // Re-exported for menu-broadcast.test.js — the live implementations now
   // live in menu.js; this surface stays so the test contract (and any
   // outside caller that pulls the menu helpers off ptyMod) keeps working.

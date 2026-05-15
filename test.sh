@@ -2539,6 +2539,28 @@ test_chat_window() {
   grep -qF 'optBtn.dataset.hash' web/public/app.js \
     && pass "app.js: modal click handler reads hash from option button" \
     || fail "app.js: modal click handler not reading hash"
+  # Regression (2026-05-15): the bare-digit chat shortcut for agent
+  # mode was calling session.resolveMenuPick directly, which only
+  # resolved the SDK's canUseTool promise but never marked the chat
+  # row answered. The chat row stayed in the modal queue forever and
+  # the next permission broadcast piled on top of a zombie. Route
+  # through handleMenuPick (which calls _markMenuChatAnswered first,
+  # THEN resolves the SDK promise) so both sides converge.
+  grep -Pzoq "bare-digit menu pick[\s\S]{0,1500}handleMenuPick\(sessionId" server/src/pty.js \
+    && pass "pty.js: bare-digit chat shortcut routes through handleMenuPick" \
+    || fail "pty.js: bare-digit chat shortcut bypasses handleMenuPick"
+  # Companion regression: when claude broadcasts a NEW canUseTool
+  # menu, mark any older still-unanswered rows superseded so they
+  # don't haunt the modal queue.
+  grep -q "_supersedeStaleMenus" server/src/menu.js \
+    && pass "menu.js: broadcasts supersede stale menus" \
+    || fail "menu.js: broadcasts don't supersede stale menus"
+  # Companion regression: a menu state-update (server confirmed pick /
+  # supersede) must rebuild the client's modal queue + re-render the
+  # popup, otherwise resolved menus stay visible in the modal.
+  grep -Pzoq "_applyMenuStateUpdate[\s\S]{0,2500}_rescanPendingMenuQueue\(\)[\s\S]{0,80}_renderPermModal\(\)" web/public/app.js \
+    && pass "app.js: menu state-update refreshes modal queue + popup" \
+    || fail "app.js: menu state-update leaves modal queue stale"
   grep -qF "sendMenuPick(n, hash)" web/public/app.js \
     && pass "app.js: sendMenuPick accepts hash arg" \
     || fail "app.js: sendMenuPick signature missing hash"

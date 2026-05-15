@@ -3312,6 +3312,13 @@ function _applyMenuStateUpdate(msg) {
       console.warn('[state-update] menu match but DOM child missing at idx=' + i);
     }
     _bindChatMenuClicks();
+    // Server confirmed this menu's state (pickedN / submitted /
+    // superseded / answered). Refresh the modal queue + popup so an
+    // answered or superseded menu drops out immediately, and a still-
+    // pending one stays in view. Without this the queue would
+    // retain a server-resolved menu until the next chat append.
+    _rescanPendingMenuQueue();
+    _renderPermModal();
     return;
   }
   console.warn('[state-update] menu state-update did NOT match any row — uuid=' + uuid + ' hash=' + (hash ? hash.slice(0,60) : 'null'));
