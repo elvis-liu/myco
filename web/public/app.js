@@ -1580,6 +1580,7 @@ function _appendChatMessageDom(message) {
   const html = renderChatMessage(message, /*isActiveMenu*/ isMenu);
   const node = _htmlToNode(html);
   if (!node) return;
+  if (message.ts) node.dataset.ts = message.ts;
   list.appendChild(node);
   scrollChatToLatest();
   _bindChatMenuClicks();
@@ -2037,6 +2038,42 @@ function scrollChatToLatest() {
   requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
 }
 
+// Insert an element into #chat-messages ordered by data-ts (ISO 8601
+// strings are lex-comparable). Walks from the END since the typical
+// case is "new event = newest". Skips the load-older control button.
+// Empty/missing ts → fall back to appendChild (legacy behavior).
+// Called from renderChatPane when re-merging preserved agent cards
+// with newly-rendered chat bubbles by timestamp. Live appends
+// (latest ts) take the appendChild path naturally.
+function _insertChronological(list, el, ts) {
+  if (!list || !el) return;
+  if (ts) el.dataset.ts = ts;
+  const tsStr = el.dataset.ts || '';
+  if (!tsStr) { list.appendChild(el); return; }
+  const children = list.children;
+  for (let i = children.length - 1; i >= 0; i--) {
+    const c = children[i];
+    if (c === el) continue;
+    if (c.id === 'chat-load-older') continue;
+    const cts = c.dataset.ts || '';
+    if (!cts || cts <= tsStr) {
+      const after = c.nextSibling;
+      if (after) list.insertBefore(el, after); else list.appendChild(el);
+      return;
+    }
+  }
+  // Older than every child — slot to the top (after load-older if present).
+  const loadOlder = list.querySelector('#chat-load-older');
+  if (loadOlder) {
+    const after = loadOlder.nextSibling;
+    if (after) list.insertBefore(el, after); else list.appendChild(el);
+  } else if (list.firstChild) {
+    list.insertBefore(el, list.firstChild);
+  } else {
+    list.appendChild(el);
+  }
+}
+
 // Lazy-load older history. Long sessions accumulate hundreds of chat
 // rows + agent cards; keeping them all in-flow inflates layout cost
 // and forces the user to scroll past ancient context. Cap visible
@@ -2307,7 +2344,20 @@ function renderChatPane(scrollToBottom = false) {
   list.innerHTML = state.chatMessages
     .map((m, i) => renderChatMessage(m, i === lastMenuIdx))
     .join('');
-  for (const el of preserve) list.appendChild(el);
+  // Stamp ts on the freshly-rendered chat bubbles so the
+  // chronological merge below can place preserved agent cards in
+  // the right slots by timestamp.
+  const chatNodes = list.querySelectorAll(':scope > .chat-msg');
+  for (let i = 0; i < chatNodes.length && i < state.chatMessages.length; i++) {
+    const t = state.chatMessages[i] && state.chatMessages[i].ts;
+    if (t) chatNodes[i].dataset.ts = t;
+  }
+  // Chronological merge — slot each preserved agent card into the
+  // chat-bubble list by its data-ts. Without this, agent cards
+  // landed at the end of the list regardless of when they actually
+  // happened. With it, a chat bubble at 13:01 + tool call at 13:02
+  // + chat bubble at 13:03 render in that order.
+  for (const el of preserve) _insertChronological(list, el, el.dataset.ts || '');
   if (scrollToBottom) scrollChatToLatest();
   _bindChatMenuClicks();
   // marked emits ```mermaid``` blocks as <pre><code class="language-mermaid">.
@@ -2951,6 +3001,7 @@ function _appendAgentEvent(ev) {
       return;
     }
     const batch = _createChromeBatch(ev, ts);
+    if (ev.ts) batch.dataset.ts = ev.ts;
     pane.appendChild(batch);
     pane.scrollTop = pane.scrollHeight;
     _enforceChatHistoryCap();
@@ -3062,6 +3113,7 @@ function _appendAgentEvent(ev) {
     card.classList.toggle('agent-card-expanded');
   });
 
+  if (ev.ts) card.dataset.ts = ev.ts;
   pane.appendChild(card);
   pane.scrollTop = pane.scrollHeight;
   _enforceChatHistoryCap();
@@ -3148,6 +3200,7 @@ function _appendTurnFooter(ev, ts) {
   row.innerHTML = `<span class="turn-footer-glyph${ok ? '' : ' turn-footer-warn'}">${escHtml(glyph)}</span>` +
                   `<span class="turn-footer-ts">${escHtml(ts)}</span>` +
                   `<span class="turn-footer-stats">${escHtml(parts.join(' · '))}</span>`;
+  if (ev.ts) row.dataset.ts = ev.ts;
   pane.appendChild(row);
   pane.scrollTop = pane.scrollHeight;
   _enforceChatHistoryCap();
