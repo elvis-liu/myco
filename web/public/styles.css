@@ -978,17 +978,26 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
     max-width: 120px;
     flex: 0 0 auto;
   }
-  /* Token meter — already small; ensure it doesn't push the input
-     off-screen on narrow phones. */
+  /* Token meter — already small; tighten font on narrow phones. */
   .token-meter {
     font-size: 0.66rem;
-    padding: 1px 6px 3px;
   }
-  /* Stop button: bigger tap target on mobile. */
-  .claude-typing-stop {
-    min-height: 32px;
-    padding: 4px 10px;
-    font-size: 0.84rem;
+  /* Composer buttons bump to 40px on mobile for finger-friendly
+     tap targets. The SVG inside scales proportionally via the
+     ".composer-icon" override below. */
+  .composer-btn {
+    width: 40px;
+    height: 40px;
+  }
+  .composer-icon {
+    width: 20px;
+    height: 20px;
+  }
+  /* Composer card uses slightly more padding on mobile so the larger
+     buttons fit without crowding the text. */
+  #chat-form.composer {
+    padding: 4px 4px calc(4px + var(--safe-bottom));
+    gap: 4px;
   }
   /* Tighten the inter-button gap so the 5-icon cluster (files /
      plan / arch / test / chat) fits comfortably on a 375px screen
@@ -2040,22 +2049,45 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   color: #2a1f00;
 }
 
-#chat-form {
+/* Unified composer card (2026-05-16) — textarea + icon buttons live
+   inside one rounded rectangle with a focus-within glow, reading as
+   a single unit instead of two adjacent controls divided by a thin
+   border. Pattern: Claude.ai / ChatGPT / Cursor composer styling. */
+#chat-form.composer {
   display: flex;
-  align-items: flex-end;         /* keep Send pinned to bottom as textarea grows */
-  gap: 4px;
-  padding: 1px 0 calc(1px + var(--safe-bottom));
-  border-top: 1px solid var(--border);
-  position: relative;            /* anchor for #chat-autocomplete */
-  flex: 0 0 auto;                /* don't grow/shrink; natural height */
+  align-items: flex-end;
+  gap: 6px;
+  padding: 6px 6px calc(6px + var(--safe-bottom));
+  border-top: 1px solid transparent;
+  position: relative;
+  flex: 0 0 auto;
+  margin: 4px 8px calc(4px + var(--safe-bottom));
+  background: var(--surface-2, #1a1f2a);
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px var(--border, rgba(255, 255, 255, .08));
+  transition: box-shadow .15s ease;
+}
+#chat-form.composer:focus-within {
+  box-shadow:
+    0 0 0 1px rgba(76, 175, 130, .55),
+    0 4px 16px rgba(0, 0, 0, .25);
+}
+/* The whole composer dims when claude is interrupting/done. Subtle. */
+#chat-form.composer.composer-running {
+  box-shadow:
+    0 0 0 1px rgba(138, 180, 248, .35),
+    0 4px 16px rgba(0, 0, 0, .25);
 }
 
-/* Slash-command + @-mention dropdown anchored above the chat input. */
+/* Slash-command + @-mention dropdown — anchored above the composer
+   card. Nested INSIDE #chat-form so position:absolute resolves to
+   the form's own bounding box; `bottom: calc(100% + 4px)` floats
+   the dropdown right above the card's top edge. */
 #chat-autocomplete {
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: calc(100% + 4px);      /* sit just above the input */
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 4px);
   max-height: 220px;
   overflow-y: auto;
   background: rgba(28, 32, 42, .96);
@@ -2068,6 +2100,7 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   padding: 4px 0;
   font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
+#chat-autocomplete[hidden] { display: none; }
 #chat-autocomplete .ac-item {
   display: flex;
   align-items: baseline;
@@ -2102,23 +2135,21 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   font-style: italic;
 }
 
+/* Textarea inside the composer card — borderless + transparent so
+   the card's own border/glow is the sole visual edge. */
 #chat-input {
   flex: 1;
-  background: var(--surface-2);
+  background: transparent;
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   font: inherit;
-  line-height: 1.4;
+  line-height: 1.45;
   min-width: 0;
-  /* Single-line minimum; the JS auto-resize (autoResize() in app.js)
-     grows the height with content up to max-height, then a thin
-     scrollbar takes over for very long pastes. The earlier 5.2em
-     minimum baked in 3 empty lines of unused space. */
   resize: none;
   overflow-y: auto;
-  min-height: 2em;       /* ~1 line at line-height:1.4 plus padding */
+  min-height: 1.8em;
   max-height: 160px;
   scrollbar-width: thin;
   scrollbar-color: rgba(120, 130, 145, .35) transparent;
@@ -2126,17 +2157,68 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 #chat-input::-webkit-scrollbar { width: 6px; }
 #chat-input::-webkit-scrollbar-track { background: transparent; }
 #chat-input::-webkit-scrollbar-thumb { background: rgba(120, 130, 145, .35); border-radius: 4px; }
-#chat-input:focus { outline: none; border-color: var(--accent); }
+#chat-input:focus { outline: none; }
 #chat-input:disabled { opacity: .5; cursor: not-allowed; }
-#chat-send {
-  background: var(--accent);
-  color: #000;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 14px;
-  font-weight: 600;
+#chat-input::placeholder { color: rgba(255, 255, 255, .28); }
+
+/* Composer actions cluster — holds #chat-send + #claude-stop side
+   by side. Sits at the bottom of the composer so it stays pinned
+   while the textarea grows upward. */
+.composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding-bottom: 2px;
 }
-#chat-send:disabled { opacity: .4; cursor: not-allowed; }
+.composer-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text);
+  transition: background .12s ease, color .12s ease, transform .08s ease;
+}
+.composer-btn:hover { background: rgba(255, 255, 255, .07); }
+.composer-btn:active { transform: scale(.94); }
+.composer-btn:disabled { opacity: .35; cursor: not-allowed; }
+.composer-icon { width: 18px; height: 18px; display: block; }
+
+/* Send: filled accent disc, dark icon. The textarea must have
+   content for it to be "ready" — empty state uses a subdued
+   appearance so the user knows clicking won't do anything yet.
+   (Real disable lives in JS — this is just visual.) */
+.composer-btn-send {
+  background: var(--accent, #4caf82);
+  color: #08120d;
+}
+.composer-btn-send:hover {
+  background: #5fbe93;
+  color: #08120d;
+}
+
+/* Stop: red disc that replaces Send while claude is running. */
+.composer-btn-stop {
+  background: rgba(255, 130, 130, .18);
+  color: #ff8a8a;
+  border: 1px solid rgba(255, 130, 130, .35);
+  display: none;     /* hidden by default; .composer-running flips */
+}
+.composer-btn-stop:hover {
+  background: rgba(255, 130, 130, .28);
+  color: #ffb0b0;
+  border-color: rgba(255, 130, 130, .55);
+}
+
+/* When the composer is in "running" state, swap Send for Stop. */
+#chat-form.composer.composer-running .composer-btn-send { display: none; }
+#chat-form.composer.composer-running .composer-btn-stop { display: inline-flex; }
 
 /* Floating toggle on the terminal pane (always available when a session
    is open). Position it top-right so it doesn't collide with btn-expand.
@@ -3459,18 +3541,16 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
      was an absolute overlay floating above #chat-form which still
      left enough visual ambiguity (overlapping chat content, rapid
      glyph repaints) for users to perceive movement. */
-  flex: 0 0 24px;
+  flex: 0 0 22px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0;
+  gap: 8px;
+  padding: 0 14px;
   color: #8b949e;
-  font-size: 0.85rem;
-  border-top: 1px dashed #21262d;
-  /* Transparent so the strip inherits the chatpane surface instead
-     of painting a slightly-bluer dark band on top of it (the previous
-     rgba(22,27,34,.4) read as a distinct lighter band against the
-     #1a1a1a chatpane bg). The dashed top border is the only divider. */
+  font-size: 0.78rem;
+  /* Composer card below has its own visual boundary now; the dashed
+     border above the status row was redundant chrome. */
+  border-top: 0;
   background: transparent;
   overflow: hidden;
   white-space: nowrap;
@@ -3489,35 +3569,9 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
    strip already hides itself when idle (visibility:hidden), so we
    don't need a separate hide rule — when the strip is invisible, so
    is the button. The kbd hint mirrors the Esc-to-interrupt binding. */
-.claude-typing-stop {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 2px 8px;
-  font: inherit;
-  font-size: 0.78rem;
-  color: var(--fg, #c9d1d9);
-  background: rgba(255, 130, 130, .12);
-  border: 1px solid rgba(255, 130, 130, .35);
-  border-radius: 3px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  line-height: 1.4;
-}
-.claude-typing-stop:hover {
-  background: rgba(255, 130, 130, .22);
-  border-color: rgba(255, 130, 130, .55);
-}
-.claude-typing-stop kbd {
-  font: inherit;
-  font-size: 0.7rem;
-  padding: 0 4px;
-  border: 1px solid rgba(255, 255, 255, .15);
-  border-radius: 2px;
-  background: rgba(0, 0, 0, .25);
-  opacity: .75;
-}
+/* (2026-05-16) #claude-stop moved out of the status strip into the
+   composer (#chat-form). Its visuals are styled via .composer-btn-
+   stop now. The old .claude-typing-stop rules are retired. */
 .claude-typing[hidden] {
   /* The global !important display:none rule on the `hidden` attribute
      at the top of this file would otherwise collapse the slot on
@@ -3548,11 +3602,10 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .claude-typing-done .claude-typing-dots { visibility: hidden; }
 .claude-typing-error { color: #ff8c69; }
 .claude-typing-error .claude-typing-dots span { background: #ff8c69; }
-/* Stop button is meaningless when claude is done or in an error
-   state (the turn already ended) — hide it then. Visible by default
-   for thinking / running / awaiting. */
-.claude-typing-done .claude-typing-stop,
-.claude-typing-error .claude-typing-stop { display: none; }
+/* (Retired) Stop hide-rules — Stop now lives in the composer and
+   is toggled via #chat-form.composer-running, which is set true
+   only for thinking / running / awaiting states (see
+   _renderClaudeTyping in app.js). */
 .claude-typing-dots {
   display: inline-flex;
   align-items: center;
@@ -3985,20 +4038,19 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 }
 .chat-load-older:active { transform: scale(.99); }
 
-/* Token meter — Zed-style context-window fill + cumulative cost
-   chip living just above the chat form (between #claude-typing and
-   #chat-autocomplete). Color tint shifts at 60% (warn) and 80%
-   (alarm) so the user can spot a swelling context without reading
-   the number. Hidden until the first turn_result arrives. */
+/* Token meter — inline span on the right edge of the status row
+   (#claude-typing). Zed-style context-window fill + cumulative
+   cost. Color tint shifts at 60% (warn) and 80% (alarm) so a
+   swelling context is visible without reading numbers. Hidden until
+   the first turn_result arrives. */
 .token-meter {
   flex: 0 0 auto;
-  padding: 2px 8px 4px;
+  margin-left: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.7rem;
   line-height: 1.4;
   color: var(--muted, #8b949e);
   opacity: 0.72;
-  text-align: right;
   user-select: text;
   cursor: help;
 }
