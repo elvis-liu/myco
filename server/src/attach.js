@@ -105,6 +105,24 @@ function _registerExternalSession(sessionId, session) {
   sessions.set(sessionId, session);
   if (typeof session.on === 'function') {
     session.on('menu', (menu) => menuMod.handleSessionMenu(sessionId, session, menu));
+    // Plan-item ▶ Run linkage: when the user kicks off a run via
+    // the chat-pane Run button, handleChatMessage stamps
+    // session._activeRunItem with the item id. On turn_result we
+    // append a run record to that item (status / summary / cost /
+    // turn ts) and broadcast the artifact update so all clients
+    // see the linked status. One run per turn — _activeRunItem
+    // clears after the outcome is stamped.
+    session.on('agent-event', (ev) => {
+      if (!ev || ev.type !== 'turn_result') return;
+      const active = session._activeRunItem;
+      if (!active) return;
+      try {
+        _stampPlanItemRunOutcome(sessionId, active.itemId, ev, active.startedAt);
+      } catch (err) {
+        console.error('[plan-run] stamp outcome failed:', err.message);
+      }
+      session._activeRunItem = null;
+    });
     session.on('exit', () => {
       setTimeout(() => {
         const cur = sessions.get(sessionId);
@@ -113,6 +131,78 @@ function _registerExternalSession(sessionId, session) {
     });
   }
   return session;
+}
+
+// Update the running status of a plan item before a turn lands. The
+// matching plan item's last `runs[]` entry is replaced (if mid-run)
+// or appended (if starting). Broadcasts an artifact state-update so
+// chat-pane re-renders the row's status chip.
+function _stampPlanItemStatus(sessionId, itemId, status, summary) {
+  const rec = sessionsMod.getSessionRecord(sessionId);
+  if (!rec) return;
+  const planArtifact = rec.artifacts && rec.artifacts.plan;
+  if (!planArtifact || !Array.isArray(planArtifact.items)) return;
+  const item = planArtifact.items.find((it) => it && it.id === itemId);
+  if (!item) return;
+  if (!Array.isArray(item.runs)) item.runs = [];
+  item.runs.push({
+    status,
+    ts: new Date().toISOString(),
+    summary: summary || null,
+  });
+  // Cap runs[] at the last 10 so a busy item doesn't bloat plan.json.
+  if (item.runs.length > 10) item.runs = item.runs.slice(-10);
+  sessionsMod.saveStore();
+  const session = sessions.get(sessionId);
+  if (session && typeof session.emit === 'function') {
+    session.emit('state-update', { kind: 'artifact', artifactType: 'plan', artifact: planArtifact });
+  }
+}
+
+// Append a terminal "run outcome" record to a plan item after the
+// turn_result event lands. status = success / error / etc. (matches
+// the agent's turn subtype). summary captures cost + duration so
+// the UI chip can show e.g. "✓ done · 6.4s".
+function _stampPlanItemRunOutcome(sessionId, itemId, turnResultEv, startedAt) {
+  const rec = sessionsMod.getSessionRecord(sessionId);
+  if (!rec) return;
+  const planArtifact = rec.artifacts && rec.artifacts.plan;
+  if (!planArtifact || !Array.isArray(planArtifact.items)) return;
+  const item = planArtifact.items.find((it) => it && it.id === itemId);
+  if (!item) return;
+  if (!Array.isArray(item.runs)) item.runs = [];
+  // Replace the trailing "running" placeholder with the outcome if
+  // present, else append.
+  const status = (turnResultEv.subtype === 'success') ? 'success' : 'error';
+  const u = turnResultEv.usage || {};
+  const inTok = u.input_tokens || 0;
+  const outTok = u.output_tokens || 0;
+  const durS = turnResultEv.durationMs != null
+    ? (turnResultEv.durationMs / 1000).toFixed(1) + 's'
+    : null;
+  const summary = [
+    durS,
+    `${inTok}→${outTok} tok`,
+  ].filter(Boolean).join(' · ');
+  const outcome = {
+    status,
+    ts: new Date().toISOString(),
+    startedAt: startedAt || null,
+    summary,
+    result: turnResultEv.result ? String(turnResultEv.result).slice(0, 2000) : null,
+  };
+  const last = item.runs[item.runs.length - 1];
+  if (last && last.status === 'running') {
+    item.runs[item.runs.length - 1] = outcome;
+  } else {
+    item.runs.push(outcome);
+  }
+  if (item.runs.length > 10) item.runs = item.runs.slice(-10);
+  sessionsMod.saveStore();
+  const session = sessions.get(sessionId);
+  if (session && typeof session.emit === 'function') {
+    session.emit('state-update', { kind: 'artifact', artifactType: 'plan', artifact: planArtifact });
+  }
 }
 
 function killSession(sessionId) {
@@ -780,6 +870,19 @@ function handleChatMessage(sessionId, session, user, text, opts = {}) {
   const mentionTarget = _detectMentionTarget(text);
   if (mentionTarget && user !== ASSISTANT_USER) {
     message.meta = { kind: 'mention', mentionUser: mentionTarget };
+  }
+  // [run:<type>#<id>] marker: the chat-pane's ▶ Run button on a
+  // plan item produces this prefix. Stash {type, id} on the
+  // session so the NEXT turn_result lands a status record on the
+  // matched plan item via _attachPlanRunOutcome.
+  const runMatch = text.match(/\[run:(plan|test|arch|td|fr|bug)#([A-Za-z0-9_-]+)\]/);
+  if (runMatch && user !== ASSISTANT_USER) {
+    session._activeRunItem = {
+      type: 'plan',                            // td/fr/bug all live in plan.json today
+      itemId: runMatch[2],
+      startedAt: new Date().toISOString(),
+    };
+    _stampPlanItemStatus(sessionId, runMatch[2], 'running', null);
   }
   sessionsMod.appendChatMessage(sessionId, message);
   session.emit('chat', message);

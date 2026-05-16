@@ -5029,9 +5029,30 @@ function renderArtifact(type, artifact) {
     // icons). Actions row below carries vote / comment / merged-badge
     // / delete so longer items aren't squeezed by a row of buttons on
     // the right.
+    // Last-run status badge. `runs` is an array stamped server-side
+    // when the user clicks ▶ Run: each entry is { status, ts,
+    // summary, turnId }. We display only the LAST run's status as a
+    // chip; click the chip (or expand the item) for the full log.
+    const runs = Array.isArray(it.runs) ? it.runs : [];
+    const lastRun = runs.length ? runs[runs.length - 1] : null;
+    const runChip = lastRun
+      ? `<span class="artifact-item-run-status artifact-run-${escHtml(lastRun.status || 'unknown')}" title="${escHtml((lastRun.status || 'unknown') + ' · ' + (lastRun.ts || '') + (lastRun.summary ? '\n' + lastRun.summary : ''))}">${
+          lastRun.status === 'running' ? '● running'
+          : lastRun.status === 'success' ? '✓ done'
+          : lastRun.status === 'error'   ? '■ error'
+          : escHtml(lastRun.status || '')
+        }</span>`
+      : '';
+    // ▶ Run button: fires a chat message scoped to this item. Claude
+    // decides whether to spawn a Task subagent or work inline; the
+    // server tags the resulting turn with this item id so its
+    // outcome lands back on the item via plan.runs[].
+    const runBtn = `<button class="artifact-item-run" data-id="${escHtml(it.id)}" data-text="${escHtml(String(it.text || '').slice(0, 200))}" title="Ask claude to work on this item — status + result will be linked back here" aria-label="Run">▶ Run</button>`;
     const actionsRow = `<div class="artifact-item-actions">
         ${mergedBadge}
+        ${runChip}
         ${voteBlock}
+        ${runBtn}
         <button class="artifact-item-delete" data-id="${escHtml(it.id)}" title="Delete this item" aria-label="Delete">×</button>
       </div>`;
     // Plan/test items render their body as markdown so multi-line
@@ -5084,6 +5105,9 @@ function renderArtifact(type, artifact) {
   body.querySelectorAll('.artifact-item-delete').forEach((btn) => {
     btn.addEventListener('click', () => onArtifactItemDelete(type, btn.dataset.id));
   });
+  body.querySelectorAll('.artifact-item-run').forEach((btn) => {
+    btn.addEventListener('click', () => onArtifactItemRun(type, btn.dataset.id, btn.dataset.text || ''));
+  });
   if (supportsVoting) {
     body.querySelectorAll('.artifact-vote').forEach((btn) => {
       btn.addEventListener('click', () => onArtifactVote(type, btn.dataset.id));
@@ -5111,6 +5135,35 @@ function renderArtifact(type, artifact) {
   // interacting with. No flicker.
   if (preservedCallout) {
     body.insertBefore(preservedCallout, body.firstChild);
+  }
+}
+
+// ▶ Run on a plan item: sends a chat message scoped to this item.
+// The text carries a [run:<type>#<id>] marker the server uses to
+// stash an "activeRunItem" on the session, so the resulting turn's
+// outcome (success / error / summary / cost) lands back on the
+// item via plan.runs[]. Claude decides freely whether to use the
+// Task subagent or work inline — the linkage is by turn, not by
+// agent topology.
+function onArtifactItemRun(type, itemId, itemText) {
+  if (!itemId) return;
+  const text = String(itemText || '').replace(/\s+/g, ' ').trim();
+  const preview = text.length > 160 ? text.slice(0, 157) + '…' : text;
+  const tag = `[run:${type}#${itemId}]`;
+  // Compose a clear message claude will recognize. The leading
+  // @myco keeps it claude-bound (vs a discussion @user mention).
+  const msg = `@myco ${tag} Please work on this plan item:\n\n${preview || '(no description)'}`;
+  // Open the chatpane so the user sees activity; bring focus to the
+  // input to make follow-up typing easy.
+  try { setChatPane(true); } catch {}
+  const inputEl = document.getElementById('chat-input');
+  if (inputEl) {
+    inputEl.value = msg;
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.focus();
+    // Auto-submit so the user doesn't have to hit Send manually.
+    const form = document.getElementById('chat-form');
+    if (form) form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
   }
 }
 

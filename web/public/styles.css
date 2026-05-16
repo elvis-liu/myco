@@ -4313,6 +4313,53 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   background: rgba(255, 255, 255, .06);
 }
 
+/* Plan-item ▶ Run button + status chip. The Run button sends a
+   chat message scoped to the item; the chip surfaces the last
+   run's outcome (running / success / error) so the user can scan
+   plan progress at a glance. */
+.artifact-item-run {
+  background: rgba(76, 175, 130, .14);
+  color: #6fdc97;
+  border: 1px solid rgba(76, 175, 130, .35);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.74rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease;
+}
+.artifact-item-run:hover {
+  background: rgba(76, 175, 130, .24);
+  border-color: rgba(76, 175, 130, .55);
+  color: #9fe6b8;
+}
+.artifact-item-run:active { transform: scale(.96); }
+.artifact-item-run-status {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.artifact-run-running {
+  background: rgba(138, 180, 248, .14);
+  color: #8ab4f8;
+  animation: artifact-run-pulse 1.5s ease-in-out infinite;
+}
+.artifact-run-success {
+  background: rgba(76, 175, 130, .14);
+  color: #6fdc97;
+}
+.artifact-run-error {
+  background: rgba(255, 130, 130, .14);
+  color: #ff8a8a;
+}
+@keyframes artifact-run-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .5; }
+}
+
 /* Task-burst grouping — consecutive turn-groups within ~5min of
    each other share a left bar so the eye reads them as ONE task.
    Tags assigned by _groupTaskBursts: task-burst-start / -mid /
