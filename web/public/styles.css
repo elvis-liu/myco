@@ -2319,31 +2319,58 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   color: #08120d;
 }
 
-/* Mic: voice input toggle. Neutral when idle, red-pulsing while
-   recording so the user can't miss that the mic is hot. Hidden via
-   the `hidden` HTML attribute until JS confirms the browser
-   supports SpeechRecognition (older Firefox / WebView fall back
-   to no mic — composer still works fine). The "Speak" label is
-   struck through + dimmed to flag the feature as in-progress. */
+/* Mic: voice input toggle. Currently SHIPPED AS DISABLED (button
+   carries the disabled attribute in HTML) — visual treatment makes
+   that obvious: 40% opacity, dashed border, strikethrough across
+   the WHOLE button (icon + label), not-allowed cursor on hover,
+   no hover-state lift. Tooltip explains "Voice input — in
+   progress · coming soon". Hidden via the `hidden` HTML attribute
+   until JS confirms SpeechRecognition is supported, then revealed
+   but still disabled. */
 .composer-btn-mic {
-  background: rgba(255, 255, 255, .05);
-  color: var(--text);
-  border: 1px solid rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .03);
+  color: rgba(255, 255, 255, .45);
+  border: 1px dashed rgba(255, 255, 255, .18);
+  opacity: 0.45;
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: rgba(255, 255, 255, .55);
+  cursor: not-allowed;
+  position: relative;
+}
+.composer-btn-mic .composer-icon {
   opacity: 0.7;
 }
-.composer-btn-mic .composer-btn-label {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-  text-decoration-color: rgba(255, 255, 255, .6);
+.composer-btn-mic:hover {
+  /* No hover lift — disabled state should feel inert. */
+  background: rgba(255, 255, 255, .03);
+  border-color: rgba(255, 255, 255, .18);
+  color: rgba(255, 255, 255, .45);
 }
-.composer-btn-mic.chat-mic-recording .composer-btn-label {
-  /* During an active recording the strikethrough is misleading —
-     it IS doing something. Drop the line-through, the red pulse
-     covers the "experimental" cue on its own. */
+.composer-btn-mic:disabled,
+.composer-btn-mic[disabled],
+.composer-btn-mic[aria-disabled="true"] {
+  pointer-events: auto;        /* allow tooltip on hover */
+  cursor: not-allowed;
+}
+/* Tiny "soon" badge floats top-right of the button to make the
+   work-in-progress state read at a glance, not just on hover. */
+.composer-btn-mic::after {
+  content: 'soon';
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   text-decoration: none;
-}
-.composer-btn-mic.chat-mic-recording {
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(240, 180, 64, .85);
+  color: #1a1a1a;
   opacity: 1;
+  pointer-events: none;
 }
 .composer-btn-mic:hover {
   background: rgba(255, 255, 255, .10);
