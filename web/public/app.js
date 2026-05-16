@@ -2229,6 +2229,49 @@ function _enforceChatHistoryCap() {
   // unwraps existing groups and rebuilds from the flat list, so
   // it's safe to fire from every mutation path.
   _groupTurns(list);
+  // Insert "Today" / "Yesterday" / "May 15" dividers when adjacent
+  // top-level rows cross a date boundary. Helps long, multi-day
+  // sessions read as discrete chunks of work.
+  _insertDateSeparators(list);
+}
+
+// Walk top-level children of #chat-messages and slot a .date-sep
+// row in whenever the UTC date changes. Idempotent — strips its own
+// prior output first. Uses data-ts (ISO timestamp, set when each
+// card / turn-group is created).
+function _insertDateSeparators(list) {
+  if (!list) return;
+  for (const sep of [...list.querySelectorAll(':scope > .date-sep')]) sep.remove();
+  let lastDay = null;
+  for (const child of [...list.children]) {
+    if (child.id === 'chat-load-older') continue;
+    const ts = child.dataset && child.dataset.ts;
+    if (!ts) continue;
+    const day = String(ts).slice(0, 10);
+    if (day && day !== lastDay) {
+      const sep = document.createElement('div');
+      sep.className = 'date-sep';
+      sep.textContent = _formatDateSeparator(day);
+      list.insertBefore(sep, child);
+      lastDay = day;
+    }
+  }
+}
+
+function _formatDateSeparator(yyyymmdd) {
+  if (!yyyymmdd) return '';
+  const today = new Date().toISOString().slice(0, 10);
+  if (yyyymmdd === today) return 'Today';
+  const y = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  if (yyyymmdd === y) return 'Yesterday';
+  // "May 15" if same calendar year, "May 15, 2024" otherwise.
+  const d = new Date(yyyymmdd + 'T00:00:00Z');
+  if (Number.isNaN(d.getTime())) return yyyymmdd;
+  const nowYear = new Date().getUTCFullYear();
+  const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+  const day = d.getUTCDate();
+  if (d.getUTCFullYear() === nowYear) return `${month} ${day}`;
+  return `${month} ${day}, ${d.getUTCFullYear()}`;
 }
 
 // Group #chat-messages children into per-turn collapsible bundles.

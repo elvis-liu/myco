@@ -4063,6 +4063,33 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   gap: 2px;
   padding: 4px 0 2px;
 }
+/* Date separator — "Today" / "Yesterday" / "May 15" divider slotted
+   between top-level chat rows when the UTC date changes. Helps long
+   multi-day sessions read as discrete chunks of work. */
+.date-sep {
+  position: relative;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  color: var(--muted, #8b949e);
+  margin: 16px 8px 8px;
+  opacity: 0.7;
+  user-select: none;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.date-sep::before,
+.date-sep::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: calc(50% - 40px);
+  height: 1px;
+  background: rgba(255, 255, 255, .06);
+}
+.date-sep::before { left: 0; }
+.date-sep::after { right: 0; }
+
 /* Presence cluster — small avatar chips at the top of the chatpane
    showing who's currently attached. Hidden when only one user is
    present (just self — no need for a cluster of one). Each chip is
