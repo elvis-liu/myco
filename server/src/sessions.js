@@ -656,7 +656,29 @@ async function importExistingTranscripts() {
 // session — fine to keep in sessions.json.
 const MAX_CHAT_MESSAGES = 500;
 
-function getChatHistory(sessionId) {
+// bug-9: default initial window when no limit is requested. The
+// chat-history WS frame on attach gates on this — 500 messages of
+// rendered markdown (with renderMd + mermaid + turn-grouping passes)
+// makes the chat pane sluggish to open. 100 is enough to land the
+// user in recent context; the new /chat/history?before=…&limit=…
+// route + the client "load older" button fetches earlier windows
+// on demand.
+const DEFAULT_CHAT_HISTORY_LIMIT = 100;
+
+// Read the chat history with optional windowing.
+//
+//   opts.limit   max messages to return (default: full filtered list)
+//   opts.before  ISO ts — return only messages strictly older than this
+//                (used by the load-older paginator)
+//
+// Filters meta.fromTranscript:true rows before slicing — those are
+// duplicates of the agent-event assistant_text stream and shouldn't
+// reach the client as chat-bubbles (see the comment block below).
+//
+// Result is always chronologically ordered (oldest → newest within
+// the returned window), matching the existing chat-history contract.
+function getChatHistory(sessionId, opts) {
+  opts = opts || {};
   const rec = loadStore().sessions[sessionId];
   if (!rec || !Array.isArray(rec.chat)) return [];
   // Drop assistant-text rows mirrored from the JSONL transcript
@@ -668,7 +690,26 @@ function getChatHistory(sessionId) {
   // in #chat-messages (chat bubble + agent card, same text). Storage
   // is preserved in rec.chat for historical inspection / forensic
   // tooling — only the wire frame to clients is filtered.
-  return rec.chat.filter((m) => !(m && m.meta && m.meta.fromTranscript === true));
+  let filtered = rec.chat.filter((m) => !(m && m.meta && m.meta.fromTranscript === true));
+  if (opts.before) {
+    const beforeTs = String(opts.before);
+    filtered = filtered.filter((m) => m && m.ts && String(m.ts) < beforeTs);
+  }
+  if (typeof opts.limit === 'number' && opts.limit > 0 && filtered.length > opts.limit) {
+    filtered = filtered.slice(-opts.limit);
+  }
+  return filtered;
+}
+
+// Convenience: how many filtered messages exist total. Used by the
+// /chat/history route so the client can render a "showing N of M"
+// hint + know when there are no more older windows to fetch.
+function getChatHistoryLength(sessionId) {
+  const rec = loadStore().sessions[sessionId];
+  if (!rec || !Array.isArray(rec.chat)) return 0;
+  let n = 0;
+  for (const m of rec.chat) if (!(m && m.meta && m.meta.fromTranscript === true)) n++;
+  return n;
 }
 
 function appendChatMessage(sessionId, msg) {
@@ -780,8 +821,10 @@ Object.assign(module.exports, {
   deleteSession,
   importExistingTranscripts,
   getChatHistory,
+  getChatHistoryLength,
   appendChatMessage,
   clearChatHistory,
+  DEFAULT_CHAT_HISTORY_LIMIT,
   // exposed for summarizer + share-info
   loadStore,
   saveStore,

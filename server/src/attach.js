@@ -638,9 +638,14 @@ function _attachAgentWebSocket(session, ws, opts = {}) {
     console.log(`[agent-resume] ${sessionId} ready to resume sdk-session=${session.sdkSessionId} on next user message`);
   }
 
-  const history = sessionsMod.getChatHistory(sessionId);
+  // bug-9: cap the initial chat-history WS frame at the recent
+  // DEFAULT_CHAT_HISTORY_LIMIT messages so the chat pane opens fast
+  // even on multi-hour sessions. Total length goes along so the
+  // client knows whether to surface a "load older" button.
+  const history = sessionsMod.getChatHistory(sessionId, { limit: sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT });
+  const total = sessionsMod.getChatHistoryLength(sessionId);
   if (history.length) {
-    ws.send(JSON.stringify({ t: 'chat-history', messages: history }));
+    ws.send(JSON.stringify({ t: 'chat-history', messages: history, total }));
   }
 
   if (session._initSnapshot) {
@@ -806,9 +811,12 @@ function attachViewerWebSocket(session, ws, opts = {}) {
   const user = opts.user || null;
   const sessionId = session.sessionId;
 
-  const history = sessionsMod.getChatHistory(sessionId);
+  // bug-9: same windowed initial frame as the owner WS — viewers also
+  // benefit from a snappy chat pane open + the same load-older flow.
+  const history = sessionsMod.getChatHistory(sessionId, { limit: sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT });
+  const total = sessionsMod.getChatHistoryLength(sessionId);
   if (history.length) {
-    ws.send(JSON.stringify({ t: 'chat-history', messages: history }));
+    ws.send(JSON.stringify({ t: 'chat-history', messages: history, total }));
   }
   _sendAttachSnapshot(session, ws);
 

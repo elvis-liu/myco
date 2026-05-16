@@ -2264,6 +2264,30 @@ test_chat_window() {
   else
     skip "test/plan-item-rewrite.test.js (no host node)"
   fi
+  # bug-9 regression: getChatHistory accepts {limit, before}; the
+  # chat-history WS frame on attach caps at DEFAULT_CHAT_HISTORY_LIMIT
+  # (100); GET /sessions/:id/chat/history?before= pages older windows.
+  # Pins the server contract that bug-9's client load-older flow
+  # depends on.
+  if have_node; then
+    if node test/chat-history-window.test.js >/dev/null 2>&1; then
+      pass "test/chat-history-window.test.js (10 cases)"
+    else
+      fail "test/chat-history-window.test.js — re-run with 'node test/chat-history-window.test.js' to see failures"
+    fi
+  else
+    skip "test/chat-history-window.test.js (no host node)"
+  fi
+  # Architecture doc — Project Purpose section is the canonical
+  # statement of why Mycelium exists (on-top-of-project, surface
+  # problems, suggest better approaches). Red-flips if someone
+  # rewrites the doc and drops it.
+  grep -qF '## Project Purpose' architecture.md \
+    && pass "architecture.md: Project Purpose section present" \
+    || fail "architecture.md: Project Purpose section missing — the why-Mycelium statement is gone"
+  grep -qF '## Project Purpose' _myco_/architecture.md \
+    && pass "_myco_/architecture.md: Project Purpose mirror present" \
+    || fail "_myco_/architecture.md: Project Purpose mirror missing — the Arch tab will fall out of sync with root"
   grep -qF 'function persistAssistantTextToChat' server/src/attach.js \
     && pass "attach.js: persistAssistantTextToChat defined" \
     || fail "attach.js: persistAssistantTextToChat missing"

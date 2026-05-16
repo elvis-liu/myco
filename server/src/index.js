@@ -4,7 +4,8 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { listSessions, spawnSession, sessionBelongsToUser, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts, loadStore, saveStore, getSessionRecord, readDescriptionForCwd: readDescriptionForCwdPublic, resolveCwd, getFileChat, getRecentFileChatMessages, appendFileChatMessage, deleteFileChatMessage } = require('./sessions');
+const sessionsMod = require('./sessions');
+const { listSessions, spawnSession, sessionBelongsToUser, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts, loadStore, saveStore, getSessionRecord, readDescriptionForCwd: readDescriptionForCwdPublic, resolveCwd, getFileChat, getRecentFileChatMessages, appendFileChatMessage, deleteFileChatMessage } = sessionsMod;
 const filesApi = require('./files');
 const { askAboutFile, ASSISTANT_USER } = require('./btw');
 const githubMod = require('./github');
@@ -792,6 +793,49 @@ app.delete('/sessions/:id/file-chat', async (req, res) => {
   const removed = deleteFileChatMessage(ctx.id, relPath, messageId);
   if (!removed) return res.status(404).json({ error: 'message not found' });
   res.json({ ok: true });
+});
+
+// bug-9: paginated chat-history window. The initial chat-history WS
+// frame on attach is capped at sessions.DEFAULT_CHAT_HISTORY_LIMIT
+// (100) to keep the chat pane snappy on long sessions. Older messages
+// are fetched on demand by the client's "load older" button:
+//
+//   GET /sessions/:id/chat/history?before=<isoTs>&limit=<n>
+//
+//     before  — return messages with ts strictly less than this. The
+//               client passes the oldest currently-rendered row's ts
+//               to fetch the preceding window. Required so the same
+//               messages don't ride down twice.
+//     limit   — max messages to return; default DEFAULT_CHAT_HISTORY
+//               _LIMIT, clamped to 1..500 (the on-disk cap).
+//
+// Response: { messages, total, hasMore }
+//   messages — oldest→newest within the window (matches the WS frame
+//              contract).
+//   total    — total filtered (non-fromTranscript) rows in rec.chat;
+//              client uses it to render a "showing N of M" hint.
+//   hasMore  — true iff there are still older messages before the
+//              returned window. Lets the client gray out the load-
+//              older button when it's pulled everything.
+app.get('/sessions/:id/chat/history', (req, res) => {
+  const ctx = fileApiPreamble(req, res, 'viewer');
+  if (!ctx) return;
+  const before = typeof req.query.before === 'string' ? req.query.before : null;
+  let limit = parseInt(String(req.query.limit || ''), 10);
+  if (!Number.isFinite(limit) || limit < 1) limit = sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT;
+  if (limit > 500) limit = 500;
+  const window = sessionsMod.getChatHistory(ctx.id, { before, limit });
+  const total = sessionsMod.getChatHistoryLength(ctx.id);
+  // hasMore = there's a message older than the window's oldest row.
+  let hasMore = false;
+  if (window.length) {
+    const oldestTs = window[0] && window[0].ts;
+    if (oldestTs) {
+      const earlier = sessionsMod.getChatHistory(ctx.id, { before: oldestTs, limit: 1 });
+      hasMore = earlier.length > 0;
+    }
+  }
+  res.json({ messages: window, total, hasMore });
 });
 
 // Plan / Arch / Test artifact routes — see server/src/artifacts.js for the

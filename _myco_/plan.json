@@ -521,7 +521,25 @@
         "originalText": "follow up to fr-7: add web push (service worker + PushManager + VAPID + server-side web-push) so the os notifications work on mobile android even when the tab is suspended/closed or the phone screen is off",
         "rewritten": true
       }
+    },
+    {
+      "id": "bug-9",
+      "text": "**Problem:** Chat pane is sluggish because it loads the entire chat history (all Claude and user messages) on open.\n**Expected:** Load only the last N messages, paginating/virtualizing older history on demand.\n**Actual:** Full history is loaded up front, inflating memory use and chat pane load time.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-16T14:36:38.676Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the chat pane is sluggish since it's loadding all of the chat history including msg from claude and user, it should only load the last N msg to 1. avoid overuse of memory 2. reduce load time for chat pane.",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-16T14:00:00.000Z"
+  "updatedAt": "2026-05-16T14:36:42.662Z"
 }

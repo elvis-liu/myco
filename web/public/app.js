@@ -1215,7 +1215,13 @@ function openSession(id, opts = {}) {
       } else if (msg.t === 'pong') {
         state.lastPongAt = Date.now();
       } else if (msg.t === 'chat-history') {
-        applyChatHistory(msg.messages);
+        // bug-9: msg.total is the server's authoritative count of the
+        // filtered chat history. msg.messages is now capped at the
+        // initial DEFAULT_CHAT_HISTORY_LIMIT window (100); older
+        // messages are fetched on demand via the new GET
+        // /sessions/:id/chat/history?before=… route (the load-older
+        // button calls _revealOrFetchOlderChat).
+        applyChatHistory(msg.messages, msg.total);
       } else if (msg.t === 'chat') {
         try {
           const m = msg.message || {};
@@ -1530,8 +1536,17 @@ function timeAgo(iso) {
 
 // ── chat (collaborator discussion + claude assistant) ────────────────────────
 
-function applyChatHistory(messages) {
+function applyChatHistory(messages, total) {
   state.chatMessages = Array.isArray(messages) ? messages.slice() : [];
+  // bug-9: track the server's authoritative total of (non-fromTranscript)
+  // chat rows, so the load-older button knows when there are still
+  // older messages on the server that the initial chat-history frame
+  // omitted. Defaults to "at least what we got" if the server didn't
+  // include `total` (older mycod that pre-dates the bug-9 protocol
+  // extension — gracefully degrades to local-only archived reveals).
+  state.chatTotal = (typeof total === 'number' && total >= state.chatMessages.length)
+    ? total
+    : state.chatMessages.length;
   // Always land on the latest message — applyChatHistory fires on initial
   // connect and on every reconnect, and the user expects to see the most
   // recent activity, not the start of the thread.
@@ -2444,8 +2459,14 @@ function _enforceChatHistoryCap() {
       c.classList.remove('chat-msg-archived');
     }
   }
-  if (archived > 0) {
-    _ensureLoadOlderButton(list, archived);
+  // bug-9: server may still have older messages that the initial
+  // chat-history frame omitted (capped at DEFAULT_CHAT_HISTORY_LIMIT).
+  // Add that gap to the load-older count so the user sees one button
+  // covering both "locally hidden" + "still on server".
+  const serverPending = Math.max(0, (state.chatTotal || 0) - state.chatMessages.length);
+  const total = archived + serverPending;
+  if (total > 0) {
+    _ensureLoadOlderButton(list, total);
   } else {
     const btn = list.querySelector('#chat-load-older');
     if (btn) btn.remove();
@@ -2811,6 +2832,15 @@ function _revealOlderChat() {
   if (!list) return;
   const archived = Array.from(list.querySelectorAll('.chat-msg-archived'));
   if (!archived.length) {
+    // bug-9: no more locally-archived cards to reveal — but the
+    // server may still have older messages we never received
+    // (chat-history WS frame is capped at DEFAULT_CHAT_HISTORY_LIMIT).
+    // Fetch the next window from the new /chat/history endpoint.
+    const serverPending = Math.max(0, (state.chatTotal || 0) - state.chatMessages.length);
+    if (serverPending > 0) {
+      _fetchOlderChatFromServer().catch(() => {});
+      return;
+    }
     const btn = list.querySelector('#chat-load-older');
     if (btn) btn.remove();
     return;
@@ -2846,6 +2876,67 @@ function _revealOlderChat() {
   if (anchor) {
     const anchorTopAfter = anchor.getBoundingClientRect().top;
     list.scrollTop += (anchorTopAfter - anchorTopBefore);
+  }
+}
+
+// bug-9: paginated older-history fetch from the server. Called from
+// _revealOlderChat when there are no more locally-archived cards but
+// state.chatTotal > state.chatMessages.length (i.e. the initial
+// chat-history frame omitted older messages per the
+// DEFAULT_CHAT_HISTORY_LIMIT cap on the server). Asks for the
+// CHAT_LOAD_OLDER_BATCH window strictly older than the oldest
+// currently-known message.
+async function _fetchOlderChatFromServer() {
+  const sid = state.activeId;
+  if (!sid) return;
+  if (state._fetchingOlderChat) return;   // single-flight gate
+  // Use the oldest currently-known message's ts as the `before` cursor.
+  const oldest = state.chatMessages.find((m) => m && m.ts);
+  if (!oldest) return;
+  state._fetchingOlderChat = true;
+  const list = document.getElementById('chat-messages');
+  const btn = list ? list.querySelector('#chat-load-older') : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading older…'; }
+  try {
+    const url = `/sessions/${encodeURIComponent(sid)}/chat/history`
+      + `?before=${encodeURIComponent(oldest.ts)}&limit=${CHAT_LOAD_OLDER_BATCH}`;
+    const res = await authedFetch(url);
+    if (!res || !res.ok) return;
+    const data = await res.json().catch(() => null);
+    if (!data || !Array.isArray(data.messages) || !data.messages.length) {
+      // Server has no older messages despite chatTotal > length —
+      // probably a sync drift (someone /clear'd, etc.). Update the
+      // total so the load-older button can retire.
+      if (typeof data.total === 'number') state.chatTotal = data.total;
+      _enforceChatHistoryCap();
+      return;
+    }
+    // Prepend the older window to state.chatMessages, then re-render
+    // the whole pane (renderChatPane's preserve-and-rebuild keeps the
+    // agent-event cards in place). Anchor scrolling on the previously-
+    // top message so the user's view doesn't jump.
+    const prevTopId = oldest.meta && oldest.meta.transcriptUuid;
+    state.chatMessages = data.messages.concat(state.chatMessages);
+    if (typeof data.total === 'number') state.chatTotal = data.total;
+    renderChatPane(/*scrollToBottom*/ false);
+    // Restore approximate scroll: find the previously-top message in
+    // the rebuilt DOM and scrollIntoView. _ensureLoadOlderButton fires
+    // inside _enforceChatHistoryCap which renderChatPane chains, so
+    // the button auto-updates with the new pending count.
+    if (prevTopId && list) {
+      const restore = list.querySelector(`.chat-msg[data-transcript-uuid="${CSS.escape(prevTopId)}"]`);
+      if (restore && restore.scrollIntoView) {
+        try { restore.scrollIntoView({ block: 'start' }); } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('[bug-9] _fetchOlderChatFromServer failed:', err && err.message);
+  } finally {
+    state._fetchingOlderChat = false;
+    if (btn && btn.parentElement) {
+      btn.disabled = false;
+      // Text re-set by _ensureLoadOlderButton on the next cap pass.
+    }
   }
 }
 
