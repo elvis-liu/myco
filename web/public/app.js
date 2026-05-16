@@ -1159,6 +1159,15 @@ function openSession(id, opts = {}) {
   // frame triggers applyReadOnly later). The old JSONL transcript
   // pane (#conversation-wrap) and the xterm fallback are gone.
   setChatPane(true);
+  // Default desktop layout: plan + chat side-by-side. The plan
+  // takes the left half (artifact-main-view), chat collapses to a
+  // right sidebar via the .has-artifact rule. Mobile (≤900px)
+  // keeps the existing mutually-exclusive chat-first layout —
+  // there's no room for two panes on a phone screen, and the
+  // chrome cluster already exposes the 📋 plan button.
+  if (window.innerWidth > 900) {
+    try { showArtifactView('plan'); } catch {}
+  }
 
   // websocket with auto-reconnect. `connect` is closure-bound to `id` and
   // `qs` so reconnect-after-close stays on this session; the `state.ws !==
