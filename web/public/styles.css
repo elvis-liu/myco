@@ -925,6 +925,88 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 /* ── mobile ───────────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
+  /* Mobile UX deltas (2026-05-16):
+     - Chrome buttons bump to 40px (Apple HIG min 44pt is the target;
+       40px on a 2x device is 80 physical px, well above the practical
+       finger threshold), so the five-icon cluster is tappable.
+     - Chat-messages overscroll contained — kills the iOS pull-to-
+       refresh that would yank the whole pane when the user scrolls
+       at the top of a long conversation.
+     - Chat input min font-size 16px (Safari ≤14 auto-zooms on focus
+       when font is smaller); padding bumped so the tap target inside
+       textarea is full-height.
+     - Perm-modal options become full-width, taller, with 44px+ tap
+       targets and a bigger glyph cluster.
+     - Carousel chip row scrolls horizontally instead of wrapping. */
+  :root { --chrome-btn-size: 40px; }
+  #chat-messages {
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  #chat-input {
+    font-size: 16px;
+    line-height: 1.45;
+    padding: 8px 10px;
+    min-height: 2.4em;
+  }
+  #chat-send {
+    min-width: 56px;
+    min-height: 40px;
+    font-size: 15px;
+  }
+  /* Perm-modal: each option is its own card on mobile — full width,
+     taller hit area, larger glyph. */
+  .perm-modal-opt {
+    min-height: 48px !important;
+    padding: 12px 14px !important;
+    font-size: 15px;
+  }
+  .perm-modal-opt-num {
+    min-width: 28px;
+    font-size: 14px;
+  }
+  /* Carousel chips: scroll horizontally instead of wrap. The flex-
+     wrap default piled chips into 3+ rows on narrow widths. */
+  .perm-modal-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+  .perm-chip {
+    max-width: 120px;
+    flex: 0 0 auto;
+  }
+  /* Token meter — already small; ensure it doesn't push the input
+     off-screen on narrow phones. */
+  .token-meter {
+    font-size: 0.66rem;
+    padding: 1px 6px 3px;
+  }
+  /* Stop button: bigger tap target on mobile. */
+  .claude-typing-stop {
+    min-height: 32px;
+    padding: 4px 10px;
+    font-size: 0.84rem;
+  }
+  /* Tighten the inter-button gap so the 5-icon cluster (files /
+     plan / arch / test / chat) fits comfortably on a 375px screen
+     after the chrome-btn-size bump to 40px. 5*40 + 4*6 = 224px,
+     leaving room for ☰ on the left without crowding. */
+  #btn-files {
+    right: calc(env(safe-area-inset-right, 0px) + 8px + var(--chrome-btn-size) + 6px);
+  }
+  #btn-plan { right: calc(env(safe-area-inset-right, 0px) + 8px + 2 * (var(--chrome-btn-size) + 6px)); }
+  #btn-arch { right: calc(env(safe-area-inset-right, 0px) + 8px + 3 * (var(--chrome-btn-size) + 6px)); }
+  #btn-test { right: calc(env(safe-area-inset-right, 0px) + 8px + 4 * (var(--chrome-btn-size) + 6px)); }
+  #btn-chat, #btn-files, #btn-plan, #btn-arch, #btn-test {
+    /* Bigger SVG inside the larger button looks balanced. */
+  }
+  #btn-chat { right: calc(env(safe-area-inset-right, 0px) + 8px); }
+  /* Slightly larger icon on mobile to match the bigger button. */
+  .chrome-icon-svg { width: 22px; height: 22px; }
+
   #sidebar {
     position: fixed;
     inset: 0;

@@ -2,7 +2,15 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <!-- interactive-widget=resizes-content keeps the chat input above the
+       on-screen keyboard on iOS 17+/Android Chrome 108+ instead of
+       requiring manual scroll. viewport-fit=cover lets the layout flow
+       under notches; safe-area-inset-* values supply the actual
+       padding. user-scalable=no kills the pinch-zoom that interferes
+       with code blocks; we counter accidental zoom-prevention damage
+       with explicit font-size:16px on inputs (Safari ≤14 zooms when
+       <16px). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="myco" />
@@ -13,7 +21,7 @@
   <link rel="icon" type="image/jpeg" href="/hetu.jpg?v=1" />
   <link rel="apple-touch-icon" href="/hetu.jpg?v=1" />
   <title>myco</title>
-  <link rel="stylesheet" href="styles.css?v=228" />
+  <link rel="stylesheet" href="styles.css?v=229" />
   <link rel="stylesheet" href="/vendor/github-dark.min.css" />
 </head>
 <body>
