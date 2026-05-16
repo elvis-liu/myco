@@ -5135,18 +5135,37 @@ function renderArtifact(type, artifact) {
           : escHtml(lastRun.status || '')
         }</span>`
       : '';
+    // Dependency check: if this item has dependsOn=[id,...], the
+    // Run button stays disabled until every listed prereq is done
+    // (or merged/marked-done). UI also surfaces an "↗ depends on:"
+    // chip so the user can see what's blocking.
+    const deps = Array.isArray(it.dependsOn) ? it.dependsOn.filter(Boolean) : [];
+    const allItems = (artifact && Array.isArray(artifact.items)) ? artifact.items : [];
+    const depResolved = (depId) => {
+      const dep = allItems.find((x) => x && x.id === depId);
+      return dep ? !!dep.done : true;  // unknown id treated as resolved (forgiving)
+    };
+    const unmetDeps = deps.filter((d) => !depResolved(d));
+    const depsChip = deps.length
+      ? `<span class="artifact-item-deps${unmetDeps.length ? ' artifact-item-deps-blocked' : ' artifact-item-deps-ok'}" title="depends on: ${escHtml(deps.join(', '))}${unmetDeps.length ? ` · blocked by: ${escHtml(unmetDeps.join(', '))}` : ' · all prereqs done'}">↗ ${unmetDeps.length ? 'blocked by' : 'after'} ${escHtml(deps.join(', '))}</span>`
+      : '';
+
     // ▶ Run button: gated on a single upvote (lowered from 2 for
-    // solo testing — flip back to 2 once group review is the norm).
-    // Below threshold the button is disabled with a tooltip
-    // explaining; the 👍 vote button next to it is the unblocker.
+    // solo testing — flip back to 2 once group review is the norm)
+    // AND on every dependsOn prereq being done. Below threshold or
+    // with unmet deps the button is disabled with a tooltip.
     const RUN_VOTE_THRESHOLD = 1;
-    const runEnabled = points >= RUN_VOTE_THRESHOLD;
+    const enoughVotes = points >= RUN_VOTE_THRESHOLD;
+    const runEnabled = enoughVotes && unmetDeps.length === 0;
     const runTitle = runEnabled
       ? 'Ask claude to work on this item — status + result will be linked back here'
-      : `Needs ${RUN_VOTE_THRESHOLD} upvote${RUN_VOTE_THRESHOLD === 1 ? '' : 's'} to run (currently ${points}). Click 👍 above to vote.`;
+      : !enoughVotes
+        ? `Needs ${RUN_VOTE_THRESHOLD} upvote${RUN_VOTE_THRESHOLD === 1 ? '' : 's'} to run (currently ${points}). Click 👍 above to vote.`
+        : `Blocked by unmet prereq${unmetDeps.length === 1 ? '' : 's'}: ${unmetDeps.join(', ')}. Mark them done first.`;
     const runBtn = `<button class="artifact-item-run" data-id="${escHtml(it.id)}" data-text="${escHtml(String(it.text || '').slice(0, 200))}" ${runEnabled ? '' : 'disabled'} title="${escHtml(runTitle)}" aria-label="Run">▶ Run</button>`;
     const actionsRow = `<div class="artifact-item-actions">
         ${mergedBadge}
+        ${depsChip}
         ${runChip}
         ${voteBlock}
         ${runBtn}

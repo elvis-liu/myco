@@ -4447,6 +4447,27 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   margin-right: 4px;
   white-space: nowrap;
 }
+/* Dependency chip — shown when a plan item carries dependsOn:[ids].
+   Amber when any prereq is unmet (blocked), muted-green when all
+   are done (ready). The chip itself is informational; the gate is
+   on the ▶ Run button. */
+.artifact-item-deps {
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  margin-right: 4px;
+  white-space: nowrap;
+  cursor: help;
+}
+.artifact-item-deps-blocked {
+  background: rgba(240, 180, 64, .14);
+  color: #f0b440;
+}
+.artifact-item-deps-ok {
+  background: rgba(76, 175, 130, .10);
+  color: rgba(76, 175, 130, .82);
+}
 .artifact-run-running {
   background: rgba(138, 180, 248, .14);
   color: #8ab4f8;

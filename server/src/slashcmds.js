@@ -112,6 +112,12 @@ const COMMANDS = [
     handler: handleDedupe,
   },
   {
+    names: ['add2plan'],
+    summary: 'Ask claude to break a description into todos / FRs and add them to the Plan (incl. dependsOn for ordering)',
+    usage: '/add2plan <description>',
+    handler: handleAdd2Plan,
+  },
+  {
     names: ['help'],
     summary: 'List available chat commands',
     usage: '/help',
@@ -523,6 +529,79 @@ async function handleDedupe(ctx) {
 
 function handleFeature(ctx) {
   return handleIssue(ctx, { kind: 'feature', labels: ['enhancement'] });
+}
+
+// /add2plan — claude breaks the user's description into a list of
+// todos / feature requests and appends them to this session's
+// plan.json via the Edit tool. Items can carry an optional
+// dependsOn: [id, ...] field for ordering constraints.
+//
+// Why route through claude instead of doing the breakdown server-
+// side: it's a reasoning task. claude has the context of the
+// conversation and the existing plan items to decompose well; a
+// regex parser can't.
+function handleAdd2Plan(ctx) {
+  const text = (ctx.args || '').trim();
+  if (!text) {
+    ctx.reply('Usage: `/add2plan <description>` — claude breaks it into todos + FRs and appends them to the Plan (with optional `dependsOn` for ordering).');
+    return;
+  }
+  const sessionId = ctx.sessionId;
+  if (!sessionId) { ctx.reply('(no session context — slash command dropped)'); return; }
+  // Read the existing plan to suggest the next free id ranges in
+  // the prompt — saves claude a round-trip on id enumeration.
+  let nextTd = 1, nextFr = 1;
+  try {
+    const store = sessionsMod.loadStore();
+    const rec = store.sessions[sessionId];
+    const items = (rec && rec.artifacts && rec.artifacts.plan && rec.artifacts.plan.items) || [];
+    for (const it of items) {
+      if (typeof it.id !== 'string') continue;
+      const tdM = it.id.match(/^td-(\d+)$/);
+      const frM = it.id.match(/^fr-(\d+)$/);
+      if (tdM) nextTd = Math.max(nextTd, parseInt(tdM[1], 10) + 1);
+      if (frM) nextFr = Math.max(nextFr, parseInt(frM[1], 10) + 1);
+    }
+  } catch {}
+  // Build the prompt. Edit (not Write) keeps any existing items
+  // intact — we only APPEND.
+  const prompt = [
+    `[/add2plan] Break the following request into discrete plan items, then APPEND them to \`_myco_/plan.json\` using your Edit tool.`,
+    ``,
+    `Item schema (append to plan.items array, do NOT remove or rewrite existing items):`,
+    `  {`,
+    `    "id": "td-N" for action items (start from td-${nextTd}) or "fr-N" for feature requests (start from fr-${nextFr}),`,
+    `    "text": "<short description, 1-2 sentences>",`,
+    `    "layer": "Todo" or "Feature",`,
+    `    "done": false,`,
+    `    "addedAt": "<current ISO 8601 UTC>",`,
+    `    "addedBy": "claude",`,
+    `    "source": "user",`,
+    `    "voters": [],`,
+    `    "comments": [],`,
+    `    "dependsOn": ["<id-of-prereq>", ...]   // OPTIONAL — only when the item logically can't start until another finishes. Skip when there's no real ordering.`,
+    `  }`,
+    ``,
+    `Also bump plan.updatedAt to the current ISO timestamp.`,
+    ``,
+    `Use dependsOn sparingly. Most items should not have it; the UI uses it to grey out the Run button until prereqs are done.`,
+    ``,
+    `Request: ${text}`,
+  ].join('\n');
+  // Inject into the SDK's user-message queue via session.write.
+  // Claude will receive it as a normal user turn.
+  try {
+    const attachMod = require('./attach');
+    const session = attachMod.getSession && attachMod.getSession(sessionId);
+    if (!session || typeof session.write !== 'function') {
+      ctx.reply('(no live agent session — try sending a message to wake it up, then re-run `/add2plan`)');
+      return;
+    }
+    session.write(prompt);
+    ctx.reply(`▶ asked claude to expand into plan items (next ids: td-${nextTd}, fr-${nextFr}). Watch the Plan tab — items will appear once claude finishes the Edit tool call.`);
+  } catch (err) {
+    ctx.reply(`(/add2plan failed: ${err.message})`);
+  }
 }
 
 // /task /tasks — the rewrite in pty.handleChatMessage only fires when the
