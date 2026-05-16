@@ -3341,19 +3341,18 @@ function _renderTokenMeter() {
   const limit = _modelTokenLimit();
   const fill = t.lastTurnInputTokens || 0;
   const pct = limit > 0 ? Math.min(100, Math.round((fill / limit) * 100)) : 0;
-  const cost = t.costUsd || 0;
-  if (!fill && !cost) { el.hidden = true; return; }
+  if (!fill) { el.hidden = true; return; }
   el.hidden = false;
   el.classList.toggle('token-meter-warn', pct >= 60 && pct < 80);
   el.classList.toggle('token-meter-alarm', pct >= 80);
   const fillStr = _humanizeTokens(fill);
   const limitStr = limit >= 1_000_000 ? '1M' : (limit / 1000) + 'k';
-  // Cumulative cost shown only if non-zero; rounds to 3 decimals so a
-  // long session shows $1.234 instead of $1.2342341.
-  const costStr = cost > 0 ? ' · $' + (cost < 1 ? cost.toFixed(3) : cost.toFixed(2)) : '';
-  el.textContent = `${fillStr} / ${limitStr} ctx (${pct}%)${costStr}`;
-  el.title = `Context: ${fill.toLocaleString()} tokens of ${limit.toLocaleString()} (${pct}%)` +
-             (cost > 0 ? `\nCumulative cost: $${cost.toFixed(4)}` : '');
+  // Status-bar meter shows context-window fill ONLY — cost is a
+  // distraction in the always-visible header strip. Per-turn cost
+  // (when the user actually wants to see it) still surfaces in the
+  // turn-footer row + the collapsed turn-head outcome chip.
+  el.textContent = `${fillStr} / ${limitStr} ctx (${pct}%)`;
+  el.title = `Context: ${fill.toLocaleString()} tokens of ${limit.toLocaleString()} (${pct}%)`;
 }
 
 // Per-turn telemetry footer — single muted line emitted right after
