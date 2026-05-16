@@ -2278,6 +2278,23 @@ test_chat_window() {
   else
     skip "test/chat-history-window.test.js (no host node)"
   fi
+  # bug-7 round 2 regression: the agent-replay WS frame must dedup
+  # identical events from session.buffer before shipping. Suspected
+  # upstream is _hydrateBufferFromDisk overlapping with the SDK's
+  # `resume` replay on a container restart — recent events end up in
+  # the buffer twice. Without dedup, the client's chrome-batch
+  # adjacency rule renders them as stacked identical "▸ × N ✓ result"
+  # rows (the original bug-7 symptom that 7cb8ed5 only partially
+  # fixed via the post-replay wipe).
+  if have_node; then
+    if node test/agent-replay-dedup.test.js >/dev/null 2>&1; then
+      pass "test/agent-replay-dedup.test.js (7 cases)"
+    else
+      fail "test/agent-replay-dedup.test.js — re-run with 'node test/agent-replay-dedup.test.js' to see failures"
+    fi
+  else
+    skip "test/agent-replay-dedup.test.js (no host node)"
+  fi
   # Architecture doc — Project Purpose section is the canonical
   # statement of why Mycelium exists (on-top-of-project, surface
   # problems, suggest better approaches). Red-flips if someone

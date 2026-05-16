@@ -631,7 +631,29 @@ function _attachAgentWebSocket(session, ws, opts = {}) {
   const sessionId = session.sessionId;
 
   if (Array.isArray(session.buffer) && session.buffer.length) {
-    ws.send(JSON.stringify({ t: 'agent-replay', events: session.buffer }));
+    // bug-7 round 2: dedup the buffer before shipping so the client
+    // doesn't end up rendering identical chrome batches stacked. The
+    // suspected upstream cause is `_hydrateBufferFromDisk` (on a
+    // container restart) overlapping with the SDK's `resume` replay —
+    // the recent events are loaded from events.jsonl AND the SDK
+    // re-walks the same conversation tail, so `_handleEvent` re-emits
+    // them and they end up in `this.buffer` twice. The client wipe in
+    // _handleAgentFrame can't help when the SAME events all arrive in
+    // ONE agent-replay frame; this dedup catches them at the wire.
+    const seen = new Set();
+    const events = [];
+    let dropped = 0;
+    for (const ev of session.buffer) {
+      let sig;
+      try { sig = JSON.stringify(ev); } catch { sig = null; }
+      if (sig && seen.has(sig)) { dropped++; continue; }
+      if (sig) seen.add(sig);
+      events.push(ev);
+    }
+    if (dropped > 0) {
+      console.log(`[agent-replay] ${sessionId} dedup dropped ${dropped} duplicate event(s) from session.buffer of ${session.buffer.length} total — bug-7 backstop`);
+    }
+    ws.send(JSON.stringify({ t: 'agent-replay', events }));
   }
   console.log(`[agent-attach] ${sessionId} user=${user || 'unknown'} mode=agent replay-events=${(session.buffer || []).length} sdk-session=${session.sdkSessionId || 'none'}`);
   if (session.sdkSessionId && !session._iterating && (!session.buffer || !session.buffer.length)) {

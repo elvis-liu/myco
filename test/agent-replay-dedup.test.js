@@ -1,0 +1,128 @@
+// bug-7 round 2 regression: the agent-replay WS frame must dedup
+// identical events from session.buffer before shipping. Suspected
+// upstream cause is `_hydrateBufferFromDisk` (loads events.jsonl tail
+// on restart) overlapping with the SDK's `resume` replay (re-walks
+// the conversation tail) — recent events end up in the buffer twice
+// and the client's chrome-batch adjacency rule renders them as
+// stacked identical "▸ × N ✓ result · NNN bytes" rows.
+//
+// The fix lives at the WIRE in attach.js _attachAgentWebSocket:
+// JSON-stringify each event, drop duplicates by signature. There's
+// a matching client-side dedup in app.js _handleAgentFrame as
+// defense-in-depth, but the server-side dedup is the primary cut.
+
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+let passed = 0, failed = 0;
+function t(name, fn) {
+  try { fn(); console.log('  ✓ ' + name); passed++; }
+  catch (err) { console.log('  ✗ ' + name + ' — ' + (err && err.stack ? err.stack : err)); failed++; }
+}
+
+// Re-implement the dedup contract here so we exercise it without
+// pulling in attach.js (which has a long require-chain and a ws/
+// sessions cycle that's expensive in this lightweight test).
+// Any future change to the inline implementation in attach.js
+// should ALSO update this mirror — the source-grep tests below
+// catch the wire-call mismatch.
+function _dedupBuffer(buffer) {
+  const seen = new Set();
+  const events = [];
+  let dropped = 0;
+  for (const ev of buffer) {
+    let sig;
+    try { sig = JSON.stringify(ev); } catch { sig = null; }
+    if (sig && seen.has(sig)) { dropped++; continue; }
+    if (sig) seen.add(sig);
+    events.push(ev);
+  }
+  return { events, dropped };
+}
+
+console.log('── bug-7 round 2: agent-replay event dedup ──');
+
+t('three byte-identical events collapse to one', () => {
+  const ev = { ts: '2026-05-16T16:06:43.123Z', type: 'tool_result', tool_use_id: 'toolu_X', content: 'abc', isError: false };
+  const buf = [ev, ev, ev];
+  const { events, dropped } = _dedupBuffer(buf);
+  assert.strictEqual(events.length, 1);
+  assert.strictEqual(dropped, 2);
+});
+
+t('events with different ts (but same content) stay distinct', () => {
+  // Real legit duplicates the SDK might produce: same tool result emitted
+  // by two different turns. Each carries its own stamped ts from
+  // agent-session._emit. They MUST stay separate so the timeline reads
+  // correctly.
+  const buf = [
+    { ts: '2026-05-16T16:06:43.123Z', type: 'tool_result', tool_use_id: 'toolu_X', content: 'abc' },
+    { ts: '2026-05-16T16:06:44.456Z', type: 'tool_result', tool_use_id: 'toolu_Y', content: 'abc' },
+  ];
+  const { events, dropped } = _dedupBuffer(buf);
+  assert.strictEqual(events.length, 2);
+  assert.strictEqual(dropped, 0);
+});
+
+t('chronological order of unique events is preserved', () => {
+  const a = { ts: '2026-05-16T16:00:00.000Z', type: 'turn_start', prompt: 'do X' };
+  const b = { ts: '2026-05-16T16:00:01.000Z', type: 'tool_use', name: 'Bash', input: { command: 'ls' } };
+  const c = { ts: '2026-05-16T16:00:02.000Z', type: 'tool_result', content: 'files', tool_use_id: 'toolu_X' };
+  const buf = [a, b, b, c, a, c];
+  const { events, dropped } = _dedupBuffer(buf);
+  // First occurrence wins — order should be a, b, c.
+  assert.deepStrictEqual(events.map((e) => e.type), ['turn_start', 'tool_use', 'tool_result']);
+  assert.strictEqual(dropped, 3);
+});
+
+t('bug-7 reproducer: 30 identical tool_result events fold to 1', () => {
+  // The user-reported symptom: three "▸ × 10 ✓ result · 3671 bytes"
+  // batches stacked. The minimum-reproducer is the same event 30
+  // times — chrome-batch adjacency would otherwise group them into a
+  // single "× 30" batch, but the user's chrome-batch run was broken
+  // by interleaved non-chrome events (assistant_text / fatal). Dedup
+  // catches it at the source.
+  const ev = { ts: '2026-05-16T16:06:43.000Z', type: 'tool_result',
+               tool_use_id: 'toolu_dup', content: 'x'.repeat(3671), isError: false };
+  const buf = new Array(30).fill(ev);
+  const { events, dropped } = _dedupBuffer(buf);
+  assert.strictEqual(events.length, 1, 'all 30 identical copies should collapse');
+  assert.strictEqual(dropped, 29);
+});
+
+t('non-serializable events still pass through (no crash)', () => {
+  // Defensive: an event with a circular reference is unlikely but
+  // JSON.stringify would throw. The dedup falls through to "include
+  // the event" rather than dropping it silently. Catches future SDK
+  // schema changes that inadvertently introduce a cycle.
+  const a = {}; a.self = a;
+  const b = { ts: '2026-05-16T16:00:00.000Z', type: 'turn_start' };
+  const { events, dropped } = _dedupBuffer([a, b, a]);
+  // Both unserializable events pass through (no signature → no dedup).
+  // The serializable one passes through once.
+  assert.strictEqual(events.length, 3);
+  assert.strictEqual(dropped, 0);
+});
+
+t('attach.js source has the bug-7 dedup wire call', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'attach.js'), 'utf8');
+  // The dedup lives inside _attachAgentWebSocket. Pin both the
+  // ws.send shape AND the dedup loop body so a future cleanup pass
+  // can't silently revert to the raw `events: session.buffer` form.
+  assert.ok(/t:\s*'agent-replay',\s*events\s*\}/.test(src),
+    'agent-replay wire send must use the deduped `events` array, not session.buffer directly');
+  assert.ok(/bug-7 round 2: dedup the buffer before shipping/.test(src),
+    'attach.js dedup comment block missing — a future cleanup might rip the loop');
+  assert.ok(/dedup dropped/.test(src),
+    'attach.js dedup must log dropped count for diagnostic visibility');
+});
+
+t('app.js source has the bug-7 client-side defense-in-depth dedup', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
+  assert.ok(/agent-replay.*dedup dropped/.test(src) || /bug-7 round 2/.test(src),
+    'app.js _handleAgentFrame must have the matching client-side dedup');
+});
+
+console.log(`\n${passed} passed, ${failed} failed`);
+if (failed) process.exit(1);

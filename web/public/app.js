@@ -3511,7 +3511,36 @@ function _handleAgentFrame(msg) {
         }
       }
     }
-    for (const ev of msg.events) _appendAgentEvent(ev);
+    // bug-7 round 2: defensive dedup. If session.buffer itself contains
+    // duplicate events (a server-side race we haven't fully pinned
+    // down — most likely a hydrate-from-disk vs live-emit overlap, or
+    // events.jsonl growing past _maybeTrimEventsFile's bounds with
+    // dup lines), the wipe still happens but the SAME events still
+    // arrive multiple times in this one frame, so the chrome-batch
+    // adjacency rule rebuilds N identical "× M" batches stacked. The
+    // exact bug-7 symptom: three identical "16:06:43 ▸ × 10 ✓ result"
+    // rows in a row.
+    //
+    // Drop exact-string-duplicate events here as a backstop. Two
+    // legitimately-different events serialize to different strings
+    // (they always carry at least a different `ts` OR a different
+    // payload), so this only catches true dups. Dropped count is
+    // logged so a future scan can correlate with server-side
+    // _emit / persist activity.
+    const seen = new Set();
+    const deduped = [];
+    let dropped = 0;
+    for (const ev of msg.events) {
+      let sig;
+      try { sig = JSON.stringify(ev); } catch { sig = null; }
+      if (sig && seen.has(sig)) { dropped++; continue; }
+      if (sig) seen.add(sig);
+      deduped.push(ev);
+    }
+    if (dropped > 0) {
+      console.log('[agent-replay] dedup dropped ' + dropped + ' duplicate event(s) of ' + msg.events.length + ' total (bug-7 root cause is server-side — investigate session.buffer hydrate-vs-emit + events.jsonl trim)');
+    }
+    for (const ev of deduped) _appendAgentEvent(ev);
     return;
   }
   if (msg.t === 'agent-init') {
