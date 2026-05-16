@@ -2095,6 +2095,22 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   100% { box-shadow: 0 0 0 1px rgba(255, 200, 90, .35), 0 0 12px rgba(255, 200, 90, .25); }
 }
 
+/* @all broadcast mention — addressed to everyone in the session.
+   Distinct cool-blue tint so it's recognizably different from a
+   personal @<user> ping (warm amber). Combined with chat-msg-mention
+   and chat-msg-mention-me (every viewer is a recipient), so override
+   the warm amber accents that those classes set above. */
+.chat-msg.chat-msg-mention-all .chat-text {
+  border-left: 3px solid rgba(100, 170, 255, .9);
+  background: rgba(100, 170, 255, .12);
+  box-shadow: 0 0 0 1px rgba(100, 170, 255, .35), 0 0 12px rgba(100, 170, 255, .25);
+  animation: chat-mention-all-pulse 1.6s ease-out 2;
+}
+@keyframes chat-mention-all-pulse {
+  0%   { box-shadow: 0 0 0 1px rgba(100, 170, 255, .65), 0 0 24px rgba(100, 170, 255, .55); }
+  100% { box-shadow: 0 0 0 1px rgba(100, 170, 255, .35), 0 0 12px rgba(100, 170, 255, .25); }
+}
+
 /* When the chat pane is collapsed and a mention-to-me has bumped the
    unread counter, swap the #btn-chat badge accent so the user can tell
    "someone addressed me" apart from generic activity. */

@@ -74,12 +74,19 @@ function _isKnownChatUser(word) {
   return false;
 }
 
-// Return the canonical username if `text` starts with `@<known-user>`
-// (optionally followed by a body). Used by handleChatMessage to short-
-// circuit chat-only mentions so they're stamped + persisted without
-// being forwarded to claude.
+// Return the canonical mention target if `text` starts with @<thing>
+// at the head, optionally followed by a body. Used by
+// handleChatMessage to short-circuit chat-only mentions so they're
+// stamped + persisted without being forwarded to claude.
 //
-// Matches `@kkrazy`, `@kkrazy hi there`, `@kkrazy, …` (trailing punct OK).
+// Recognised targets:
+//   - `@all` — special-cased broadcast mention. Every viewer / owner
+//     attached to this session sees the row highlighted as addressed
+//     to them (chat-pane unread badge bumps regardless of who they
+//     are). Returns the literal lowercased string 'all'.
+//   - `@<known-user>` — head-of-message mention to a specific
+//     collaborator (canonical lowercased login).
+//
 // Returns null for `@<unknown-word>` — those fall through to the
 // normal chat-to-claude path. (The legacy `@myco` / `@claude`
 // "talk-to-claude" prefix is gone — every chat message reaches claude
@@ -87,6 +94,8 @@ function _isKnownChatUser(word) {
 function _detectMentionTarget(text) {
   const m = String(text || '').match(/^@([A-Za-z][\w-]{0,30})\b/);
   if (!m) return null;
+  const w = m[1].toLowerCase();
+  if (w === 'all') return 'all';   // broadcast mention — see fr-3
   return _isKnownChatUser(m[1]) ? m[1] : null;
 }
 
@@ -918,6 +927,7 @@ function handleChatMessage(sessionId, session, user, text, opts = {}) {
   const mentionTarget = _detectMentionTarget(text);
   if (mentionTarget && user !== ASSISTANT_USER) {
     message.meta = { kind: 'mention', mentionUser: mentionTarget };
+    if (mentionTarget === 'all') message.meta.broadcast = true;
   }
   // [run:<type>#<id>] marker: the chat-pane's ▶ Run button on a
   // plan item produces this prefix. Stash {type, id} on the

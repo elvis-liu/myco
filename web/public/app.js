@@ -1660,13 +1660,16 @@ function _bumpChatUnreadIfHidden(message) {
   if (!message || message.user === state.chatUser) return;
   if (state.chatPaneVisible) return;
   state.chatUnread = (state.chatUnread || 0) + 1;
-  // Promote the badge styling when the bump is an @<me> mention so the
-  // user can tell "someone addressed me" apart from generic activity.
+  // Promote the badge styling when the bump is an @<me> mention OR
+  // an @all broadcast so the user can tell "someone addressed me"
+  // apart from generic activity. @all is treated like @me for unread
+  // purposes since it addresses every viewer including this one.
   // Cleared when the chat pane opens (resets state.chatUnread + the
   // mention flag).
-  const isMyMention = !!(message.meta && message.meta.kind === 'mention'
-    && state.chatUser
-    && String(message.meta.mentionUser || '').toLowerCase() === String(state.chatUser).toLowerCase());
+  const isMentionMsg = !!(message.meta && message.meta.kind === 'mention');
+  const isBroadcast = isMentionMsg && message.meta.broadcast === true;
+  const isMyMention = isMentionMsg && (isBroadcast || (state.chatUser
+    && String(message.meta.mentionUser || '').toLowerCase() === String(state.chatUser).toLowerCase()));
   if (isMyMention) {
     state.chatUnreadMention = true;
     // Fire a desktop notification when the tab is backgrounded —
@@ -1694,7 +1697,10 @@ function _maybeNotifyMention(message) {
     const text = String(message.text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
     const sessionLabel = (state.sessions || []).find((s) => s.id === state.activeId);
     const sessionTitle = (sessionLabel && (sessionLabel.cwd || sessionLabel.label || sessionLabel.id)) || '';
-    const n = new Notification(`${sender} @${state.chatUser || 'you'}`, {
+    const target = (message.meta && message.meta.broadcast)
+      ? '@all'
+      : '@' + (state.chatUser || 'you');
+    const n = new Notification(`${sender} ${target}`, {
       body: text,
       tag: 'myco-mention-' + (message.meta && message.meta.transcriptUuid || Date.now()),
       icon: '/hetu.jpg',
@@ -2851,14 +2857,21 @@ function renderChatMessage(m, isActiveMenu) {
   let cls = 'chat-msg';
   if (fromClaude) cls += ' from-claude';
   if (fromSelf) cls += ' from-self';
-  // @<known-user> chat-only mentions (stamped server-side with
-  // meta.kind='mention'). Highlight EVERY mention as a card so the
-  // sender and other viewers can see who it was addressed to; add an
-  // extra accent when the current user IS the recipient.
+  // Chat-only mentions (stamped server-side with meta.kind='mention').
+  // Two variants:
+  //   - @<known-user>: highlighted as a card so sender + other viewers
+  //     see who it was addressed to; extra accent when the current user
+  //     IS the recipient (chat-msg-mention-me).
+  //   - @all: broadcast mention (meta.broadcast=true). Every viewer
+  //     gets the recipient-style accent, since "all" addresses them
+  //     too. Renders with an additional chat-msg-mention-all class so
+  //     CSS can tint the chip / icon differently from a 1:1 mention.
   const isMention = m.meta && m.meta.kind === 'mention' && m.meta.mentionUser;
-  const isMentionToMe = isMention && state.chatUser
-    && String(m.meta.mentionUser).toLowerCase() === String(state.chatUser).toLowerCase();
+  const isBroadcast = isMention && m.meta.broadcast === true;
+  const isMentionToMe = isMention && (isBroadcast || (state.chatUser
+    && String(m.meta.mentionUser).toLowerCase() === String(state.chatUser).toLowerCase()));
   if (isMention) cls += ' chat-msg-mention';
+  if (isBroadcast) cls += ' chat-msg-mention-all';
   if (isMentionToMe) cls += ' chat-msg-mention-me';
   // For menu broadcasts, the inline buttons below ARE the picker; the
   // chat body just sets the scene with the question. Override the text

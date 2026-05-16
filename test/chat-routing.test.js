@@ -52,6 +52,21 @@ t('@<unknown-word> does NOT resolve — falls through to agent route', () => {
   assert.strictEqual(attach._detectMentionTarget('@asdf nope'), null);
 });
 
+t('@all is the broadcast mention — returns the literal "all" target', () => {
+  // fr-3: @all addresses every viewer at once. It's a chat-only
+  // mention (not forwarded to claude) and the client renders it
+  // with chat-msg-mention-all + chat-msg-mention-me on every
+  // viewer (each viewer is a recipient).
+  assert.strictEqual(attach._detectMentionTarget('@all heads up'), 'all');
+  // Case-insensitive (head-of-message is canonicalized).
+  assert.strictEqual(attach._detectMentionTarget('@ALL stand-up at 10'), 'all');
+  // Bare @all (no body) still resolves.
+  assert.strictEqual(attach._detectMentionTarget('@all'), 'all');
+  // Embedded @all is not a route hint — "tell @all the meeting…"
+  // is a normal message that just happens to mention all.
+  assert.strictEqual(attach._detectMentionTarget('tell @all the meeting is moved'), null);
+});
+
 t('plain text never matches a mention', () => {
   assert.strictEqual(attach._detectMentionTarget('hi there'), null);
   assert.strictEqual(attach._detectMentionTarget(''), null);

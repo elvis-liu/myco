@@ -810,6 +810,23 @@ test_at_myco_chat_handler() {
   grep -q '_isKnownChatUser' server/src/attach.js \
     && pass "attach.js: known-user check guards mention routing" \
     || fail "attach.js: known-user check guards mention routing"
+  # fr-3: @all broadcast mention. Server recognizes the literal 'all'
+  # target at head-of-message, stamps meta.broadcast=true, and stays
+  # chat-only (no forward to claude). Client renders chat-msg-mention-all
+  # and bumps the unread badge for every viewer (each viewer is a
+  # recipient).
+  grep -qF "if (w === 'all') return 'all'" server/src/attach.js \
+    && pass "attach.js: _detectMentionTarget recognizes @all" \
+    || fail "attach.js: _detectMentionTarget missing @all branch — broadcast mention won't fire"
+  grep -qF 'broadcast = true' server/src/attach.js \
+    && pass "attach.js: meta.broadcast=true stamped on @all mentions" \
+    || fail "attach.js: missing meta.broadcast=true stamp for @all"
+  grep -qF 'chat-msg-mention-all' web/public/app.js \
+    && pass "app.js: renders chat-msg-mention-all class for broadcast mentions" \
+    || fail "app.js: missing chat-msg-mention-all render class — @all won't be visually distinct"
+  grep -qF 'chat-msg-mention-all' web/public/styles.css \
+    && pass "styles.css: chat-msg-mention-all styling present" \
+    || fail "styles.css: chat-msg-mention-all styling missing"
   # Plain chat (no /btw) must NOT trigger the side-channel assistant.
   # Regression guard: the old shouldAskAssistant treated any '?'-ending
   # message as an assistant trigger, making every question look like claude
@@ -2135,6 +2152,22 @@ test_chat_window() {
     fi
   else
     skip "test/plan-run-comment.test.js (no host node)"
+  fi
+  # fr-4 regression: /td /fr /bug with >8-word body OR the /td! /fr!
+  # /bug! bang variants kick off an async claude rewrite that
+  # reshapes the description into a tight issue-style body. Item is
+  # persisted immediately with the original text + meta.rewritePending,
+  # then updated in place when claude returns. Short crisp items skip
+  # the rewrite entirely. The test stubs btw.runClaudeP to control
+  # the rewrite output without hitting the API.
+  if have_node; then
+    if node test/plan-item-rewrite.test.js >/dev/null 2>&1; then
+      pass "test/plan-item-rewrite.test.js (5 cases)"
+    else
+      fail "test/plan-item-rewrite.test.js — re-run with 'node test/plan-item-rewrite.test.js' to see failures"
+    fi
+  else
+    skip "test/plan-item-rewrite.test.js (no host node)"
   fi
   grep -qF 'function persistAssistantTextToChat' server/src/attach.js \
     && pass "attach.js: persistAssistantTextToChat defined" \

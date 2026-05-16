@@ -193,12 +193,39 @@ function _nextPlanItemId(items, layer) {
 // source='user' so the next "Refresh" of the plan (which re-extracts
 // from the transcript and replaces the items array) preserves these
 // instead of clobbering them — see the merge in artifacts.js refresh.
+//
+// fr-4 (2026-05-16): if the body is long (> PLAN_ITEM_REWRITE_WORD_THRESHOLD
+// words) OR opt-in via a leading `!` ("/td! Auth flow is broken when …"),
+// kick off an async claude rewrite that re-shapes the description into
+// a tight software-issue format (problem → expected vs actual → context).
+// The item is saved IMMEDIATELY with the original text so the user gets
+// instant feedback; when the rewrite lands the item's text + meta is
+// updated in place and broadcast via state-update. Original text is
+// preserved on `meta.originalText`. Short items (≤ threshold, no `!`)
+// skip the rewrite entirely — quick captures stay quick.
+const PLAN_ITEM_REWRITE_WORD_THRESHOLD = 8;
 function addPlanItem(ctx, layer) {
-  const text = (ctx.args || '').trim();
+  let text = (ctx.args || '').trim();
   if (!text) {
     ctx.reply(`Usage: /<cmd> <description> — adds a ${layer} item to this session's Plan.`);
     return;
   }
+  // Opt-in force-rewrite via leading `!`. The parser's regex stops at
+  // `\b` after the slash-cmd name so `/td!` arrives here as args
+  // starting with `!` (parseCommand splits "/td! …" → name='td',
+  // rest='! …'). Strip the bang + adjacent whitespace.
+  let forceRewrite = false;
+  if (text.startsWith('!')) {
+    forceRewrite = true;
+    text = text.slice(1).trim();
+    if (!text) {
+      ctx.reply(`Usage: /<cmd>! <description> — adds a ${layer} item and asks claude to rewrite it into software-issue format.`);
+      return;
+    }
+  }
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const shouldRewrite = forceRewrite || wordCount > PLAN_ITEM_REWRITE_WORD_THRESHOLD;
+
   const sessionId = ctx.sessionId;
   if (!sessionId) { ctx.reply('(no session context — slash command dropped)'); return; }
   let item;
@@ -222,6 +249,9 @@ function addPlanItem(ctx, layer) {
       voters: [],
       comments: [],
     };
+    if (shouldRewrite) {
+      item.meta = { rewritePending: true, rewriteRequested: forceRewrite ? 'force' : 'long' };
+    }
     rec.artifacts.plan.items.push(item);
     // _persistPlanArtifact handles saveStore + the _myco_/plan.json
     // mirror + the state-update emit so /merge and (future) /dedupe
@@ -231,7 +261,92 @@ function addPlanItem(ctx, layer) {
     ctx.reply(`(plan item failed to save: ${err.message})`);
     return;
   }
-  ctx.reply(`✓ added **${layer}** \`${item.id}\` to Plan: ${text}`);
+  const replyTail = shouldRewrite
+    ? ' — claude is rewriting this into issue format (will update shortly)…'
+    : '';
+  ctx.reply(`✓ added **${layer}** \`${item.id}\` to Plan: ${text}${replyTail}`);
+  if (shouldRewrite) {
+    // Fire-and-forget — the persistence + broadcast on completion is
+    // the user signal, not the chat reply. We don't await so the chat
+    // input frees up immediately.
+    _rewritePlanItemAsync(sessionId, item.id, text, layer, ctx).catch((err) => {
+      console.error(`[plan-rewrite] ${sessionId} ${item.id}: ${err && err.message ? err.message : err}`);
+    });
+  }
+}
+
+// Issue-style rewrite prompt. Keep it short, lean, no preamble — we
+// want the model to output ONLY the rewritten body, ready to land in
+// rec.artifacts.plan.items[].text. The schema in the user message
+// (problem / expected / actual / context) matches what a software
+// engineer would look for first when triaging.
+const _PLAN_REWRITE_SYSTEM = [
+  'You rewrite a short plan-item description into a tight software-engineering issue body.',
+  'OUTPUT FORMAT — markdown, in this order, omit sections that don\'t apply:',
+  '**Problem:** one sentence calling out the actual user-facing or developer-facing pain.',
+  '**Expected:** what the right behaviour or shape is.',
+  '**Actual:** what currently happens instead.',
+  '**Context:** any extra signal (file path, repro steps, env) — only if present in the input.',
+  'KEEP IT TIGHT: total ≤ 4 short lines for trivial items, ≤ 10 lines for complex ones.',
+  'Preserve the user\'s domain words verbatim — do not paraphrase technical terms. No preamble, no closing remarks, no "here is the rewrite".',
+].join('\n');
+
+async function _rewritePlanItemAsync(sessionId, itemId, originalText, layer, ctx) {
+  const cwd = (ctx && ctx.absCwd) || process.cwd();
+  const userPrompt = [
+    `Layer: ${layer}`,
+    `Original description: ${originalText}`,
+    '',
+    'Rewrite the description following the system prompt format.',
+  ].join('\n');
+  const btw = require('./btw');
+  let rewritten;
+  try {
+    rewritten = await btw.runClaudeP(cwd, `${_PLAN_REWRITE_SYSTEM}\n\n${userPrompt}`);
+  } catch (err) {
+    rewritten = null;
+  }
+  // _clearRewritePending updates the item under both success and failure;
+  // we always need to drop the rewritePending flag so the UI's "rewriting…"
+  // indicator turns off.
+  _applyPlanItemRewrite(sessionId, itemId, rewritten, originalText);
+}
+
+function _applyPlanItemRewrite(sessionId, itemId, rewritten, originalText) {
+  let store, rec, item;
+  try {
+    store = sessionsMod.loadStore();
+    rec = store.sessions[sessionId];
+    if (!rec || !rec.artifacts || !rec.artifacts.plan || !Array.isArray(rec.artifacts.plan.items)) return;
+    item = rec.artifacts.plan.items.find((it) => it && it.id === itemId);
+    if (!item) return;
+  } catch { return; }
+  if (!item.meta) item.meta = {};
+  delete item.meta.rewritePending;
+  const cleanedRewrite = _sanitizePlanRewrite(rewritten);
+  if (cleanedRewrite) {
+    item.meta.originalText = originalText;
+    item.meta.rewritten = true;
+    item.text = cleanedRewrite;
+  } else {
+    item.meta.rewriteFailed = true;
+  }
+  _persistPlanArtifact(rec, sessionId);
+}
+
+// Tolerate the claude-cli error stand-ins (`(claude failed to start: …)`,
+// `(claude responded with no content)`, etc.) and obvious garbage —
+// return null so the caller leaves the original text in place + flags
+// rewriteFailed instead of overwriting the item with an error stub.
+function _sanitizePlanRewrite(raw) {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^\(claude /.test(trimmed)) return null;
+  // Strip code fences the model may wrap around the output.
+  const unfenced = trimmed.replace(/^```(?:markdown)?\s*([\s\S]*?)\s*```$/i, '$1').trim();
+  if (!unfenced) return null;
+  return unfenced;
 }
 
 // Persist the plan artifact + mirror to _myco_/plan.json + emit

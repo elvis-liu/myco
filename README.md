@@ -98,6 +98,8 @@ How chat routes:
 
 - **Any message** — forwarded to the running Claude session as a normal user turn (the AgentSession's streaming-input queue). Works from owner and read-only viewer chat alike — chat is the collaborative steering channel for the session.
 - **`@user …`** at the head — recognized as a discussion mention to a known collaborator. Stamped + persisted as chat-only; NOT forwarded to Claude.
+- **`@all …`** at the head — broadcast mention. Every viewer attached to the session gets the recipient highlight + an unread-badge bump. Useful for "stand-up in 5" / "deploying now" style team pings. Chat-only; NOT forwarded to Claude.
+- **`/td …` / `/fr …` / `/bug …`** — add a plan item (Todo / Feature / Bug). If the description is longer than ~8 words, claude rewrites it into a tight software-issue format (problem → expected vs actual → context) asynchronously; the item appears immediately and updates in place when the rewrite lands. Use the bang variants **`/td!`**, **`/fr!`**, **`/bug!`** to force the rewrite on a short item.
 - **`/btw <text>`** — spawns a fresh `claude -p` in the session's cwd, with the last ~20 chat messages and last ~40 lines of ANSI-stripped scrollback as context, and posts the reply into the chat. Doesn't touch the running session. Inherits `process.env` and the user's `~/.claude/` config, so whatever auth (API key or `claude.ai` subscription) the main session uses works here too.
 - **`/task`, `/skip N`, `/cancel N`** — task-list intervention. Forwarded to Claude as a natural-language directive (see `CLAUDE.md` task-list etiquette). The agent replies with the list / dismissal confirmation.
 
