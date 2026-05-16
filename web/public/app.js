@@ -3289,6 +3289,25 @@ function _handleAgentFrame(msg) {
     if (wrap && state._agentMainPaneShouldHide !== false) wrap.hidden = true;
   }
   if (msg.t === 'agent-replay' && Array.isArray(msg.events)) {
+    // Every WS attach (initial AND every reconnect) re-sends the full
+    // session.buffer. Without wiping the previously-rendered cards,
+    // the second attach re-appends every event next to the existing
+    // ones, and the chrome-batch adjacency rule folds the duplicates
+    // into the trailing batch — surfacing as "16:06:43 ▸ × 10" rows
+    // repeating 2-4 times, depending on how many reconnects happened
+    // and where adjacency broke. Wipe non-`.chat-msg` children
+    // (agent cards, chrome batches, turn footers, load-older button)
+    // before the loop. The matching `.chat-msg` chat bubbles are
+    // handled by applyChatHistory's preserve-and-rebuild path; this
+    // mirrors that contract for the agent-event stream.
+    const pane = _ensureAgentLogPane();
+    if (pane) {
+      for (const el of [...pane.children]) {
+        if (!el.classList || !el.classList.contains('chat-msg')) {
+          el.remove();
+        }
+      }
+    }
     for (const ev of msg.events) _appendAgentEvent(ev);
     return;
   }

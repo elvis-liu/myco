@@ -439,6 +439,19 @@ test_best_practices_template() {
   grep -q "_handleAgentFrame" web/public/app.js \
     && pass "app.js: agent-event frame handler wired" \
     || fail "app.js: agent-event frame handler wired"
+  # Regression for bug-7 (2026-05-16): agent-replay arrives on every
+  # WS reconnect with the FULL session.buffer; before this fix the
+  # client appended cards on top of the prior render, and the chrome-
+  # batch adjacency rule folded the duplicates into the trailing batch
+  # — surfacing as "16:06:43 ▸ × 10" rows repeating 2-4 times. The fix
+  # wipes non-chat-msg children before processing the events loop.
+  if awk '/msg.t === .agent-replay./{found=1} found && /for \(const ev of msg.events\) _appendAgentEvent/{print "OK"; exit}' web/public/app.js | grep -q '^OK$'; then
+    if awk '/msg.t === .agent-replay./{found=1} found && !done && /el.remove\(\)/{print "OK"; done=1; exit}' web/public/app.js | grep -q '^OK$'; then
+      pass "app.js: agent-replay wipes prior cards before re-render (no dup chrome batches on reconnect)"
+    else
+      fail "app.js: agent-replay handler missing the pre-render wipe — dup chrome batches will reappear on reconnect"
+    fi
+  fi
   # Phase 9: spawnSession no longer "branches" — agent is the only
   # mode. The const declaration is the new contract.
   grep -q "const mode = 'agent'" server/src/sessions.js \
@@ -1831,7 +1844,7 @@ test_chat_window() {
   else
     pass "CLAUDE.md: @myco /task references removed"
   fi
-  grep -qF 'task-list etiquette' CLAUDE.md \
+  grep -qiF 'task-list etiquette' CLAUDE.md \
     && pass "CLAUDE.md: documents /task protocol (bare-slash form)" \
     || fail "CLAUDE.md: missing /task protocol section"
   grep -qF 'Stale-task heads-up' CLAUDE.md \
