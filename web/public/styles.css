@@ -2512,8 +2512,20 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   }
 }
 .artifact-main-view .artifact-header {
-  padding: 10px 16px;
+  /* Match the chrome cluster's vertical band exactly: the cluster
+     sits at top:10px and is --chrome-btn-size tall (32px desktop /
+     40px mobile), so its band is ~52px / 60px. We size the header
+     to --pane-header-h (52px/56px) and vertical-center its content
+     so the title baseline lines up with the floating buttons. */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--pane-header-h);
+  height: var(--pane-header-h);
+  padding: 0 16px;
   font-size: .92rem;
+  box-sizing: border-box;
+  flex: 0 0 auto;
 }
 .artifact-main-view .artifact-body {
   flex: 1;
