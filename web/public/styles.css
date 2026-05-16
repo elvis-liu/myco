@@ -4354,6 +4354,18 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   color: #9fe6b8;
 }
 .artifact-item-run:active { transform: scale(.96); }
+.artifact-item-run:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, .04);
+  color: rgba(255, 255, 255, .45);
+  border-color: rgba(255, 255, 255, .12);
+}
+.artifact-item-run:disabled:hover {
+  background: rgba(255, 255, 255, .04);
+  border-color: rgba(255, 255, 255, .12);
+  color: rgba(255, 255, 255, .45);
+}
 .artifact-item-run-status {
   padding: 1px 6px;
   border-radius: 3px;

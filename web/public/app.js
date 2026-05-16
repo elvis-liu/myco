@@ -5043,11 +5043,16 @@ function renderArtifact(type, artifact) {
           : escHtml(lastRun.status || '')
         }</span>`
       : '';
-    // ▶ Run button: fires a chat message scoped to this item. Claude
-    // decides whether to spawn a Task subagent or work inline; the
-    // server tags the resulting turn with this item id so its
-    // outcome lands back on the item via plan.runs[].
-    const runBtn = `<button class="artifact-item-run" data-id="${escHtml(it.id)}" data-text="${escHtml(String(it.text || '').slice(0, 200))}" title="Ask claude to work on this item — status + result will be linked back here" aria-label="Run">▶ Run</button>`;
+    // ▶ Run button: gated on the same 2-vote quorum the server uses
+    // for auto-execute (AUTO_EXECUTE_VOTE_THRESHOLD in artifacts.js).
+    // Below quorum the button is disabled with a tooltip explaining
+    // — discourages running items that haven't been triaged by the
+    // group. The 👍 vote button right next to it is the unblocker.
+    const runEnabled = points >= 2;
+    const runTitle = runEnabled
+      ? 'Ask claude to work on this item — status + result will be linked back here'
+      : `Needs 2 upvotes to run (currently ${points}). Click 👍 above to vote.`;
+    const runBtn = `<button class="artifact-item-run" data-id="${escHtml(it.id)}" data-text="${escHtml(String(it.text || '').slice(0, 200))}" ${runEnabled ? '' : 'disabled'} title="${escHtml(runTitle)}" aria-label="Run">▶ Run</button>`;
     const actionsRow = `<div class="artifact-item-actions">
         ${mergedBadge}
         ${runChip}
