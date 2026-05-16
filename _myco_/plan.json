@@ -198,7 +198,7 @@
       "id": "td-9",
       "text": "the following output is broadcased to chat pane as a selection: \"● 5ed1552 is committed locally. This is a meaningfully bigger UX change than the\n────────────────────────────────────────────────────────────────────────────────\n ☐ Deploy plan \n\nShip 5ed1552 (chat routing rewrite) the same way as before?\n\n❯ 1. Deploy to mycobeta + push\n     Same flow as 5ed1552's predecessors: git archive HEAD → scp → ssh extract →\n      ssh deploy.sh on mycobeta, run ./test.sh there, then git push origin main.\n      Local mycod stays on the OLD code until someone restarts it (would kill\n     this Claude session).\n  2. Push only, deploy later\n     git push origin main now so the commit is on GitHub, but skip the mycobeta\n     deploy. Useful if you want to eyeball the diff on the GitHub UI first.\n  3. Hold both\n     Leave 5ed1552 local. You can roll back with git reset --soft HEAD~1 if you\n     want to amend before publishing.\n  4. Type something.\n────────────────────────────────────────────────────────────────────────────────\n  5. Chat about this\" instead I am seeing \"claude07:58 AM\n↪ Superseded by a newer dialog\"",
       "layer": "Todo",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-15T00:00:54.433Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -210,7 +210,8 @@
           "text": "another case the menu selection is not broadcasted to chat pane: ● The Refresh button today fires fast (~1s for re-extracting   from JSONL). Adding LLM-based dedupe adds 10–30s round-trip   to claude -p. Three integration shapes — UX trade-offs ───────────────────────────────────────────────────────────────  ☐ Integration   How should plan-refresh integrate the dedupe scan?  ❯ 1. Background, inline callout      Refresh returns immediately as today. The server kicks off       the LLM dedupe in the background; when it returns       (10–30s), a state-update frame delivers proposals and the      plan view renders a 'Possible merges' callout at the top      with `Apply` / `Dismiss` buttons per group. Best UX — no      blocking, user confirms inline.   2. Sequential, blocking refresh      Refresh waits for both the re-extraction AND the dedupe      LLM call before returning. Button reads 'Refreshing…      (asking claude for merges)'. User clicks `Apply`/`Dismiss`       in the plan view once",
           "ts": "2026-05-15T03:05:41.880Z"
         }
-      ]
+      ],
+      "ranAt": "2026-05-15T05:36:58.166Z"
     },
     {
       "id": "td-10",
@@ -254,204 +255,6 @@
       "addedAt": "2026-05-15T01:45:21.237Z",
       "addedBy": "ryan-blues",
       "source": "user",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "15fd2a8fea11",
-      "text": "lazy-load chat history on scroll-up instead of loading the full transcript at once (mobile perf)",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "fb0778f2d28e",
-      "text": "add a top-right 'return to main' icon so the Todo window doesn't auto-vanish on new main-window messages",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "035f6b39b023",
-      "text": "rename the 'claude' author label to 'myco' in chat rows (e.g. resolved menu picks)",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "6999624cb48a",
-      "text": "fix white status-bar background on readonly viewer and chat pane to match surroundings",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "58642f209617",
-      "text": "stop duplicate plan rendering across main window and discussion pane (fold one)",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "28a04e3394be",
-      "text": "add typing+submit handling for menu options like 'chat about it' / 'type something'",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "a35203905de0",
-      "text": "include context (yes/no to what) in permission prompts shown in chat pane",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "aadb45b7782a",
-      "text": "fix plan-selection rows that render '↪ Superseded by a newer dialog' instead of the options",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "ec68422867b0",
-      "text": "add pop-up blocking pane for queued user-input-required responses, ordered by arrival",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "8a833e591df6",
-      "text": "stop auto-switching to readonly viewer; keep chat pane as the main working window",
-      "layer": "Chat",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "cfcb3835576d",
-      "text": "make file explorer fill the entire screen when enabled on mobile",
-      "layer": "Mobile",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "f956c1407b59",
-      "text": "match scroll bar color with surrounding components",
-      "layer": "Mobile",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "5d2f5526fd4d",
-      "text": "deploy commit 5c8a04f (menu-pick queue + retry) to mycobeta",
-      "layer": "PTY",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "b06112c4faf2",
-      "text": "investigate recurring 'No response requested' / 'ran 1 tool call no text reply' on mycobeta",
-      "layer": "PTY",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "d21ce9515983",
-      "text": "ensure session is in auto mode when a request is sent to claude",
-      "layer": "PTY",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "e2ca9cad2273",
-      "text": "auto-recover claude session from the resume window after redeploy (no manual intervention)",
-      "layer": "PTY",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "7faaaa005332",
-      "text": "make /clear wipe persisted history server-side, not just in-memory (refresh restores it today)",
-      "layer": "Server",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "348515a0b920",
-      "text": "auto-persist architecture to architecture.md and auto-load on tab open (no refresh button)",
-      "layer": "Architecture",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "8239618ece05",
-      "text": "render the same session independently across mobile, browser, and vscode clients",
-      "layer": "Session",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "a4b636e1a972",
-      "text": "decide where the 'myserver' host from the vscode-remote share URL is stored/configured",
-      "layer": "Session",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "1470281a4434",
-      "text": "stop passing auth tokens via WebSocket URL query strings; use a subprotocol or first-message handshake",
-      "layer": "Security",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
-      "voters": [],
-      "comments": []
-    },
-    {
-      "id": "8161ca198b4e",
-      "text": "support gitee and allow saving gitee tokens",
-      "layer": "Integration",
-      "done": false,
-      "addedAt": "2026-05-15T01:45:59.398Z",
       "voters": [],
       "comments": []
     },
@@ -510,7 +313,40 @@
       "source": "user",
       "voters": [],
       "comments": []
+    },
+    {
+      "id": "e98b41c27c83",
+      "text": "new sample todo",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-05-15T07:57:46.716Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "dd9b5676e094",
+      "text": "the plan/arch/test/file explorer icons are not bringing up the right tab",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-15T16:27:28.587Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "a6eaaa980bb6",
+      "text": "support multi-modal input (voice, image)",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-05-15T23:29:44.181Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": []
     }
   ],
-  "updatedAt": "2026-05-15T02:57:51.389Z"
+  "updatedAt": "2026-05-15T23:29:44.181Z"
 }
