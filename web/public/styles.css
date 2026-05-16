@@ -4063,6 +4063,69 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   gap: 2px;
   padding: 4px 0 2px;
 }
+/* Presence cluster — small avatar chips at the top of the chatpane
+   showing who's currently attached. Hidden when only one user is
+   present (just self — no need for a cluster of one). Each chip is
+   a colored circle keyed by a deterministic hue from the login, so
+   the same user always gets the same color across sessions. */
+.chatpane-presence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding: 6px 12px 4px;
+  background: rgba(255, 255, 255, .015);
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  font-size: 0.7rem;
+}
+.chatpane-presence[hidden] { display: none; }
+.presence-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: hsl(var(--presence-hue, 200deg) 38% 38%);
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  font-weight: 600;
+  user-select: none;
+  cursor: help;
+  position: relative;
+  border: 2px solid transparent;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.presence-chip:hover { transform: scale(1.08); }
+/* Owner: small accent ring + crown-ish dot at top */
+.presence-chip-owner {
+  border-color: rgba(76, 175, 130, .55);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+}
+.presence-chip-owner::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  right: -1px;
+  width: 6px;
+  height: 6px;
+  background: var(--accent, #4caf82);
+  border-radius: 50%;
+  border: 1px solid var(--bg, #0d1117);
+}
+.presence-chip-guest { opacity: 0.85; }
+.presence-chip-me {
+  border-color: rgba(170, 200, 255, .65);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+}
+.presence-initial { line-height: 1; }
+
+@media (max-width: 900px) {
+  .chatpane-presence { padding: 8px 12px 6px; }
+  .presence-chip { width: 26px; height: 26px; font-size: 0.82rem; }
+}
+
 /* Turn groups — each user prompt → tool activity → claude reply →
    turn footer bundles into one collapsible unit. Default state:
    collapsed on phone (≤900px), expanded on desktop. Click the head

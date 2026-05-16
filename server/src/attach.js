@@ -392,6 +392,52 @@ function streamTranscriptToWs(sessionId, ws) {
 // `agent-event` frames, replays the per-session event ring on attach so
 // reconnects see prior context, and routes chat / menu frames back into
 // handleChatMessage / handleMenuPick(Toggle|Submit).
+// Presence tracking — module-level map of sessionId → Set of attached
+// client info. On every attach/detach we broadcast the current
+// roster to all attached clients of that session so the chat-pane
+// header can render avatar chips for who's looking. Owners and
+// viewers (share-link guests) both show up; role distinguishes them.
+const _sessionPresence = new Map();
+
+function _registerPresence(sessionId, info) {
+  let set = _sessionPresence.get(sessionId);
+  if (!set) { set = new Set(); _sessionPresence.set(sessionId, set); }
+  set.add(info);
+}
+
+function _unregisterPresence(sessionId, info) {
+  const set = _sessionPresence.get(sessionId);
+  if (!set) return;
+  set.delete(info);
+  if (set.size === 0) _sessionPresence.delete(sessionId);
+}
+
+function _presencePayload(sessionId) {
+  const set = _sessionPresence.get(sessionId);
+  if (!set) return [];
+  const users = [];
+  for (const info of set) {
+    users.push({
+      login: info.login || '(anon)',
+      role: info.role || 'viewer',
+      attachedAt: info.attachedAt,
+    });
+  }
+  return users;
+}
+
+function _broadcastPresence(sessionId) {
+  const set = _sessionPresence.get(sessionId);
+  if (!set) return;
+  const users = _presencePayload(sessionId);
+  const frame = JSON.stringify({ t: 'presence', users });
+  for (const info of set) {
+    if (info.ws && info.ws.readyState === info.ws.OPEN) {
+      try { info.ws.send(frame); } catch {}
+    }
+  }
+}
+
 function attachWebSocket(session, ws, opts = {}) {
   return _attachAgentWebSocket(session, ws, opts);
 }
@@ -441,6 +487,18 @@ function _attachAgentWebSocket(session, ws, opts = {}) {
   session.on('state-update', onStateUpdate);
   session.on('exit', onExit);
 
+  // Track this attach in the presence roster + broadcast the updated
+  // list to everyone watching the session (incl. the new connection,
+  // so their chatpane header paints the chips immediately).
+  const presenceInfo = {
+    ws,
+    login: user || '(anon)',
+    role: 'owner',
+    attachedAt: new Date().toISOString(),
+  };
+  _registerPresence(sessionId, presenceInfo);
+  _broadcastPresence(sessionId);
+
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
@@ -481,6 +539,8 @@ function _attachAgentWebSocket(session, ws, opts = {}) {
     session.off('chat', onChat);
     session.off('state-update', onStateUpdate);
     session.off('exit', onExit);
+    _unregisterPresence(sessionId, presenceInfo);
+    _broadcastPresence(sessionId);
   });
 }
 
@@ -570,6 +630,17 @@ function attachViewerWebSocket(session, ws, opts = {}) {
   const ownerLogin = sessionsMod.getSessionRecord(sessionId)?.user || null;
   ws.send(JSON.stringify({ t: 'viewer-mode', owner: ownerLogin }));
 
+  // Track viewer in the presence roster — role='guest' distinguishes
+  // share-link viewers from the session owner in the chip cluster.
+  const presenceInfo = {
+    ws,
+    login: user || '(anon)',
+    role: 'guest',
+    attachedAt: new Date().toISOString(),
+  };
+  _registerPresence(sessionId, presenceInfo);
+  _broadcastPresence(sessionId);
+
   const stopTranscript = streamTranscriptToWs(sessionId, ws);
 
   function handleViewerInbound(raw) {
@@ -602,6 +673,8 @@ function attachViewerWebSocket(session, ws, opts = {}) {
     session.off('chat', onChat);
     session.off('state-update', onStateUpdate);
     stopTranscript();
+    _unregisterPresence(sessionId, presenceInfo);
+    _broadcastPresence(sessionId);
   });
 }
 

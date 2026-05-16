@@ -21,7 +21,7 @@
   <link rel="icon" type="image/jpeg" href="/hetu.jpg?v=1" />
   <link rel="apple-touch-icon" href="/hetu.jpg?v=1" />
   <title>myco</title>
-  <link rel="stylesheet" href="styles.css?v=234" />
+  <link rel="stylesheet" href="styles.css?v=235" />
   <link rel="stylesheet" href="/vendor/github-dark.min.css" />
 </head>
 <body>
@@ -89,6 +89,12 @@
              dragging left grows it, dragging right shrinks it. Width
              persisted in localStorage. -->
         <div id="chatpane-resize" title="Drag to resize"></div>
+        <!-- Presence chips: shows the avatars of everyone currently
+             attached to this session (owner + guest viewers). Hidden
+             when only 1 user is attached (just self — no point
+             showing a chip cluster of size 1). _renderPresence(users)
+             rebuilds the chip set on every t:'presence' WS frame. -->
+        <div id="chatpane-presence" class="chatpane-presence" hidden></div>
         <!-- Read-only banner: shown for guests / share-token viewers.
              applyReadOnly() unhides this + sets the owner login. The
              chat input stays enabled because guests can still post

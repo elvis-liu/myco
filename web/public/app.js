@@ -92,6 +92,71 @@ async function authedFetch(path, opts = {}) {
   return res;
 }
 
+// Presence: render avatar chips for everyone currently attached to
+// the active session. Hidden when only one user is attached (just
+// self — boring). The chip cluster lives at the top of the chat
+// pane (#chatpane-presence). Each chip is a colored circle with the
+// first letter of the login, owner has a small accent dot, viewers
+// (guests) get a muted hue. Hover for full login + role + duration.
+function _renderPresence(users) {
+  const host = document.getElementById('chatpane-presence');
+  if (!host) return;
+  if (!Array.isArray(users) || users.length <= 1) {
+    host.hidden = true;
+    host.innerHTML = '';
+    return;
+  }
+  // Sort: self first (so the user sees themselves anchored at the
+  // left edge), then owners, then alphabetical by login.
+  const me = (state.chatUser || '').toLowerCase();
+  users = users.slice().sort((a, b) => {
+    const aMe = a.login.toLowerCase() === me ? 0 : 1;
+    const bMe = b.login.toLowerCase() === me ? 0 : 1;
+    if (aMe !== bMe) return aMe - bMe;
+    const aOwner = a.role === 'owner' ? 0 : 1;
+    const bOwner = b.role === 'owner' ? 0 : 1;
+    if (aOwner !== bOwner) return aOwner - bOwner;
+    return a.login.localeCompare(b.login);
+  });
+  host.hidden = false;
+  host.innerHTML = users.map((u) => {
+    const initial = (u.login || '?').slice(0, 1).toUpperCase();
+    const hue = _presenceHue(u.login);
+    const isMe = u.login.toLowerCase() === me;
+    const since = _presenceSince(u.attachedAt);
+    const title = `${u.login} · ${u.role || 'viewer'} · joined ${since}`;
+    const cls = 'presence-chip' +
+                (u.role === 'owner' ? ' presence-chip-owner' : ' presence-chip-guest') +
+                (isMe ? ' presence-chip-me' : '');
+    return `<span class="${cls}" style="--presence-hue: ${hue}deg" title="${escHtml(title)}">` +
+           `<span class="presence-initial">${escHtml(initial)}</span>` +
+           `</span>`;
+  }).join('');
+}
+
+// Deterministic hue from a login string — same user always gets the
+// same color. Cheap hash; collisions across logins are fine since
+// it's purely cosmetic.
+function _presenceHue(login) {
+  let h = 0;
+  const s = String(login || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
+function _presenceSince(iso) {
+  if (!iso) return 'just now';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return 'just now';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 function showLogin() {
   const modal = document.getElementById('login-modal');
   if (modal) modal.hidden = false;
@@ -1115,6 +1180,8 @@ function openSession(id, opts = {}) {
         // round-trip required.
         state.artifacts = msg.artifacts || {};
         _onArtifactsCacheUpdated();
+      } else if (msg.t === 'presence' && Array.isArray(msg.users)) {
+        _renderPresence(msg.users);
       } else if (msg.t === 'agent-init' || msg.t === 'agent-replay' || msg.t === 'agent-event') {
         // SDK-driven session frames (mode='agent', phase 1 of the
         // agent-sdk-research migration). Routes through the basic
