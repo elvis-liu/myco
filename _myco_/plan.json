@@ -615,6 +615,12 @@
             "kind": "design",
             "manual": true
           }
+        },
+        {
+          "id": "052592194286",
+          "user": "kkrazy",
+          "text": "fr-10 design highlights The biggest finding: fr-10's Context block lists ~6 \"required\" REST endpoints, but 5 of them already exist under slightly different paths. Only two new server routes are strictly needed for an MVP — saving most of the work:  Wishlist\tAlready exists as\tGap GET /files\tGET /sessions/:id/files\tnone GET /files/content\tGET /sessions/:id/file\tnone POST /chat\tWS only ({t:'chat', text})\tnew REST wrapper GET /chat/:session_id\tGET /sessions/:id/chat/history (just shipped with bug-9 pagination)\tnone POST /chat/session\tPOST /sessions\tnone GET /health\t—\tnew (3 lines) Architecture — activity-bar contribution → Sessions/Files TreeViews + Chat WebviewView + StatusBarItem; SecretStorage for the bearer; hybrid REST + WS (REST for commands, WS for live fan-out, reconnect-on-focus with ?before= catch-up for backgrounded VS Code).  Phased rollout:  v0.1 (2–3 days): read-only MVP — Sessions + Files browse + REST-poll chat. Server side ~30 lines. v0.5 (3–4 days): WS + editable files vi",
+          "ts": "2026-05-16T15:49:27.036Z"
         }
       ],
       "meta": {
