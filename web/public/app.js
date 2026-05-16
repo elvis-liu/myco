@@ -2104,6 +2104,54 @@ function _enforceChatHistoryCap() {
     const btn = list.querySelector('#chat-load-older');
     if (btn) btn.remove();
   }
+  // Cluster consecutive resolved AskUserQuestion rows into one visual
+  // bundle (shared left bar, tighter spacing). Wizard-style flows
+  // produce 3-8 questions in a row, each one resolving to a single-
+  // line "Q: ✓ Picked …" — without clustering they read as N
+  // disconnected rows; with clustering they read as one Q&A run.
+  _clusterAnsweredQuestions(list);
+}
+
+// Walk #chat-messages and tag runs of 2+ consecutive resolved
+// AskUserQuestion menus (chat-msg-menu-collapsed without the
+// chat-msg-menu-perm tool-permission marker — those are CSS-hidden
+// anyway). First in a run → qa-run-start; middle → qa-run-mid;
+// last → qa-run-end. Runs of 1 stay unmarked. CSS draws a shared
+// left bar across all three classes and tightens vertical spacing.
+function _clusterAnsweredQuestions(list) {
+  if (!list) return;
+  // Reset any prior tags first — the run boundaries shift on each
+  // append (a new resolved menu extends the previous run; a non-QA
+  // event ends one).
+  for (const el of list.querySelectorAll('.qa-run-start, .qa-run-mid, .qa-run-end')) {
+    el.classList.remove('qa-run-start', 'qa-run-mid', 'qa-run-end');
+  }
+  const cards = [];
+  for (const el of list.children) {
+    if (el.id === 'chat-load-older') continue;
+    cards.push(el);
+  }
+  // Iterate one past the end so the run-flush logic at the boundary
+  // handles a run that reaches the last card cleanly.
+  let runStart = -1;
+  for (let i = 0; i <= cards.length; i++) {
+    const el = cards[i];
+    const isQa = !!(el && el.classList &&
+      el.classList.contains('chat-msg-menu-collapsed') &&
+      !el.classList.contains('chat-msg-menu-perm'));
+    if (isQa) {
+      if (runStart < 0) runStart = i;
+      continue;
+    }
+    if (runStart < 0) continue;     // not in a run, nothing to flush
+    const runLen = i - runStart;
+    if (runLen >= 2) {
+      cards[runStart].classList.add('qa-run-start');
+      for (let j = runStart + 1; j < i - 1; j++) cards[j].classList.add('qa-run-mid');
+      cards[i - 1].classList.add('qa-run-end');
+    }
+    runStart = -1;
+  }
 }
 
 // Strip the heavy bits from a card that's just been archived. Cuts

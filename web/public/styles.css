@@ -4008,6 +4008,60 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   gap: 2px;
   padding: 4px 0 2px;
 }
+/* Q&A clustering: when claude fires consecutive AskUserQuestion
+   prompts (wizard-style), the resolved rows collapse to one-liners
+   like "Daemon model: ✓ Picked [2] Built-in --daemon flag". Three
+   or four of these in a row used to read as N disconnected events
+   — the clustering wraps them in a shared left bar + tight stack so
+   the eye groups them as ONE Q&A run. JS tags qa-run-start/-mid/
+   -end via _clusterAnsweredQuestions(). Tool-permission menus
+   (.chat-msg-menu-perm) are excluded because they're hidden by
+   default and live in the modal carousel anyway. */
+.qa-run-start,
+.qa-run-mid,
+.qa-run-end {
+  border-left: 2px solid rgba(76, 175, 130, .30);
+  padding-left: 12px;
+  margin-left: 4px;
+  background: rgba(76, 175, 130, .025);
+}
+.qa-run-start {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top-left-radius: 3px;
+}
+.qa-run-mid {
+  margin-top: 0;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.qa-run-end {
+  margin-top: 0;
+  padding-top: 2px;
+  padding-bottom: 6px;
+  border-bottom-left-radius: 3px;
+  margin-bottom: 8px;
+}
+/* Q&A run badge — a tiny "Q&A" tag pinned to the top-left of the
+   first row in a run, so the user has a one-word affordance for
+   "these belong together". Drawn via ::before so we don't have to
+   inject DOM. The 'content: "Q&A"' is intentionally short — long
+   labels fight with the actual question text. */
+.qa-run-start::before {
+  content: 'Q&A';
+  display: inline-block;
+  margin: -2px 6px 2px -2px;
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(76, 175, 130, .85);
+  background: rgba(76, 175, 130, .10);
+  border-radius: 2px;
+  vertical-align: 1px;
+}
+
 /* Lazy-load older history (2026-05-16): keeps the chat pane crisp on
    long sessions. Cards beyond CHAT_VISIBLE_LIMIT (50) get .chat-msg-
    archived; the load-older button sits at the top of #chat-messages
