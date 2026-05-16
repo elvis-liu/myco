@@ -1431,6 +1431,16 @@ test_deploy_oauth_flags() {
   else
     pass "deploy.sh: no source-vs-served regex regression"
   fi
+  # Regression (2026-05-16 follow-up): the verify_deploy retry loop has
+  # `set -euo pipefail` propagating grep's exit 1 (no-match during the
+  # post-swap Caddy→mycod 502 race) into the `served=$(...)` assignment,
+  # which set -e then turned into a silent script abort BEFORE the
+  # retry could fire. The `|| true` tail keeps the loop alive — when
+  # this guard red-flips, future deploys will silently exit 1 again
+  # even with the URL-encoded comparison in place.
+  grep -qF '| head -1 || true)' deploy.sh \
+    && pass "deploy.sh: verify retry survives transient empty curl results (|| true tail)" \
+    || fail "deploy.sh: verify retry will abort under pipefail when grep doesn't match — need '|| true' tail on served= assignment"
 }
 
 test_oauth_static() {

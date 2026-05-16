@@ -400,7 +400,14 @@ verify_deploy() {
     # `T`, `%3A`, digits, trailing `Z`) — the old `\d+` was greedy
     # only on the year prefix and silently mismatched everything
     # post-build-stamp rollout.
-    served=$(curl -sk --max-time 5 "https://$domain/" 2>/dev/null | grep -oP 'app\.js\?v=\K[^"'\''\s&<]+' | head -1)
+    #
+    # The trailing `|| true` keeps the retry loop alive under
+    # `set -euo pipefail` when curl|grep|head returns empty: grep's
+    # exit 1 on no-match (Caddy→mycod 502 race in the first second
+    # after container swap) would otherwise propagate via pipefail
+    # and abort the script before any retry — exactly the silent
+    # exit that 179da49's mycobeta+myco deploys hit.
+    served=$(curl -sk --max-time 5 "https://$domain/" 2>/dev/null | grep -oP 'app\.js\?v=\K[^"'\''\s&<]+' | head -1 || true)
     [ -n "$served" ] && break
     sleep 2
   done
