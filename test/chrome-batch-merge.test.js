@@ -200,5 +200,35 @@ t('static guard: _enforceChatHistoryCap invokes the merge', () => {
     'app.js must call _mergeIdenticalChromeBatches(list) from _enforceChatHistoryCap so the merge fires on every chat mutation');
 });
 
+t('static guard: merge call lives BEFORE the cards.length <= CHAT_VISIBLE_LIMIT early return', () => {
+  // bug-10 round 2 regression: the original placement of the merge
+  // call was below the `if (cards.length <= CHAT_VISIBLE_LIMIT) return;`
+  // early-return, which silently skipped the merge for every chat
+  // under 50 cards (the common case). User reproduced 5 stacked
+  // `× N perm asked · Bash` rows on a chat with 6 batches; fix lifts
+  // the call to the TOP of _enforceChatHistoryCap so it always fires.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
+  // Extract the function body via a brace-balanced scan so we can
+  // reason about ordering inside it.
+  const sigIdx = src.indexOf('function _enforceChatHistoryCap');
+  assert.ok(sigIdx >= 0, '_enforceChatHistoryCap not found in app.js');
+  const bodyStart = src.indexOf('{', sigIdx);
+  let depth = 0, i = bodyStart;
+  let bodyEnd = -1;
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) { bodyEnd = i; break; } }
+  }
+  assert.ok(bodyEnd > 0, 'could not find _enforceChatHistoryCap body end');
+  const body = src.slice(sigIdx, bodyEnd + 1);
+  const mergeIdx = body.indexOf('_mergeIdenticalChromeBatches(list)');
+  const earlyReturnIdx = body.search(/if \(cards\.length <= CHAT_VISIBLE_LIMIT\)/);
+  assert.ok(mergeIdx > 0, '_mergeIdenticalChromeBatches call missing inside _enforceChatHistoryCap');
+  assert.ok(earlyReturnIdx > 0, 'CHAT_VISIBLE_LIMIT early-return guard missing — has the function shape changed?');
+  assert.ok(mergeIdx < earlyReturnIdx,
+    'merge call must appear BEFORE the cards.length <= CHAT_VISIBLE_LIMIT early return — otherwise it never fires for chats under 50 cards, the common case (user repro: 6 batches, merge silently skipped)');
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -2421,6 +2421,15 @@ const CHAT_HARD_CAP = 1000;
 function _enforceChatHistoryCap() {
   const list = document.getElementById('chat-messages');
   if (!list) return;
+  // bug-10 round 2: the chrome-batch merge must run on EVERY chat
+  // mutation regardless of cap size. The original placement (below
+  // the cards.length <= CHAT_VISIBLE_LIMIT early return) silently
+  // skipped the merge for any chat under 50 cards — the common
+  // case. User reproduced 5 stacked `× N perm asked · Bash` batches
+  // on a chat with only 6 chrome batches; the early return ate the
+  // merge. Lifted here so it fires before the cap-based archive
+  // logic decides whether to bail.
+  _mergeIdenticalChromeBatches(list);
   // Real message cards only — exclude our own load-older button.
   let cards = [];
   for (const el of list.children) {
@@ -2471,12 +2480,10 @@ function _enforceChatHistoryCap() {
     const btn = list.querySelector('#chat-load-older');
     if (btn) btn.remove();
   }
-  // bug-10: collapse multiple chrome batches that all show the same
-  // final-event label (e.g. five consecutive `× N perm asked · Bash`
-  // batches over a few minutes) into ONE row with the counts summed.
-  // Runs BEFORE the turn-grouping / date-sep passes so they see the
-  // merged batches and don't try to group around now-removed nodes.
-  _mergeIdenticalChromeBatches(list);
+  // bug-10: the chrome-batch merge already ran at the TOP of this
+  // function (before the cards.length <= CHAT_VISIBLE_LIMIT early
+  // return). Don't re-fire here — idempotent so it'd be safe, but
+  // the duplicate work shows up in profiles on long sessions.
   // Cluster consecutive resolved AskUserQuestion rows into one visual
   // bundle (shared left bar, tighter spacing). Wizard-style flows
   // produce 3-8 questions in a row, each one resolving to a single-
