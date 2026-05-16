@@ -4063,6 +4063,100 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   gap: 2px;
   padding: 4px 0 2px;
 }
+/* Turn groups — each user prompt → tool activity → claude reply →
+   turn footer bundles into one collapsible unit. Default state:
+   collapsed on phone (≤900px), expanded on desktop. Click the head
+   to toggle. The whole head row is the tap target. */
+.turn-group {
+  margin: 8px 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, .015);
+  transition: background .12s ease;
+}
+.turn-group.turn-collapsed { background: rgba(255, 255, 255, .01); }
+.turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.86rem;
+  line-height: 1.4;
+  border: 1px solid transparent;
+  /* Sticky while the body is expanded — keeps the user oriented
+     when scrolling through a long claude reply inside the turn. */
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface, #161821);
+}
+.turn-head:hover { background: rgba(255, 255, 255, .04); }
+.turn-collapsed .turn-head { background: transparent; }
+.turn-collapsed .turn-head:hover { background: rgba(255, 255, 255, .03); }
+.turn-chevron {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform .15s ease;
+  opacity: 0.6;
+}
+.turn-expanded .turn-chevron {
+  transform: rotate(90deg);
+  opacity: 0.8;
+}
+.turn-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.turn-head-ts {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  color: var(--muted, #8b949e);
+  opacity: 0.7;
+}
+.turn-head-outcome {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(76, 175, 130, .10);
+  color: rgba(76, 175, 130, .85);
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.turn-head-outcome-warn {
+  background: rgba(255, 184, 107, .12);
+  color: #ffb86b;
+}
+.turn-head-outcome[hidden] { display: none; }
+.turn-body { padding: 2px 10px 10px; }
+.turn-collapsed .turn-body { display: none; }
+
+@media (max-width: 900px) {
+  .turn-head {
+    min-height: 44px;        /* finger-friendly tap target */
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+  .turn-head-outcome { font-size: 0.66rem; }
+  .turn-head-ts { font-size: 0.7rem; }
+}
+
 /* Q&A clustering: when claude fires consecutive AskUserQuestion
    prompts (wizard-style), the resolved rows collapse to one-liners
    like "Daemon model: ✓ Picked [2] Built-in --daemon flag". Three

@@ -2025,6 +2025,16 @@ function _bindChatMenuClicks() {
 
 function clearChat() {
   state.chatMessages = [];
+  // Explicitly wipe ALL DOM children of #chat-messages — including
+  // agent cards / turn-groups / load-older buttons. The
+  // renderChatPane preserve logic (which keeps agent cards across
+  // chat-history applies) is the right call WITHIN a session, but
+  // on a session switch we want a clean slate: the previous
+  // session's agent activity must not leak into the new one. The
+  // new session's chat-history + agent-replay will repopulate
+  // shortly after the WS attach lands.
+  const list = document.getElementById('chat-messages');
+  if (list) list.innerHTML = '';
   renderChatPane();
 }
 
@@ -2147,6 +2157,113 @@ function _enforceChatHistoryCap() {
   // line "Q: ✓ Picked …" — without clustering they read as N
   // disconnected rows; with clustering they read as one Q&A run.
   _clusterAnsweredQuestions(list);
+  // Bundle user prompt → tool activity → claude reply → turn footer
+  // into a single collapsible "turn group". Idempotent — every call
+  // unwraps existing groups and rebuilds from the flat list, so
+  // it's safe to fire from every mutation path.
+  _groupTurns(list);
+}
+
+// Group #chat-messages children into per-turn collapsible bundles.
+// A "turn" = a user message and every agent card / chat row that
+// follows it until the next user message. Each turn gets a clickable
+// head row (user prompt summary + ts + outcome chip) and a body
+// holding the cards. Default state: collapsed on mobile, expanded
+// on desktop — so long sessions read as a feed of conversation
+// turns instead of a sea of events.
+//
+// Idempotent: every call first flattens any existing turn-groups
+// back to direct children, then re-walks and re-wraps. This means
+// it's safe to call from every #chat-messages mutation (live append
+// or re-render) without state-tracking.
+function _groupTurns(list) {
+  if (!list) return;
+  // Unwrap existing turn-groups (move body children back to list,
+  // then drop the wrapper).
+  for (const group of [...list.querySelectorAll(':scope > .turn-group')]) {
+    const body = group.querySelector(':scope > .turn-body');
+    if (body) {
+      for (const child of [...body.children]) {
+        list.insertBefore(child, group);
+      }
+    }
+    group.remove();
+  }
+  // Walk flat children, opening a new turn at each user message and
+  // sweeping subsequent events into its body until the next user
+  // message arrives.
+  const snapshot = [...list.children];
+  let open = null;
+  for (const card of snapshot) {
+    if (card.id === 'chat-load-older') continue;
+    if (card.classList.contains('chat-msg-user')) {
+      // Close any prior turn first, then open a new one with this
+      // user message as the head's summary source + first body row.
+      const group = document.createElement('div');
+      group.className = 'turn-group';
+      if (card.dataset.ts) group.dataset.ts = card.dataset.ts;
+      const head = document.createElement('div');
+      head.className = 'turn-head';
+      head.innerHTML = _renderTurnHead(card);
+      const body = document.createElement('div');
+      body.className = 'turn-body';
+      group.appendChild(head);
+      group.appendChild(body);
+      list.insertBefore(group, card);
+      body.appendChild(card);   // move user msg into the body
+      head.addEventListener('click', (e) => {
+        // Don't toggle if user clicks an interactive nested element
+        // (none today, defensive for the future).
+        if (e.target.closest('a, button')) return;
+        group.classList.toggle('turn-collapsed');
+        group.classList.toggle('turn-expanded');
+      });
+      // Default state — collapsed on phone, expanded on desktop.
+      // Drives reading density: feed-of-turns on mobile, expanded
+      // detail on desktop.
+      if (window.innerWidth <= 900) group.classList.add('turn-collapsed');
+      else group.classList.add('turn-expanded');
+      open = { group, head, body };
+      continue;
+    }
+    if (!open) continue;   // orphan event before any user message
+    open.body.appendChild(card);
+    // If this card is the turn-footer, fold its outcome into the
+    // head chip and close the turn.
+    if (card.classList.contains('turn-footer')) {
+      _refreshTurnHead(open.head, open.body);
+      open = null;
+    }
+  }
+}
+
+// First-line summary of the user message that anchors this turn.
+// Trimmed to 100 chars; whitespace collapsed. Chevron shows
+// expand/collapse state via CSS.
+function _renderTurnHead(userCard) {
+  const text = (userCard.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  const ts = userCard.dataset.ts || '';
+  const tsShort = ts ? ts.slice(11, 16) : '';
+  return `<span class="turn-chevron" aria-hidden="true"></span>` +
+         `<span class="turn-head-text">${escHtml(text || '(empty turn)')}</span>` +
+         (tsShort ? `<span class="turn-head-ts">${escHtml(tsShort)}</span>` : '') +
+         `<span class="turn-head-outcome" hidden></span>`;
+}
+
+// When a turn-footer lands in this turn's body, surface its outcome
+// (✓ done / ■ failed) and key stats (cost · duration) in the head's
+// outcome chip so a collapsed turn still tells the user how it went.
+function _refreshTurnHead(head, body) {
+  const footer = body.querySelector(':scope > .turn-footer');
+  if (!footer) return;
+  const ok = !footer.querySelector('.turn-footer-warn');
+  const stats = footer.querySelector('.turn-footer-stats');
+  const statsText = stats ? stats.textContent.trim() : '';
+  const slot = head.querySelector('.turn-head-outcome');
+  if (!slot) return;
+  slot.hidden = false;
+  slot.className = 'turn-head-outcome' + (ok ? ' turn-head-outcome-ok' : ' turn-head-outcome-warn');
+  slot.textContent = (ok ? '✓ ' : '■ ') + statsText;
 }
 
 // Walk #chat-messages and tag runs of 2+ consecutive resolved
@@ -2307,6 +2424,20 @@ function renderChatPane(scrollToBottom = false) {
   const list = document.getElementById('chat-messages');
   const empty = document.getElementById('chat-empty');
   if (!list) return;
+  // Unwrap any existing turn-groups so we see the flat list of cards
+  // again. _groupTurns re-runs at the end via _enforceChatHistoryCap,
+  // so we end up grouped again — this is just to expose chat-msg
+  // bubbles (which currently live inside turn-bodies) as direct
+  // children for the preserve-and-rebuild pass.
+  for (const group of [...list.querySelectorAll(':scope > .turn-group')]) {
+    const body = group.querySelector(':scope > .turn-body');
+    if (body) {
+      for (const child of [...body.children]) {
+        list.insertBefore(child, group);
+      }
+    }
+    group.remove();
+  }
   // Preserve non-chat-message children. The chat-pane DOM is shared
   // between two streams:
   //   1. state.chatMessages → chat bubbles + menu rows (.chat-msg)
@@ -2315,9 +2446,8 @@ function renderChatPane(scrollToBottom = false) {
   // The old `list.innerHTML = …` wipe destroyed stream-2 content
   // every time chat-history arrived from the server — manifesting as
   // "history disappears after refresh." Detach the preserved
-  // children, rebuild the .chat-msg list, then re-append them after
-  // so both streams coexist. Order: chat bubbles, then agent cards
-  // (chronological interleaving is a future enhancement).
+  // children, rebuild the .chat-msg list, then re-merge by ts so
+  // both streams interleave chronologically.
   const preserve = [];
   for (const el of list.children) {
     if (el.classList && el.classList.contains('chat-msg')) continue;   // chat bubble/menu → rebuilt
