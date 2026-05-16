@@ -4426,6 +4426,113 @@ function bindChatUi() {
   _bindPermModal();
   _bindPermModalKeys();
   _bindStopAgent();
+  _bindVoiceInput();
+}
+
+// Voice input: browser-local speech-to-text via the Web Speech API.
+// On-device on Safari (Apple's native speech) + recent Chrome with
+// processLocally; older Chrome may use Google's cloud (still
+// browser-mediated, no myco server involvement). Falls back to a
+// hidden button if the API isn't exposed at all.
+//
+// Flow: click 🎙 → recognition.start() → interim transcripts stream
+// into the textarea as the user speaks → final commits land on
+// silence pause → click again to stop. textInput retains base text
+// the user typed manually; voice is appended (not replacing). Auto-
+// stops on the engine's `end` event (engine policy varies, but most
+// stop after ~5s of silence).
+function _bindVoiceInput() {
+  const btn = document.getElementById('chat-mic');
+  const input = document.getElementById('chat-input');
+  if (!btn || !input) return;
+  if (btn.dataset.bound === '1') return;
+  btn.dataset.bound = '1';
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    // Browser doesn't support SpeechRecognition — keep the button
+    // hidden so the composer isn't broken on Firefox / older
+    // Safari / WebView etc. (HTML had `hidden` attribute by
+    // default; we leave it alone here.)
+    return;
+  }
+  btn.hidden = false;
+  let recognition = null;
+  let recording = false;
+  let baseText = '';     // textarea content BEFORE recording started
+
+  const stopVoice = () => {
+    recording = false;
+    btn.classList.remove('chat-mic-recording');
+    btn.setAttribute('aria-pressed', 'false');
+    recognition = null;
+  };
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (recording) {
+      try { recognition && recognition.stop(); } catch {}
+      return;
+    }
+    let rec;
+    try { rec = new SR(); }
+    catch (err) { console.warn('[voice] init failed:', err); return; }
+    // Prefer the client's locale; fall back to en-US.
+    try { rec.lang = navigator.language || 'en-US'; } catch {}
+    rec.continuous = true;
+    rec.interimResults = true;
+    // processLocally (Chrome 137+ flag) forces on-device speech.
+    // Setting it on browsers that don't recognize the property is
+    // a no-op. Safari is on-device by default for the system mic
+    // permission grant.
+    try { rec.processLocally = true; } catch {}
+    baseText = input.value;
+    rec.onresult = (ev) => {
+      let interim = '';
+      let final = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const tr = ev.results[i][0] && ev.results[i][0].transcript;
+        if (!tr) continue;
+        if (ev.results[i].isFinal) final += tr;
+        else interim += tr;
+      }
+      if (final) baseText = _joinSpoken(baseText, final);
+      const next = _joinSpoken(baseText, interim);
+      if (next !== input.value) {
+        input.value = next;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        try {
+          const end = input.value.length;
+          input.setSelectionRange(end, end);
+        } catch {}
+      }
+    };
+    rec.onerror = (ev) => {
+      // "no-speech" / "aborted" / "audio-capture" — log + bail.
+      console.warn('[voice] recognition error:', ev.error || ev);
+      stopVoice();
+    };
+    rec.onend = stopVoice;
+    try {
+      rec.start();
+      recognition = rec;
+      recording = true;
+      btn.classList.add('chat-mic-recording');
+      btn.setAttribute('aria-pressed', 'true');
+    } catch (err) {
+      console.warn('[voice] start threw:', err);
+    }
+  });
+}
+
+// Concatenate a spoken fragment onto existing text without colliding
+// punctuation. If the new piece doesn't start with whitespace and
+// the existing text doesn't end with whitespace, insert a single
+// space. Trims trailing whitespace on the result.
+function _joinSpoken(base, addition) {
+  if (!addition) return base;
+  if (!base) return addition.trimStart();
+  const needsSpace = !/\s$/.test(base) && !/^\s/.test(addition);
+  return base + (needsSpace ? ' ' : '') + addition;
 }
 
 // Stop / interrupt: button click + global Esc keybind when claude is

@@ -2319,6 +2319,36 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   color: #08120d;
 }
 
+/* Mic: voice input toggle. Neutral when idle, red-pulsing while
+   recording so the user can't miss that the mic is hot. Hidden via
+   the `hidden` HTML attribute until JS confirms the browser
+   supports SpeechRecognition (older Firefox / WebView fall back
+   to no mic — composer still works fine). */
+.composer-btn-mic {
+  background: rgba(255, 255, 255, .05);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, .12);
+}
+.composer-btn-mic:hover {
+  background: rgba(255, 255, 255, .10);
+  border-color: rgba(255, 255, 255, .25);
+}
+.composer-btn-mic.chat-mic-recording {
+  background: rgba(255, 80, 80, .18);
+  color: #ff8080;
+  border-color: rgba(255, 80, 80, .55);
+  animation: chat-mic-pulse 1.4s ease-in-out infinite;
+}
+.composer-btn-mic.chat-mic-recording:hover {
+  background: rgba(255, 80, 80, .28);
+  color: #ffb0b0;
+}
+@keyframes chat-mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 80, 80, .35); }
+  50%      { box-shadow: 0 0 0 6px rgba(255, 80, 80, 0);   }
+}
+.composer-btn-mic[hidden] { display: none !important; }
+
 /* Stop: red tinted button next to Send. Visible only when claude
    is running (.composer-running). */
 .composer-btn-stop {
