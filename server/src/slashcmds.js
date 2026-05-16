@@ -563,28 +563,30 @@ function handleAdd2Plan(ctx) {
       if (frM) nextFr = Math.max(nextFr, parseInt(frM[1], 10) + 1);
     }
   } catch {}
-  // Build the prompt. Edit (not Write) keeps any existing items
-  // intact — we only APPEND.
+  // Build the prompt — claude calls mcp__myco__add_plan_items
+  // (server-side appender) instead of editing plan.json directly.
+  // The tool handles id generation + persistence + broadcast; we
+  // just describe the schema claude should pass.
   const prompt = [
-    `[/add2plan] Break the following request into discrete plan items, then APPEND them to \`_myco_/plan.json\` using your Edit tool.`,
+    `[/add2plan] Break the following request into discrete plan items, then call the \`mcp__myco__add_plan_items\` tool to append them.`,
     ``,
-    `Item schema (append to plan.items array, do NOT remove or rewrite existing items):`,
+    `Tool input shape:`,
     `  {`,
-    `    "id": "td-N" for action items (start from td-${nextTd}) or "fr-N" for feature requests (start from fr-${nextFr}),`,
-    `    "text": "<short description, 1-2 sentences>",`,
-    `    "layer": "Todo" or "Feature",`,
-    `    "done": false,`,
-    `    "addedAt": "<current ISO 8601 UTC>",`,
-    `    "addedBy": "claude",`,
-    `    "source": "user",`,
-    `    "voters": [],`,
-    `    "comments": [],`,
-    `    "dependsOn": ["<id-of-prereq>", ...]   // OPTIONAL — only when the item logically can't start until another finishes. Skip when there's no real ordering.`,
+    `    "items": [`,
+    `      {`,
+    `        "text": "<1-2 sentence description>",`,
+    `        "layer": "Todo" | "Feature" | "Bug",`,
+    `        "dependsOn": ["td-3", ...]    // OPTIONAL, only when ordering is required`,
+    `      },`,
+    `      ...`,
+    `    ]`,
     `  }`,
     ``,
-    `Also bump plan.updatedAt to the current ISO timestamp.`,
-    ``,
-    `Use dependsOn sparingly. Most items should not have it; the UI uses it to grey out the Run button until prereqs are done.`,
+    `Guidance:`,
+    `- Prefer 1-7 short items over many over-decomposed ones.`,
+    `- Use \`dependsOn\` sparingly. Most items should have NO dependsOn.`,
+    `- Server auto-generates ids (td-N / fr-N / bug-N); you only supply text/layer/dependsOn.`,
+    `- Existing items are preserved — the tool only appends.`,
     ``,
     `Request: ${text}`,
   ].join('\n');

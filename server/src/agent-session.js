@@ -236,6 +236,13 @@ class AgentSession extends EventEmitter {
         plansDirectory: path.join(this.cwd, '.claude', 'plans'),
       },
       settingSources: ['project', 'local'],
+      // myco's own in-process MCP server exposes server-side tools
+      // claude can call. Currently: mcp__myco__add_plan_items
+      // appends items to plan.json. Per-session so the tool
+      // handlers can scope mutations to THIS session via closure.
+      mcpServers: {
+        myco: require('./myco-mcp').createMycoMcpServer(this.sessionId),
+      },
     };
     if (this.sdkSessionId) sdkOpts.resume = this.sdkSessionId;
 
@@ -399,6 +406,22 @@ class AgentSession extends EventEmitter {
       const toolName = input && input.tool_name;
       const toolInput = input && input.tool_input;
       const tool_use_id = input && input.tool_use_id;
+      // myco's own MCP tools (mcp__myco__*) are auto-allowed —
+      // they're internal server-side mutations and the user
+      // shouldn't see a permission prompt every time claude
+      // appends a plan item via mcp__myco__add_plan_items.
+      if (typeof toolName === 'string' && toolName.startsWith('mcp__myco__')) {
+        const reason = `myco-internal MCP tool (${toolName})`;
+        console.log(`[agent-hook] ${this.sessionId} PreToolUse=allow ${toolName} tool_use_id=${tool_use_id || '?'} (myco-internal)`);
+        this._emit({ type: 'hook_allow', toolName, tool_use_id, reason });
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+            permissionDecisionReason: reason,
+          },
+        };
+      }
       const inputForMatching = _matchingInputFor(toolName, toolInput);
       // Lazy-require to dodge the pty.js → sessions.js → agent-session.js
       // import-cycle hazard.
