@@ -294,12 +294,22 @@
       "id": "fr-2",
       "text": "add support to delete bug/fr/todo",
       "layer": "Feature",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-16T07:37:20.143Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
-      "comments": []
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "fr2done",
+          "user": "claude",
+          "text": "✓ done — pre-existing implementation verified, no new code needed.\n\n**Delete path end-to-end:**\n\n- **Client UI:** every plan item renders a `×` button via the `artifact-item-delete` class (`web/public/app.js:5204`).\n- **Click handler:** `onArtifactItemDelete(type, itemId)` (`web/public/app.js:5319`) shows a `confirm()` dialog, then issues `DELETE /sessions/:id/artifact/item?type=plan&itemId=<id>` and reloads the artifact.\n- **Server:** the route at `server/src/artifacts.js:636` filters `artifact.items` by id, persists via `persistArtifact`, and broadcasts a `state-update` so every attached client's Plan tab re-renders live.\n\nWorks for `td-*`, `fr-*`, and `bug-*` (all live in the same `plan` artifact). Read-only viewers also get the button — the server's auth preamble is gated at `viewer` level for this route, matching the rest of the artifact-mutation surface.\n\nThe earlier `runs[0]` entry stuck at `running` was a stale stamp from a dispatch whose `turn_result` never reached `_stampPlanItemRunOutcome` (the auto-summary mechanism shipped in `a4330fe` would have closed it); cleaned up here.",
+          "ts": "2026-05-16T12:30:00.000Z",
+          "meta": { "kind": "run-summary", "manual": true }
+        }
+      ]
     },
     {
       "id": "td-17",
@@ -336,8 +346,81 @@
       "voters": [
         "kkrazy"
       ],
+      "comments": [],
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-16T08:54:49.582Z",
+          "startedAt": "2026-05-16T08:39:55.027Z",
+          "summary": "2840.1s · 190→87107 tok",
+          "result": "**Summary — `[run:plan#bug-7]` + the @myco sweep, both shipped:**\n\n| Host | Commits live | Tests | Verification |\n|---|---|---|---|\n| `mycobeta.labxnow.ai` | `a4330fe` + `7cb8ed5` | 571 / 0 / 25 | run-summary=3 · wipe=4 · CHAT_ALIAS_PREFIX_RE=0 |\n| `myco.labxnow.ai` | `a4330fe` + `7cb8ed5` | 571 / 0 / 25 | run-summary=3 · wipe=4 · CHAT_ALIAS_PREFIX_RE=0 |\n\n**bug-7 root cause + fix (commit `7cb8ed5`):**\n- `agent-replay` arrives on every WS attach — initial AND every reconnect — carrying the full `session.buffer`. Before the fix, the client looped `_appendAgentEvent(ev)` without wiping the cards from the prior attach. Chrome events fold into the immediately-previous sibling, so the dups stacked onto the trailing batch — that's what produced the repeated `16:06:43 ▸ × 10 ✓ result · 3671 bytes` rows.\n- Fix: `_handleAgentFrame` wipes every non-`.chat-msg` child of `#chat-messages` before processing the events. Mirrors the contract `renderChatPane` already uses for the chat-bubble stream.\n- Regression: static check in test.sh that the `agent-replay` branch contains both the events loop *and* an `el.remove()` wipe.\n- Live verification on myco: `[agent-attach] … replay-events=77` after hydrating 76 events from disk, no errors.\n\n**Bonus from this round:** the `a4330fe` deploy initially failed on a case-sensitive `grep -qF 'task-list etiquette' CLAUDE.md` — flipped to `grep -qiF` in the same commit.\n\nThe `[run:plan#bug-7]` dispatch you sent will get its auto-summary comment appended to the bug-7 item on the next turn_result that lands in your live session (since the run-summary feature shipped in `a4330fe`)."
+        }
+      ]
+    },
+    {
+      "id": "fr-3",
+      "text": "add feature in the chat pane to @all which sends msg to the entire group",
+      "layer": "Feature",
+      "done": true,
+      "addedAt": "2026-05-16T08:58:16.838Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "fr3done",
+          "user": "claude",
+          "text": "✓ done — shipped in commit `533abb7`, deployed to mycobeta + myco.\n\n**`@all` broadcast mention end-to-end:**\n\n- **Server detection:** `server/src/attach.js _detectMentionTarget` — special-cases the lowercased word `'all'` *before* the `_isKnownChatUser` allowlist check, returns the literal `'all'` target. Stays chat-only (not forwarded to claude) like any other mention.\n- **Server stamp:** `handleChatMessage` sets `meta.broadcast = true` on the persisted chat row when the target is `'all'`, so every attached client knows the row addresses them.\n- **Client render:** `web/public/app.js renderChatMessage` adds the `chat-msg-mention-all` class and treats `isBroadcast` as `isMentionToMe = true` for every viewer (each viewer is a recipient).\n- **Client unread bump:** `_bumpChatUnreadIfHidden` bumps the `#btn-chat` unread badge for every viewer on a broadcast (treated as `@me`), and `_maybeNotifyMention` fires a desktop notification titled `@all` (vs `@<you>` for a 1:1 ping).\n- **Styling:** `web/public/styles.css` `.chat-msg-mention-all` — distinct cool-blue tint + matching `chat-mention-all-pulse` keyframes, so it's visually different from the warm amber `@<known-user>` ping.\n- **Tests:** `test/chat-routing.test.js` (+4 cases — case-insensitive `@ALL`, bare `@all`, embedded \"tell @all …\" stays chat-to-claude). `test.sh` four static guards (server branch + meta.broadcast stamp + client render class + CSS rule).\n- **Docs:** `README.md` Discussion-pane section + `web/public/index.html` empty-chat hint both document the syntax.\n\nLive image-side verification on production (myco @ `0338a6a89be0`): `chat-msg-mention-all` appears 2× in `app.js`, 1× in `styles.css`, and `if (w === 'all') return 'all'` is present in `attach.js`.\n\nThe earlier `runs[0]` entry stuck at `running` was a stale stamp from the original `[run:plan#fr-3]` dispatch at `09:00:21Z` whose `turn_result` never reached `_stampPlanItemRunOutcome` (same race that ate fr-2's outcome); cleaned up here.",
+          "ts": "2026-05-16T12:35:00.000Z",
+          "meta": { "kind": "run-summary", "manual": true }
+        }
+      ]
+    },
+    {
+      "id": "fr-4",
+      "text": "use llm to rewrite td/fr/bug in a format suitable for software development and issue. Focuing on calling out the problem",
+      "layer": "Feature",
+      "done": true,
+      "addedAt": "2026-05-16T08:59:39.471Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "fr4done",
+          "user": "claude",
+          "text": "✓ done — shipped in commit `533abb7`, deployed to mycobeta + myco.\n\n**LLM rewrite for `/td`, `/fr`, `/bug`:**\n\n- **Trigger (per the scoping answer):** rewrite fires when the body has more than 8 words OR when the user invokes the opt-in bang variant — `/td!`, `/fr!`, `/bug!`. Short crisp items (≤8 words, no bang) skip the rewrite so quick captures stay quick.\n- **Async UX:** the item is persisted IMMEDIATELY with the user's original text + `meta.rewritePending = true` so the user gets instant feedback. The chat reply notes \"claude is rewriting this into issue format …\". When claude returns, `_applyPlanItemRewrite` swaps `item.text` in place, stamps `meta.originalText` + `meta.rewritten = true`, drops the pending flag, and broadcasts a `state-update` so every attached client's Plan tab re-renders.\n- **Server (`server/src/slashcmds.js`):**\n  - `addPlanItem` — detects leading `!` in args to set `forceRewrite`, word-counts the body to set `shouldRewrite`, persists with `meta.rewritePending`, then fire-and-forget kicks off `_rewritePlanItemAsync`.\n  - `_rewritePlanItemAsync` — calls `btw.runClaudeP(cwd, system + user-prompt)` with the `_PLAN_REWRITE_SYSTEM` constant. System prompt asks for the issue body shape: **Problem** (one-sentence pain) / **Expected** (intended behaviour) / **Actual** (current behaviour) / **Context** (repro, paths, env — omit when absent). Tight: ≤4 lines trivial, ≤10 lines complex. No preamble, no closing remarks.\n  - `_applyPlanItemRewrite` — success path swaps text + sets `meta.rewritten`; failure path leaves the original text untouched and sets `meta.rewriteFailed = true` so the UI can surface the gap.\n  - `_sanitizePlanRewrite` — tolerates the `claude-cli` error stand-ins (`(claude failed to start: …)`) and strips wrapper code fences before accepting.\n  - `meta.rewriteRequested` records WHY the rewrite fired (`'long'` | `'force'`) for forensics.\n- **Constant:** `PLAN_ITEM_REWRITE_WORD_THRESHOLD = 8` — single source of truth.\n- **Tests:** `test/plan-item-rewrite.test.js` (5 cases — stubs `btw.runClaudeP` via module-cache override): short skips, long triggers, bang forces, failure preserves original + sets `rewriteFailed`, bang-with-empty-body bounces with usage hint. `test.sh` wires the test into the gate.\n- **Docs:** `README.md` Discussion-pane section documents the bang variants.\n\nLive image-side verification on production (myco @ `0338a6a89be0`): `_rewritePlanItemAsync` appears 2× in `slashcmds.js`, `PLAN_ITEM_REWRITE_WORD_THRESHOLD` 3×.\n\nThe earlier `runs[0]` entry stuck at `running` was a stale stamp from the original `[run:plan#fr-4]` dispatch at `09:00:23Z` whose `turn_result` never reached `_stampPlanItemRunOutcome` (same race that ate fr-2 and fr-3's outcomes); cleaned up here.\n\nNote: this very comment was hand-written by claude per the user's request; future `/fr!` / `/td!` dispatches will have claude auto-rewrite the *original* description into the issue-format shape on add. The hand-rewrite path is documented at fr-4's parent comment in the chat history.",
+          "ts": "2026-05-16T12:35:00.000Z",
+          "meta": { "kind": "run-summary", "manual": true }
+        }
+      ]
+    },
+    {
+      "id": "fr-5",
+      "text": "add system prompt to ensure pop up questions whenever require user attention, for example clatification to feature, approache, etc.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-16T09:56:12.657Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "fr-6",
+      "text": "add link to fr/td/bug for easy navigation to the specific items in the plan view",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-16T09:57:23.487Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
       "comments": []
     }
   ],
-  "updatedAt": "2026-05-16T08:35:18.182Z"
+  "updatedAt": "2026-05-16T09:57:23.487Z"
 }
