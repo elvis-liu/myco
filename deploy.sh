@@ -373,7 +373,7 @@ swap_container() {
 
 verify_deploy() {
   step "Verifying"
-  local domain expected served
+  local domain expected_raw expected served
   # Local-mode deploys can override the verification target via
   # MYCO_VERIFY_DOMAIN — useful when running on a public host
   # (e.g. on prod, REMOTE=kkrazy@localhost but the actual public
@@ -383,17 +383,31 @@ verify_deploy() {
   else
     domain=$(echo "$REMOTE" | sed 's/.*@//')
   fi
-  expected=$(grep -oP 'app\.js\?v=\K\d+' web/public/index.html | head -1)
+  # Read the freshly-baked build stamp from the running container.
+  # This is the SAME value the server (src/index.js indexHtml())
+  # URL-encodes into the served `?v=…` token; comparing against the
+  # source index.html's `?v=N` placeholder would always fail because
+  # the server rewrites it. The Dockerfile generates build.txt with
+  # `date -u +%Y-%m-%dT%H:%M:%SZ` — colons are the only chars
+  # encodeURIComponent transforms (→ %3A), so the URL-encoding step
+  # below is exact (no other reserved chars in the ISO timestamp).
+  expected_raw=$(remote "docker exec $NAME cat /app/web/public/build.txt" 2>/dev/null | tr -d '\r\n')
+  [ -n "$expected_raw" ] || die "could not read build.txt from container '$NAME' — is the new image up?"
+  expected=$(echo "$expected_raw" | sed 's/:/%3A/g')
   served=""
   for i in 1 2 3 4 5 6 7 8; do
-    served=$(curl -sk --max-time 5 "https://$domain/" 2>/dev/null | grep -oP 'app\.js\?v=\K\d+' | head -1)
+    # `[^"'\''\s&<]+` matches the full encoded value (year, dashes,
+    # `T`, `%3A`, digits, trailing `Z`) — the old `\d+` was greedy
+    # only on the year prefix and silently mismatched everything
+    # post-build-stamp rollout.
+    served=$(curl -sk --max-time 5 "https://$domain/" 2>/dev/null | grep -oP 'app\.js\?v=\K[^"'\''\s&<]+' | head -1)
     [ -n "$served" ] && break
     sleep 2
   done
   [ -n "$served" ] || die "https://$domain/ not responding after redeploy"
   [ "$served" = "$expected" ] \
-    && ok "https://$domain/ serving app.js?v=$served (matches source)" \
-    || die "version mismatch: served v$served, source v$expected"
+    && ok "https://$domain/ serving app.js?v=$served (matches build.txt $expected_raw)" \
+    || die "version mismatch: served '$served', container build.txt '$expected_raw' (URL-encoded '$expected') — stale container or routing layer caching?"
 }
 
 # ─── main ────────────────────────────────────────────────────────────────────

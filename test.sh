@@ -1412,6 +1412,25 @@ test_deploy_oauth_flags() {
   # design decision — we removed --add-token entirely.
   ! grep -qE -- '--add-token' deploy.sh && pass "deploy.sh: --add-token removed"               || fail "deploy.sh: --add-token still referenced"
   ! grep -q 'MYCO_TOKENS' deploy.sh     && pass "deploy.sh: MYCO_TOKENS removed"               || fail "deploy.sh: MYCO_TOKENS still referenced"
+  # Regression (2026-05-16): verify_deploy used to grep `app.js?v=\d+` on
+  # both source + served HTML, which broke once the server started
+  # rewriting `?v=` to the URL-encoded build.txt timestamp (e.g.
+  # `2026-05-16T11%3A28%3A21Z`). The greedy `\d+` then captured `2026`
+  # from the year and red-flipped with "version mismatch v2026 vs v223"
+  # on every otherwise-successful deploy. The fix compares the served
+  # value against the freshly-baked build.txt pulled out of the running
+  # container; the regex now matches the full encoded value.
+  grep -qF 'docker exec $NAME cat /app/web/public/build.txt' deploy.sh \
+    && pass "deploy.sh: verify_deploy compares against container build.txt" \
+    || fail "deploy.sh: verify_deploy still grepping the source ?v= placeholder — will misreport after every deploy"
+  grep -qF '\K[^"' deploy.sh \
+    && pass "deploy.sh: verify regex captures the full encoded version (not just \\d+)" \
+    || fail "deploy.sh: verify regex still uses the greedy \\d+ — will capture year prefix only"
+  if grep -qF 'grep -oP '"'"'app\.js\?v=\K\d+'"'"' web/public/index.html' deploy.sh; then
+    fail "deploy.sh: stale source-vs-served verify_deploy regex is back"
+  else
+    pass "deploy.sh: no source-vs-served regex regression"
+  fi
 }
 
 test_oauth_static() {
