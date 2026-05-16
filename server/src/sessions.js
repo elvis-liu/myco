@@ -656,22 +656,46 @@ async function importExistingTranscripts() {
 // session — fine to keep in sessions.json.
 const MAX_CHAT_MESSAGES = 500;
 
-// bug-9 / round 2: default initial window when no limit is requested.
-// The chat-history WS frame on attach gates on this — 500 messages
-// of rendered markdown (with renderMd + mermaid + turn-grouping
-// passes) made the chat pane sluggish to open. Round 1 dropped it
-// to 100; round 2 (after user feedback that the pane was still
-// slow on reload) drops it to 25 — quarter of round 1. The load-
-// older button + the paginated /chat/history?before=…&limit=… route
-// fetch earlier windows on demand, so cutting the initial window
-// further is no info loss; just a faster first paint.
-const DEFAULT_CHAT_HISTORY_LIMIT = 25;
+// bug-9 / round 3: cap the initial chat-history WS frame by BYTE
+// BUDGET rather than message count. A count-based cap treated one
+// 50-char "ok" the same as one 30 KB markdown blob — wildly
+// different first-paint render cost. Byte-budget keeps the wire
+// payload predictable AND the renderMd / mermaid / turn-grouping
+// work bounded.
+//
+// History timeline of the cap:
+//   round 1: 100 messages   — still slow on long sessions
+//   round 2: 25 messages    — better, but variable (a few huge
+//                             markdown replies could still drag)
+//   round 3: 256 KB         — current. byte budget across the JSON-
+//                             stringify size of each kept message.
+//
+// The load-older button + the paginated /chat/history?before=…
+// route fetch earlier windows on demand, so a smaller initial
+// window is no info loss — just faster first paint.
+const DEFAULT_CHAT_HISTORY_BYTES = 256 * 1024;
+
+// Legacy alias — some callsites + tests still reference the old
+// LIMIT constant. Keep it as a small fixed count (used by the
+// paginated /chat/history?limit= route when the client wants a
+// fixed-size window for "load older N"). Independent of the byte
+// budget above which gates the INITIAL attach frame.
+const DEFAULT_CHAT_HISTORY_LIMIT = 50;
 
 // Read the chat history with optional windowing.
 //
-//   opts.limit   max messages to return (default: full filtered list)
-//   opts.before  ISO ts — return only messages strictly older than this
-//                (used by the load-older paginator)
+//   opts.maxBytes  byte budget — walk from the tail and keep adding
+//                  messages as long as cumulative JSON size <= budget.
+//                  Used by the chat-history WS frame on attach so the
+//                  first paint is bounded regardless of message sizes.
+//   opts.limit     max messages to return (count). Used by the
+//                  load-older paginator when the client wants a fixed-
+//                  size window.
+//   opts.before    ISO ts — return only messages strictly older than
+//                  this. Used by the load-older paginator.
+//
+// When BOTH maxBytes and limit are set, the smaller of the two
+// effective windows wins (whichever produces fewer messages).
 //
 // Filters meta.fromTranscript:true rows before slicing — those are
 // duplicates of the agent-event assistant_text stream and shouldn't
@@ -696,6 +720,23 @@ function getChatHistory(sessionId, opts) {
   if (opts.before) {
     const beforeTs = String(opts.before);
     filtered = filtered.filter((m) => m && m.ts && String(m.ts) < beforeTs);
+  }
+  // Byte budget first — walks tail → head accumulating JSON-stringify
+  // sizes; keeps the most-recent prefix that fits. ALWAYS keeps at
+  // least one message so a single oversized row doesn't return an
+  // empty window (it just costs whatever it costs — the user still
+  // gets to see the most recent activity).
+  if (typeof opts.maxBytes === 'number' && opts.maxBytes > 0 && filtered.length) {
+    let bytes = 0;
+    let keepFromIdx = filtered.length;
+    for (let i = filtered.length - 1; i >= 0; i--) {
+      let sz;
+      try { sz = JSON.stringify(filtered[i]).length; } catch { sz = 0; }
+      if (bytes && bytes + sz > opts.maxBytes) break;
+      bytes += sz;
+      keepFromIdx = i;
+    }
+    filtered = filtered.slice(keepFromIdx);
   }
   if (typeof opts.limit === 'number' && opts.limit > 0 && filtered.length > opts.limit) {
     filtered = filtered.slice(-opts.limit);
@@ -827,6 +868,7 @@ Object.assign(module.exports, {
   appendChatMessage,
   clearChatHistory,
   DEFAULT_CHAT_HISTORY_LIMIT,
+  DEFAULT_CHAT_HISTORY_BYTES,
   // exposed for summarizer + share-info
   loadStore,
   saveStore,

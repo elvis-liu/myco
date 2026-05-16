@@ -664,7 +664,12 @@ function _attachAgentWebSocket(session, ws, opts = {}) {
   // DEFAULT_CHAT_HISTORY_LIMIT messages so the chat pane opens fast
   // even on multi-hour sessions. Total length goes along so the
   // client knows whether to surface a "load older" button.
-  const history = sessionsMod.getChatHistory(sessionId, { limit: sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT });
+  // bug-9 round 3: byte-budget cap on the initial chat-history WS
+  // frame (256 KB by default — see sessions.DEFAULT_CHAT_HISTORY_BYTES).
+  // The wire payload + first-paint render workload are bounded by
+  // total size, not message count, so a few large markdown blobs
+  // don't blow the budget like a count-based cap would.
+  const history = sessionsMod.getChatHistory(sessionId, { maxBytes: sessionsMod.DEFAULT_CHAT_HISTORY_BYTES });
   const total = sessionsMod.getChatHistoryLength(sessionId);
   if (history.length) {
     ws.send(JSON.stringify({ t: 'chat-history', messages: history, total }));
@@ -835,7 +840,12 @@ function attachViewerWebSocket(session, ws, opts = {}) {
 
   // bug-9: same windowed initial frame as the owner WS — viewers also
   // benefit from a snappy chat pane open + the same load-older flow.
-  const history = sessionsMod.getChatHistory(sessionId, { limit: sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT });
+  // bug-9 round 3: byte-budget cap on the initial chat-history WS
+  // frame (256 KB by default — see sessions.DEFAULT_CHAT_HISTORY_BYTES).
+  // The wire payload + first-paint render workload are bounded by
+  // total size, not message count, so a few large markdown blobs
+  // don't blow the budget like a count-based cap would.
+  const history = sessionsMod.getChatHistory(sessionId, { maxBytes: sessionsMod.DEFAULT_CHAT_HISTORY_BYTES });
   const total = sessionsMod.getChatHistoryLength(sessionId);
   if (history.length) {
     ws.send(JSON.stringify({ t: 'chat-history', messages: history, total }));

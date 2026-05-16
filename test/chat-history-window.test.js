@@ -53,15 +53,65 @@ function seedSession(sid, n) {
 
 console.log('── bug-9: windowed getChatHistory + getChatHistoryLength ──');
 
-t('DEFAULT_CHAT_HISTORY_LIMIT is exported and equals 25', () => {
-  // Lowered from 100 to 25 in round 2 (user feedback: chat pane still
-  // slow on reload with 100 markdown rows). The load-older button +
-  // paginated /chat/history?before= route fetch earlier windows on
-  // demand, so a smaller initial window is no info loss — just faster
-  // first paint. Bumping back to 100 (or anything > 50) would re-
-  // introduce the sluggish-reload symptom this constant is pinned for.
-  assert.strictEqual(sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT, 25,
-    'the WS chat-history frame default must be 25 to keep first paint fast');
+t('DEFAULT_CHAT_HISTORY_BYTES is exported and equals 256 KB', () => {
+  // Round 3 (the current cap): byte-budget instead of count. One 30 KB
+  // markdown blob and one 50-char "ok" cost wildly different to
+  // render; a count-based cap couldn't see the difference. The byte
+  // budget bounds wire payload + first-paint workload predictably.
+  // The load-older button + paginated /chat/history?before= route
+  // fetch earlier windows on demand, so a smaller initial budget is
+  // no info loss — just faster first paint.
+  assert.strictEqual(sessionsMod.DEFAULT_CHAT_HISTORY_BYTES, 256 * 1024,
+    'the WS chat-history frame default must cap at 256 KB to keep first paint fast');
+});
+
+t('DEFAULT_CHAT_HISTORY_LIMIT (legacy count-cap) is still exported for the /chat/history?limit= route', () => {
+  // The count cap survived as a small default for paginated older-
+  // window fetches via GET /sessions/:id/chat/history?limit= when
+  // the client doesn't pass an explicit count. Independent of the
+  // byte budget that gates the initial attach frame.
+  assert.strictEqual(typeof sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT, 'number');
+  assert.ok(sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT > 0
+            && sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT <= 100,
+    'legacy count default should sit in a sensible range');
+});
+
+t('opts.maxBytes returns the tail prefix that fits the budget', () => {
+  const sid = 'sess-chw-bytes';
+  seedSession(sid, 50);
+  // Each message is small (~80 bytes when stringified). A 500-byte
+  // budget should fit ~6 messages.
+  const tight = sessionsMod.getChatHistory(sid, { maxBytes: 500 });
+  assert.ok(tight.length > 0 && tight.length < 50,
+    'maxBytes should trim a fraction of the messages, got ' + tight.length);
+  assert.strictEqual(tight[tight.length - 1].text, 'msg 49',
+    'last element must be the most recent (msg 49)');
+  // Budget large enough to fit everything — full list returned.
+  const loose = sessionsMod.getChatHistory(sid, { maxBytes: 1024 * 1024 });
+  assert.strictEqual(loose.length, 50, 'big budget returns everything');
+});
+
+t('opts.maxBytes always keeps at least one message even if it exceeds the budget', () => {
+  const sid = 'sess-chw-bytes-min';
+  seedSession(sid, 5);
+  // Set the budget below the size of a single stringified message.
+  const result = sessionsMod.getChatHistory(sid, { maxBytes: 1 });
+  assert.strictEqual(result.length, 1,
+    'a single oversized message should still be returned (most recent), not an empty window');
+  assert.strictEqual(result[0].text, 'msg 4');
+});
+
+t('opts.maxBytes + opts.limit — whichever produces fewer messages wins', () => {
+  const sid = 'sess-chw-bytes-limit';
+  seedSession(sid, 50);
+  // Tight count cap with a generous byte budget → count wins.
+  const byCount = sessionsMod.getChatHistory(sid, { maxBytes: 999999, limit: 3 });
+  assert.strictEqual(byCount.length, 3);
+  assert.strictEqual(byCount[2].text, 'msg 49');
+  // Generous count cap with a tight byte budget → bytes win.
+  const byBytes = sessionsMod.getChatHistory(sid, { maxBytes: 250, limit: 9999 });
+  assert.ok(byBytes.length > 0 && byBytes.length < 50,
+    'byte budget should trim despite generous count limit');
 });
 
 t('no opts → returns ALL filtered messages (backward compat)', () => {
@@ -140,12 +190,14 @@ t('limit=0 falls through (treated as no-limit, no-op)', () => {
   assert.strictEqual(all.length, 5);
 });
 
-t('attach.js wire calls chat-history with the windowed limit', () => {
+t('attach.js wire calls chat-history with the byte budget', () => {
   // Source-level guard against a future cleanup pass dropping the
-  // limit and silently restoring the "ship all 500" behavior.
+  // cap and silently restoring the "ship all 500" behavior.
   const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'attach.js'), 'utf8');
-  assert.ok(src.includes('DEFAULT_CHAT_HISTORY_LIMIT'),
-    'attach.js must reference DEFAULT_CHAT_HISTORY_LIMIT when sending the chat-history WS frame');
+  assert.ok(src.includes('DEFAULT_CHAT_HISTORY_BYTES'),
+    'attach.js must reference DEFAULT_CHAT_HISTORY_BYTES when sending the chat-history WS frame');
+  assert.ok(/maxBytes:\s*sessionsMod\.DEFAULT_CHAT_HISTORY_BYTES/.test(src),
+    'attach.js must pass maxBytes: DEFAULT_CHAT_HISTORY_BYTES to getChatHistory');
   assert.ok(/messages:\s*history,\s*total/.test(src),
     'chat-history WS frame must carry `total` so the client knows whether more exists');
 });
