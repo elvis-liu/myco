@@ -423,7 +423,7 @@
       "id": "fr-6",
       "text": "add link to fr/td/bug for easy navigation to the specific items in the plan view",
       "layer": "Feature",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-16T09:57:23.487Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -432,17 +432,67 @@
       ],
       "comments": [
         {
-          "id": "fr6done",
+          "id": "d2fc0e867182",
           "user": "claude",
-          "text": "✓ done — shipped in commit `79076eb`, deployed to mycobeta (image stamp `2026-05-16T12:47:01Z`).\n\n**Deep-link to plan items via `<origin>/#<id>`:**\n\n- **Stable DOM anchor:** every plan-item `<li>` carries `id=\"artifact-item-<id>\"` (`web/public/app.js renderItem`), so pasting `https://mycobeta.labxnow.ai/#fr-7` scrolls right to it.\n- **Copy-link affordance:** the id chip (`fr-7`, `td-3`, `bug-2`) now has `role=\"button\"` + `tabindex=\"0\"` + `data-deep-link-id`. Click (or keyboard Enter / Space) calls `_copyArtifactItemDeepLink` which writes `<origin><pathname>#<id>` to `navigator.clipboard`, updates `location.hash` via `history.replaceState` (no back-button pollution), and flashes a 1.2 s green `.artifact-item-id-copied` badge on the chip as confirmation.\n- **Hash → focus pipeline:** `_focusArtifactItemFromHash` resolves the hash on page load AND on every `hashchange` event. It looks up which artifact type owns the id (`_findArtifactTypeForItem` walks `state.artifacts`), opens that tab via `showArtifactView`, then `_scrollToArtifactItem` calls `scrollIntoView({block:'center', behavior:'smooth'})` and adds the `.artifact-item-deep-link-focused` class for ~2.4 s.\n- **Cache-not-ready fallback:** if the artifact cache hasn't been hydrated yet when the hash arrives, the requested id is stashed on `state.pendingDeepLinkId` and consumed by the next `_onArtifactsCacheUpdated` (artifacts-init / state-update) or the post-render bind block, whichever fires first. So a deep link in the URL on cold load lands cleanly even though the items render asynchronously.\n- **Hash whitelist:** only fragments matching `^(fr|td|bug|test)-\\d+$` (or legacy hex) are intercepted; other `#…` fragments pass through untouched so future fragment-routing can coexist.\n- **Visual feedback:** `.artifact-item-deep-link-focused` runs a 1.6 s × 2 cool-blue box-shadow pulse keyframe so the landed item is immediately findable in a long list.\n- **Tests:** test.sh adds seven static guards under the artifact-render block — li id, `data-deep-link-id` chip, both helper functions, the `hashchange` listener, and both CSS classes. All 18 node tests still pass.\n- **Live verification on mycobeta:** `artifact-item-${escHtml(it.id)}` ×1, `_copyArtifactItemDeepLink` ×3, `_focusArtifactItemFromHash` ×3, `artifact-item-deep-link-focused` ×1 in styles.css, `data-deep-link-id` ×2 — all greps green on the running container.\n\nTry it: open the Plan tab, click any id chip — the URL bar gets `#<id>` and the permalink lands on your clipboard.\n\nNot deployed to production myco yet — say the word if you want fr-6 promoted there too.",
-          "ts": "2026-05-16T13:00:00.000Z",
+          "text": "✓ success · 365.7s · $9.3897 · 31↓/15302↑\n\n**fr-6 implementation summary:**\n\n| Surface | Change |\n|---|---|\n| **`web/public/app.js renderItem`** | Each `<li>` now carries `id=\"artifact-item-<itemId>\"`. The id chip gets `data-deep-link-id`, `role=\"button\"`, `tabindex=\"0\"`, and a tooltip \"Click to copy a deep link to this item\". |\n| **`web/public/app.js _copyArtifactItemDeepLink`** | Click / Enter / Space on the id chip writes `<origin><pathname>#<id>` to `navigator.clipboard`, updates `location.hash` via `history.replaceState` (no history pollution), and flashes a 1.2 s green \"copied\" badge on the chip. |\n| **`web/public/app.js _focusArtifactItemFromHash`** | Reads `location.hash`, finds which artifact type contains the id, opens that tab via `showArtifactView`, then scrolls the matching `<li>` into view with a 2 s deep-link puls…",
+          "ts": "2026-05-16T12:41:50.175Z",
           "meta": {
             "kind": "run-summary",
-            "manual": true
+            "runStartedAt": "2026-05-16T12:35:44.471Z"
           }
         }
+      ],
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-16T12:41:50.175Z",
+          "startedAt": "2026-05-16T12:35:44.471Z",
+          "summary": "365.7s · 31→15302 tok",
+          "result": "**fr-6 implementation summary:**\n\n| Surface | Change |\n|---|---|\n| **`web/public/app.js renderItem`** | Each `<li>` now carries `id=\"artifact-item-<itemId>\"`. The id chip gets `data-deep-link-id`, `role=\"button\"`, `tabindex=\"0\"`, and a tooltip \"Click to copy a deep link to this item\". |\n| **`web/public/app.js _copyArtifactItemDeepLink`** | Click / Enter / Space on the id chip writes `<origin><pathname>#<id>` to `navigator.clipboard`, updates `location.hash` via `history.replaceState` (no history pollution), and flashes a 1.2 s green \"copied\" badge on the chip. |\n| **`web/public/app.js _focusArtifactItemFromHash`** | Reads `location.hash`, finds which artifact type contains the id, opens that tab via `showArtifactView`, then scrolls the matching `<li>` into view with a 2 s deep-link pulse. Bails out cleanly if the cache isn't populated yet — stashes the id on `state.pendingDeepLinkId` and consumes it on the next cache update / render. |\n| **`web/public/app.js _onArtifactsCacheUpdated`** | Tries to resolve the hash on every cache update — handles the initial-load case where the artifacts-init frame arrives after the URL was parsed. |\n| **`web/public/app.js` hashchange listener** | Module-level `window.addEventListener('hashchange', …)` — pasting a permalink in the address bar re-focuses the item. |\n| **`web/public/app.js renderArtifact bind block`** | Consumes `state.pendingDeepLinkId` post-render so a deep link that arrived before the items had DOM ids still lands cleanly. |\n| **`web/public/styles.css`** | `.artifact-item-id[data-deep-link-id]` gets `cursor: copy` + hover/focus styles; `.artifact-item-id-copied` is the 1.2 s green flash; `.artifact-item-deep-link-focused` runs a 1.6 s × 2 cool-blue box-shadow pulse keyframe on the focused `<li>`. |\n| **`test.sh`** | Seven new static guards: stable li id, `data-deep-link-id` chip, copy helper, focus helper, hashchange listener, plus both CSS classes. |\n| **Tests** | All 18 node tests still pass. |\n\nReady to commit + p"
+        }
       ]
+    },
+    {
+      "id": "fr-7",
+      "text": "**Problem:** Users miss chat events that require their attention when the browser tab isn't focused.\n**Expected:** Promote in-chat notifications to the browser level so the OS surfaces them natively.\n**Actual:** Notifications stay confined to the chat UI and are only visible when the user is already looking at it.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-16T13:41:23.687Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "promote notification to the chat up to the brower level, which would sent notification via the os. This would allow user to be notified of events require user attention",
+        "rewritten": true
+      },
+      "runs": [
+        {
+          "status": "running",
+          "ts": "2026-05-16T13:45:55.994Z",
+          "summary": null
+        }
+      ]
+    },
+    {
+      "id": "bug-8",
+      "text": "**Problem:** Completed td/fr/bug items still show an active \"Run\" button, and the generic label doesn't reflect the item's type.\n**Expected:** Once an item is done, the action button is disabled. Label varies by type: bug → \"Fix\", fr → \"Implement\", todo → suggested verb (e.g. \"Do\" or \"Start\").\n**Actual:** Button stays enabled after completion and is labeled \"Run\" regardless of type.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-16T13:48:55.576Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "when a td/fr/bug is done, the run button should be disabled. Also the run button should be named according the type, for bug, it can be fix, for fr, it can be implement, for todo, can be sth u suggest",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-16T09:57:23.487Z"
+  "updatedAt": "2026-05-16T13:49:02.961Z"
 }

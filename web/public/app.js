@@ -1635,6 +1635,11 @@ function appendChatMessage(message) {
   if (message && message.meta && message.meta.kind === 'menu' && message.meta.menu
       && Array.isArray(message.meta.menu.options) && message.meta.menu.options.length) {
     state.permModalDismissed = false;
+    // fr-7: OS-level notification for blocking menus when the tab is
+    // unfocused. Lives in the same NEW-menu hot path so hash-dedup
+    // re-renders (handled earlier in the function with an early return)
+    // can't re-notify.
+    _maybeNotifyMenuPending(message);
   }
   _rescanPendingMenuQueue();
   _renderPermModal();
@@ -1723,6 +1728,100 @@ function _maybeRequestNotificationPermission() {
   if (typeof Notification === 'undefined') return;
   if (Notification.permission !== 'default') return;
   try { Notification.requestPermission().catch(() => {}); } catch {}
+}
+
+// fr-7: surface high-signal chat events through the OS notification
+// center when the tab is unfocused. Shares the same gates as
+// _maybeNotifyMention (API available, permission granted, tab not
+// already visible). Two trigger sources:
+//
+//   _maybeNotifyMenuPending — claude is BLOCKED waiting for the user
+//     to answer a permission menu / AskUserQuestion. Fired from
+//     appendChatMessage when a fresh menu broadcast lands (filtered
+//     by the new-menu hot path so re-renders / hash-dedup updates
+//     don't re-notify). For tool-permission menus the title names the
+//     tool ("⊕ claude wants Bash") so the user knows what's pending
+//     before opening the tab. For AskUserQuestion menus the chat-text
+//     body IS the question and serves as the notification body.
+//
+//   _maybeNotifyTurnComplete — claude finished a long turn (≥ the
+//     LONG_TURN_THRESHOLD_MS gate, default 30s). Skip short turns
+//     so the OS center doesn't fill up with "claude finished" pings
+//     for every 2-second response. Title carries the outcome glyph
+//     + duration; body is the first line of the assistant's final
+//     text so the user has a sneak peek.
+//
+// Both helpers tag the Notification with a stable identifier so the
+// SAME event re-fired (e.g. on reconnect) replaces the existing
+// notification instead of stacking.
+const NOTIFY_LONG_TURN_THRESHOLD_MS = 30000;
+
+function _shouldFireOsNotification() {
+  if (typeof Notification === 'undefined') return false;
+  if (Notification.permission !== 'granted') return false;
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') return false;
+  return true;
+}
+
+function _maybeNotifyMenuPending(message) {
+  if (!_shouldFireOsNotification()) return;
+  if (!message || !message.meta || message.meta.kind !== 'menu') return;
+  const menu = message.meta.menu;
+  if (!menu || !Array.isArray(menu.options) || !menu.options.length) return;
+  if (message.meta.answered || message.meta.superseded) return;
+  try {
+    const tgt = message.meta.target;
+    let title;
+    let body;
+    if (tgt && tgt.tool) {
+      // Permission menu: "claude wants to run Bash(curl …)"
+      const argPreview = tgt.input ? String(tgt.input).replace(/\s+/g, ' ').slice(0, 80) : '';
+      title = `⊕ claude wants ${tgt.tool}`;
+      body = argPreview ? `${tgt.tool}(${argPreview})` : `${tgt.tool} — open the chat to allow / deny.`;
+    } else {
+      // AskUserQuestion: the chat text IS the question. menu.lead
+      // (if present) is preferred over the full text body since the
+      // server already strips the option enumeration off it.
+      const lead = menu.lead ? String(menu.lead) : String(message.text || '');
+      title = '🤔 claude is waiting on a decision';
+      body = lead.replace(/\s+/g, ' ').trim().slice(0, 200);
+    }
+    const tag = 'myco-menu-' + (menu.hash || (message.meta.transcriptUuid || Date.now()));
+    const n = new Notification(title, { body, tag, icon: '/hetu.jpg', silent: false, requireInteraction: !!(tgt && tgt.tool) });
+    n.onclick = () => { try { window.focus(); } catch {} try { n.close(); } catch {} };
+    // Permission menus block claude — leave them up until the user
+    // dismisses them (requireInteraction:true above). AskUserQuestion
+    // menus auto-close after 12s; the in-app callout stays.
+    if (!(tgt && tgt.tool)) setTimeout(() => { try { n.close(); } catch {} }, 12000);
+  } catch {}
+}
+
+function _maybeNotifyTurnComplete(ev) {
+  if (!_shouldFireOsNotification()) return;
+  if (!ev || ev.type !== 'turn_result') return;
+  // Suppress short turns — the OS center fills up fast otherwise.
+  // turn_result.durationMs is set by agent-session._emit; defaults
+  // to absent on older sessions, treat absent as "long enough" so
+  // we don't silently drop legitimate notifications.
+  if (typeof ev.durationMs === 'number' && ev.durationMs < NOTIFY_LONG_TURN_THRESHOLD_MS) return;
+  try {
+    const ok = ev.subtype === 'success';
+    const glyph = ok ? '✓' : '■';
+    const durStr = (typeof ev.durationMs === 'number') ? (ev.durationMs / 1000).toFixed(1) + 's' : '';
+    const costStr = (typeof ev.totalCostUsd === 'number') ? '$' + ev.totalCostUsd.toFixed(4) : '';
+    const titleBits = [`${glyph} claude finished`, durStr, costStr].filter(Boolean).join(' · ');
+    const firstLine = ev.result
+      ? String(ev.result).replace(/\s+/g, ' ').trim().slice(0, 200)
+      : '(no final text — see the chat timeline for tool detail)';
+    const n = new Notification(titleBits, {
+      body: firstLine,
+      tag: 'myco-turn-' + (ev.ts || Date.now()),
+      icon: '/hetu.jpg',
+      silent: false,
+    });
+    n.onclick = () => { try { window.focus(); } catch {} try { n.close(); } catch {} };
+    setTimeout(() => { try { n.close(); } catch {} }, 12000);
+  } catch {}
 }
 
 function _renderChatUnreadBadge() {
@@ -3594,7 +3693,13 @@ function _appendAgentEvent(ev) {
   // payload remains accessible via expand), but ALSO emits a flat,
   // single-line muted footer right in the chat timeline so a senior
   // user sees duration + tokens + cost without expanding chrome.
-  if (ev.type === 'turn_result') _appendTurnFooter(ev, ts);
+  if (ev.type === 'turn_result') {
+    _appendTurnFooter(ev, ts);
+    // fr-7: OS notification for long turns finishing while the tab
+    // is unfocused. Short turns are filtered inside the helper to
+    // keep the OS center quiet.
+    _maybeNotifyTurnComplete(ev);
+  }
 
   // Chrome batching: consecutive chrome events collapse into one
   // compact "▸ N events" indicator. Click the indicator to expand and

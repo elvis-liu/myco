@@ -1840,6 +1840,31 @@ test_chat_window() {
   grep -qF 'artifact-item-id-copied' web/public/styles.css \
     && pass "styles.css: id-chip copied flash styling present" \
     || fail "styles.css: id-chip copied flash missing — no copy confirmation feedback"
+  # fr-7 (2026-05-16): high-signal chat events surface through the OS
+  # notification center when the tab is unfocused. Two new sources
+  # extend the existing _maybeNotifyMention pattern:
+  #   - _maybeNotifyMenuPending — permission menus + AskUserQuestion
+  #     menus (claude is BLOCKED waiting on the user).
+  #   - _maybeNotifyTurnComplete — gated on ≥30s turns so the OS
+  #     center doesn't fill up with "claude finished" pings for
+  #     every short response.
+  # Reuses the existing permission-granted gate + visibilityState
+  # check via the shared _shouldFireOsNotification helper.
+  grep -qF '_maybeNotifyMenuPending' web/public/app.js \
+    && pass "app.js: _maybeNotifyMenuPending helper present" \
+    || fail "app.js: _maybeNotifyMenuPending missing — blocking menus won't surface as OS notifications"
+  grep -qF '_maybeNotifyTurnComplete' web/public/app.js \
+    && pass "app.js: _maybeNotifyTurnComplete helper present" \
+    || fail "app.js: _maybeNotifyTurnComplete missing — finished long turns won't surface as OS notifications"
+  grep -qF '_shouldFireOsNotification' web/public/app.js \
+    && pass "app.js: _shouldFireOsNotification shared gate present" \
+    || fail "app.js: _shouldFireOsNotification gate missing — visibility/permission checks would be duplicated/divergent"
+  grep -qF 'NOTIFY_LONG_TURN_THRESHOLD_MS' web/public/app.js \
+    && pass "app.js: long-turn threshold constant defined" \
+    || fail "app.js: NOTIFY_LONG_TURN_THRESHOLD_MS missing — short turns will spam the OS notification center"
+  grep -qF 'requireInteraction:' web/public/app.js \
+    && pass "app.js: permission-menu notification uses requireInteraction so it sticks until answered" \
+    || fail "app.js: requireInteraction missing on permission-menu notification — blocking menus won't stay visible"
   # Regression: plan items are grouped by `layer` (3-tier-style buckets) and
   # the extractor's plan prompt asks for {layer, text} objects.
   grep -q "parsePlanItems"      server/src/extractor.js && pass "parsePlanItems parser exists" || fail "parsePlanItems parser exists"
