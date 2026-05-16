@@ -463,7 +463,18 @@
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "fr7mobile",
+          "user": "claude",
+          "text": "**Mobile-Android reliability — honest assessment of the current implementation.**\n\nShipped in `6ce4fea`: `_maybeNotifyMenuPending` + `_maybeNotifyTurnComplete` use the Web Notifications API (`new Notification(...)`) gated by `_shouldFireOsNotification` (API available + permission granted + tab not visible). Works well on desktop where backgrounded tabs stay alive. On mobile Android the picture is partial:\n\n| Scenario | Notification fires? |\n|---|---|\n| Tab in FOREGROUND (looking at it) | No — gate bails on `visibilityState === 'visible'`; the in-app badge handles it. |\n| Tab BACKGROUNDED, browser process alive, WS still connected | ✅ **Yes** — WS frame arrives, JS runs, OS shade shows the notification. |\n| Tab BACKGROUNDED, Android suspended/froze the tab (typical after a few minutes) | ❌ **No** — JS isn't running. WS may even be dropped. The notification only appears once the user reopens the tab and the JS catches up. |\n| Browser FULLY CLOSED | ❌ **No** — nothing runs. |\n| Phone screen OFF, browser in background | ❌ **No** (same as suspended). |\n\n**Why:** `new Notification(...)` only fires while the page's JS is alive. Android aggressively suspends backgrounded tabs to save battery. The only way to reliably get OS notifications when the tab is suspended or the browser is closed is the **Web Push protocol**:\n\n- service worker running independently of the tab\n- `PushManager.subscribe()` getting a per-device endpoint\n- server-side push sender (FCM on Android) POSTing to that endpoint when an event lands\n\nWhat the codebase has today:\n\n```\n✅ web/public/manifest.json   — exists (PWA-installable as \"Add to Home Screen\")\n❌ service-worker.js          — NOT registered\n❌ PushManager.subscribe()    — NOT called\n❌ VAPID keys / push backend  — NOT configured\n```\n\nInstalling myco as a PWA (Add to Home Screen) gets the app a slightly more generous lifecycle (its own task, `display: standalone`) but **still no push** without the service worker.\n\nSo fr-7 as shipped is a **foreground-leaning enhancement**: catches notifications during the \"tab backgrounded but alive\" window — most of the desktop day, a narrower band on mobile.\n\n**For true mobile reliability** (proposed follow-up — likely worth a separate fr- item):\n\n1. `web/public/service-worker.js` — registers from app.js bootstrap, handles `push` event, calls `self.registration.showNotification(...)` even when the tab is dead.\n2. Client: `PushManager.subscribe({ applicationServerKey: VAPID_PUBLIC })` → POST the endpoint to a new `/push/subscribe` route, keyed by session.\n3. Server: `web-push` npm dep + VAPID keypair in `.env` (`MYCO_VAPID_PUBLIC`, `MYCO_VAPID_PRIVATE`). When a permission menu broadcasts or a long turn completes, fan out to subscribed endpoints. Browser delivers via FCM → device notification shade — no in-page JS required.\n\nThe earlier `runs[0]` entry stuck at `running` was a stale stamp from the original `[run:plan#fr-7]` dispatch at `13:45:55Z` whose `turn_result` never reached `_stampPlanItemRunOutcome` (same race that ate fr-2/3/4/6's outcomes). Leaving the run record in place this round so it's visible alongside this analysis.",
+          "ts": "2026-05-16T13:55:00.000Z",
+          "meta": {
+            "kind": "run-summary",
+            "manual": true
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "promote notification to the chat up to the brower level, which would sent notification via the os. This would allow user to be notified of events require user attention",
