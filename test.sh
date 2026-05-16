@@ -2409,13 +2409,20 @@ test_chat_window() {
   # menu-pick / menu-toggle / menu-submit frames. Without these branches
   # every modal click is silently dropped at the WS boundary — verified
   # live on mycobeta test006 2026-05-15.
-  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-pick'" server/src/attach.js \
+  #
+  # Distance window: 8000 chars from the function header. The handler
+  # block sits a few hundred lines into _attachAgentWebSocket, and the
+  # function organically grows as features land (e.g. bug-7 round 2's
+  # event-dedup pushed it from ~4000 → ~4300 chars). When this red-flips
+  # on a future feature, bump the window — the contract is "handler
+  # lexically inside the function," not a specific offset.
+  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,8000}msg\.t === 'menu-pick'" server/src/attach.js \
     && pass "attach.js: agent WS handles menu-pick frame" \
     || fail "attach.js: agent WS missing menu-pick handler"
-  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-toggle'" server/src/attach.js \
+  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,8000}msg\.t === 'menu-toggle'" server/src/attach.js \
     && pass "attach.js: agent WS handles menu-toggle frame" \
     || fail "attach.js: agent WS missing menu-toggle handler"
-  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,4000}msg\.t === 'menu-submit'" server/src/attach.js \
+  grep -Pzoq "_attachAgentWebSocket[\s\S]{0,8000}msg\.t === 'menu-submit'" server/src/attach.js \
     && pass "attach.js: agent WS handles menu-submit frame" \
     || fail "attach.js: agent WS missing menu-submit handler"
   # Multi-select AskUserQuestion: agent-session must mark each option
