@@ -4105,7 +4105,6 @@ function _createChromeBatch(ev, ts) {
   head.className = 'agent-card-head';
   head.innerHTML =
     `<span class="agent-card-ts">${escHtml(ts)}</span>` +
-    `<span class="agent-card-kind agent-mute agent-chrome-kind-head">▸ chrome</span>` +
     `<span class="agent-card-count agent-mute">× 1</span>` +
     `<span class="agent-card-summary agent-mute agent-chrome-last">${escHtml(_chromeShortLabel(ev))}</span>`;
   card.appendChild(head);
