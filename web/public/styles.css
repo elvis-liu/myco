@@ -4117,6 +4117,32 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .agent-chrome-kind-head {
   letter-spacing: 0.04em;
 }
+/* Outcome chip on the chrome batch head — replaces the standalone
+   turn-footer row. Shows "✓ done · 6.4s · 6 in / 150 out · 54.7k
+   cached" once the turn's result event lands. Tinted by outcome. */
+.agent-chrome-outcome {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-chrome-outcome-ok {
+  color: rgba(76, 175, 130, .9);
+  background: rgba(76, 175, 130, .08);
+}
+.agent-chrome-outcome-warn {
+  color: #ffb86b;
+  background: rgba(255, 184, 107, .10);
+}
+/* The legacy .turn-footer rule still exists for any old DOM the
+   user has cached, but new turns won't emit one. Hide if present. */
+.turn-footer { display: none; }
 .agent-chrome-body {
   display: flex;
   flex-direction: column;
