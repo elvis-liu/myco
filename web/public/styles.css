@@ -2484,12 +2484,32 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  /* Mobile reserves room at the top for the floating chrome
+     cluster (5 buttons, 40-44px tall) so scroll content doesn't
+     hide under them. Desktop drops the reservation in the rule
+     below so the artifact pane takes the entire vertical extent
+     of the main area. */
   padding-top: calc(env(safe-area-inset-top, 0px) + var(--pane-header-h));
   box-sizing: border-box;
   /* Sit above the chatpane (z-index:30) so opening Plan/Arch/Test
      actually covers the conversation. Without this the chatpane
      still painted on top and the chrome-icon click looked dead. */
   z-index: 31;
+}
+@media (min-width: 901px) {
+  /* Desktop: artifact takes the entire main-pane vertical space.
+     Chrome cluster overlays the top-right; the artifact-header's
+     padding-right below keeps the title + refresh button out from
+     under the floating buttons. */
+  .artifact-main-view {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  .artifact-main-view .artifact-header {
+    /* Clear the chrome cluster: 5 buttons × 32px + 4 gaps × 8px
+       + 10px right inset = ~210px. Round up with a safety margin
+       so the title doesn't clip behind the buttons. */
+    padding-right: 232px;
+  }
 }
 .artifact-main-view .artifact-header {
   padding: 10px 16px;
