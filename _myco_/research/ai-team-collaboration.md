@@ -258,7 +258,235 @@ effort piece and depends on stabilizing the event-history wire format.
 
 ---
 
-## 5. Open design questions
+## 5. How human developers + workflows need to adapt
+
+The features in §3 are necessary but not sufficient. AI-native teamwork
+also requires that **humans change how they write code, communicate,
+and operate as a team**. The tools matter, but the habits matter more —
+without them the tools become surfaces no one trusts.
+
+This section is opinionated. Treat it as a working hypothesis to
+challenge, not a prescription.
+
+### 5.1 Individual habits
+
+**Write for two readers.** Every comment, doc string, commit message,
+and PR description is now read by *two* primary audiences: humans
+reviewing the change, and AI reasoning about the codebase later.
+Vague messages ("fix bug") starve both. The new minimum bar:
+
+- *What changed* (one line, present tense, imperative)
+- *Why* (the user-visible symptom OR the design constraint that forced it)
+- *What this leaves un-done* (known follow-ups; gives AI a thread to pull on)
+
+Worked example (from this repo, 2026-05-17):
+> `chat: fix scroll-up infinite-fetch loop + bump initial-load to 8KB + bump in-memory cap to 1MB`
+> *(then 30-line body explaining the loop, the cap interaction, what was
+> reverted, and what tests were added).*
+
+That body is read every time AI loads context for a future chat-pane
+change. Same goes for `_myco_/architecture.md`, `_myco_/notebook.md`,
+and inline comments at non-obvious decision points.
+
+**Commit smaller, more often.** AI reasons better about a small atomic
+diff than a 1500-line "weekly sync" commit. Keep each commit to one
+*concept* — the same discipline that makes human review easier makes
+AI's mental model of the codebase converge faster.
+
+**Plan-first as a default for non-trivial work.** File a `/td`, `/fr`,
+or `/bug` BEFORE you start coding, not after. The item gives:
+- A handle the AI can run against (`▶ Run` dispatches a session to it)
+- A place for comments accumulating findings
+- A trail for the next teammate to understand what shipped and why
+
+For one-line fixes, this is overkill. For anything spanning more than
+~2 commits, skip it at your peril.
+
+**Calibrate AI trust per tool, not per session.** The trust ladder
+(theme B above) is only as useful as the user's discipline in using
+it. The pattern that works:
+
+1. New project / new AI model — everything starts in `queue` (review-required).
+2. Spend a week observing what AI does well: read-only file ops, structured
+   refactors, test additions all probably promote to `allow`.
+3. Things that touched something that broke production stay in `queue`
+   permanently (no exceptions; the cost of a Friday-evening incident
+   dwarfs the friction of a review queue).
+4. Re-calibrate quarterly — model updates, repo evolution, team turnover
+   all shift the right thresholds.
+
+**Leave breadcrumbs explicitly.** AI is good at synthesizing context
+that's *written down* and bad at recovering context that's only in
+someone's head. Habits that pay compound interest:
+- `TODO(@alice): ...` markers attributable to a person
+- `_myco_/notebook.md` entries when you discover anything non-obvious
+- `ADR-NNN.md` files (architectural decision records) for design choices
+  that future-you (or AI) will second-guess
+- Plan-item comments with *the rationale that didn't make the commit*
+
+**Treat AI's confident wrong answers as a known failure mode.** AI will
+sometimes propose code that compiles, passes its own tests, looks
+reasonable, and is subtly wrong. The mitigation isn't "trust less";
+it's "verify differently":
+- Read the diff, don't just the explanation.
+- Run the actual feature manually if it's user-facing.
+- Look at *what was deleted* with the same attention as what was added.
+
+### 5.2 Team rituals
+
+**Code review evolves into two passes.**
+1. *AI first pass* — formatting, obvious bugs, missing tests,
+   misalignment with `_myco_/architecture.md`. AI is excellent at this
+   and tireless. Automate it on every PR.
+2. *Human second pass* — design judgment, edge cases the AI couldn't
+   foresee, "does this make sense for our users". This pass shrinks
+   in mechanical effort (AI caught the typos) but rises in importance
+   (AI can't catch what a customer will hate).
+
+Don't skip the human pass. The first time you do, the result will be
+fine. The tenth time, you'll ship something embarrassing.
+
+**Standups become AI-state syncs.** The 15-minute morning sync now has
+a fourth question:
+> "What is your AI session blocked on, and who can unblock it?"
+
+If alice's session has been awaiting `/ask @bob` for 6 hours, that's
+the standup item. The `/team` dashboard (theme D) is the standup
+artifact — open it on the shared screen, walk through any yellow ⚠
+chips.
+
+**Onboarding flips.** Today: new hire reads the wiki, pairs with a
+senior, reads the codebase, asks questions in #help. Tomorrow:
+
+- Day 1: new hire is given a myco session pointed at the project with
+  a "tour guide" persona pre-loaded into CLAUDE.md. AI walks them
+  through the codebase, explains conventions, points at gotchas
+  recorded in `_myco_/notebook.md`.
+- Week 1: new hire ships their first small fix with AI as the pair.
+  Human review is by a teammate, not AI alone.
+- Month 1: new hire is dispatching plan items via `▶ Run` and reviewing
+  AI's work. They're trusted to manage the AI, not just consume its
+  output.
+
+**Decision logs become a team artifact, not a personal one.** Every
+design choice that took >30 minutes of discussion lands in
+`_myco_/decisions/YYYY-MM-DD-<topic>.md`. AI reads these on every
+session start. The next time someone proposes the rejected approach,
+AI knows to flag it ("we considered this in March — see decisions/
+2026-03-12-auth-tokens.md").
+
+**Postmortems include "what AI did, what humans did, who decided
+what".** When something breaks, the question isn't just "was it AI's
+fault or a human's"; it's "was the trust level appropriate, was the
+review queue catching things it should, did the team have visibility
+when it mattered". Audit log (theme B) is the primary record.
+
+### 5.3 Skill shifts
+
+**Skills that become more valuable:**
+
+| Skill | Why |
+|-------|-----|
+| Writing clear specs | AI is a competent contractor; vague specs produce vague work |
+| Architectural judgment | AI optimizes locally; humans hold the global picture |
+| Test design | Tests are the gold standard for verifying AI work — write them carefully |
+| Code review (deep, not just style) | AI catches typos; humans catch wrong abstractions |
+| Debugging | When AI's confident-wrong code makes it to prod, debugging is the unblock |
+| Calibrated skepticism | Knowing which AI outputs to trust at which level |
+
+**Skills that get absorbed (or rebalanced):**
+
+| Skill | What happens to it |
+|-------|---------------------|
+| Boilerplate generation | AI does it — humans set the template, AI fills it in |
+| Routine refactors (rename, extract) | AI does it — humans audit |
+| Initial test scaffolding | AI drafts, humans verify the coverage is real |
+| Documentation drafting | AI drafts, humans edit for accuracy |
+| Searching docs / Stack Overflow | AI does it — humans verify the answer fits this codebase |
+
+The shift isn't "AI replaces juniors" — it's "everyone does more of
+the high-judgment work because the mechanical work is faster". Roles
+that previously specialized in mechanics (junior dev grinding through
+tickets, QA running manual scripts) shift toward design + judgment.
+
+**A new role to budget for: AI policy admin.** Someone owns the trust
+ladder, the audit log, the deny-list, the subscription topics, the
+review-routing rules. Small team: tech lead carves out an hour a
+week. Large team: 0.25-0.5 FTE.
+
+### 5.4 Anti-patterns to actively avoid
+
+1. **Rubber-stamping AI diffs.** "AI wrote it, AI tested it, ship it"
+   is a velocity trap. The first three diffs you skip review on will
+   be fine. The fourth will silently break something subtle. Mandatory
+   human review of EVERY merged PR, no exceptions.
+
+2. **AI-only spec writing.** Letting AI generate the spec because it's
+   faster collapses the spec → code feedback loop. The spec is the
+   contract between the humans deciding what to build and the agent
+   building it. Humans write specs.
+
+3. **"AI wrote it, so we don't need tests."** Inverted. AI code needs
+   *more* test coverage, not less, because the failure modes are
+   different from human-written code. AI confidently produces code
+   that passes its own tests but misses cases the human author would
+   have caught from lived experience with the bug.
+
+4. **Treating AI as oracle.** AI doesn't know your customers, your
+   on-call rotation, your deploy schedule, the political reasons
+   behind weird code. When AI's answer surprises you, the right
+   response is "tell me your reasoning" — not "ship it" and not
+   "ignore it".
+
+5. **Context debt.** Long-lived AI sessions accumulate token cost +
+   irrelevant context. Discipline: close out sessions when the
+   thread is done. New thread, new session. The `_myco_/` memory
+   carries forward; the chat doesn't need to.
+
+6. **Skipping human pair time.** Pairing with another human is still
+   the highest-bandwidth knowledge transfer mode we have. AI augments
+   it, doesn't replace it. Teams that abandon human pairing in favor
+   of "everyone pairs with AI" lose the implicit norm-sharing that
+   keeps a codebase coherent.
+
+7. **No-feedback trust escalation.** Auto-promoting tools to `allow`
+   because "they've been fine for a week" without an explicit human
+   nod is how the unattended Friday-evening incident happens. Trust
+   escalation is a deliberate act, logged, attributable.
+
+8. **Hiding AI usage from teammates.** If alice uses AI to ship a fix
+   and bob doesn't know AI was involved, bob can't calibrate his
+   review. AI usage is metadata on the commit (e.g. `Co-Authored-By:
+   Claude` line, already standard in our commits), not a secret.
+
+### 5.5 Management adapts too
+
+**New metrics.** Velocity goes up, but quality variance might too.
+Track:
+- Diffs reverted within 7 days (AI's confidently-wrong rate)
+- Time-in-review-queue (theme B latency)
+- Cost per shipped feature (theme D rollup)
+- New-contributor time-to-first-merge (onboarding effect)
+- % of plan items closed with their stated test coverage
+
+**AI policy as a real artifact.** Not a memo — a file in the repo:
+- `_myco_/policy/ai-allowed-tools.md`: what AI may run unattended
+- `_myco_/policy/ai-deny-list.md`: never-touched paths (prod creds,
+  customer DBs, deploy keys)
+- `_myco_/policy/review-routing.md`: who reviews what
+- All version-controlled, all reviewable like code
+
+**Cost transparency.** Per-user, per-project, per-day. Surfaced in
+the `/team` dashboard. Surprises kill trust faster than incidents do.
+
+**Performance reviews include "how well do you collaborate with AI".**
+Not in a creepy way — in the same way "how well do you collaborate
+with teammates" already shows up. The skill is real, it's developable,
+it's worth recognizing.
+
+---
+
+## 6. Open design questions
 
 - **Where does the notebook live cross-project?** Per-project today
   (`<absCwd>/_myco_/notebook.md`). Should there be a personal
@@ -284,7 +512,7 @@ effort piece and depends on stabilizing the event-history wire format.
 
 ---
 
-## 6. Anti-features (things to deliberately NOT add)
+## 7. Anti-features (things to deliberately NOT add)
 
 - **No new chat surfaces for the AI to "speak through".** Stay
   within `agent-event` + `chat` frames; don't fork them.
@@ -297,7 +525,7 @@ effort piece and depends on stabilizing the event-history wire format.
 
 ---
 
-## 7. Filing this against `plan.json`
+## 8. Filing this against `plan.json`
 
 Each theme above becomes a feature request. Filed under fr-12 through
 fr-16 (see plan.json entries dated 2026-05-17). The granular sub-tasks
