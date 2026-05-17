@@ -211,23 +211,23 @@ t('attach.js wire calls chat-history with the small INITIAL_CHAT_HISTORY_BYTES b
     'attach.js must NOT have a setTimeout that ships the DEFAULT chat-history budget — round-5 dropped the auto-backfill');
 });
 
-t('attach.js + app.js wire the round-6 pre-merged timeline-init frame', () => {
-  // Round 6 replaces the two-frame initial protocol (chat-history
-  // + agent-replay) with ONE pre-merged timeline-init frame. Server
-  // sorts items by ts before shipping; client wipes both panes and
-  // renders in arrival order. Fixes tab-switch order corruption.
+t('attach.js + app.js keep timeline-init helpers as DORMANT after the round-6.1 revert', () => {
+  // Round 6 (pre-merged timeline-init) lost claude-output rendering
+  // on reload because _applyTimelineInit silently bypassed the
+  // state._agentChatPaneArmed setup the agent-replay handler does.
+  // Round 6.1 reverted to the round-5 two-frame shape; the helpers
+  // stay defined for a future, more careful attempt — but the live
+  // attach path no longer invokes _shipTimelineInit.
   const sa = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'attach.js'), 'utf8');
   assert.ok(/function _shipTimelineInit/.test(sa),
-    'attach.js must define _shipTimelineInit');
-  assert.ok(/t:\s*'timeline-init'/.test(sa),
-    "attach.js must ship the 'timeline-init' frame");
-  assert.ok(/_shipTimelineInit\(session, ws, sessionId/.test(sa),
-    'attach.js _attachAgentWebSocket must invoke _shipTimelineInit');
+    'attach.js must keep _shipTimelineInit dormant for a future retry');
+  assert.ok(/_shipAgentReplay\(session, ws, sessionId/.test(sa),
+    'attach.js must invoke _shipAgentReplay on attach (round-5 shape)');
+  assert.ok(/_shipChatHistory\(ws, sessionId/.test(sa),
+    'attach.js must invoke _shipChatHistory on attach (round-5 shape)');
   const ca = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
-  assert.ok(/msg\.t === 'timeline-init'/.test(ca),
-    "app.js must handle the 'timeline-init' WS frame");
   assert.ok(/function _applyTimelineInit/.test(ca),
-    'app.js must define _applyTimelineInit');
+    'app.js must keep _applyTimelineInit dormant for a future retry');
 });
 
 t('app.js has the client-side MAX_CHAT_BYTES rolling cap (round 5)', () => {

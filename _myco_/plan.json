@@ -583,7 +583,9 @@
       "addedAt": "2026-05-16T15:11:57.693Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -639,7 +641,88 @@
         "originalText": "add vscode support which would be able to browse the file system, send msg to llm using a local chat pane alike implementation, all interacting with myco via its rest api. please automatically fill in what api need to be provided",
         "rewritten": true
       }
+    },
+    {
+      "id": "fr-11",
+      "text": "**Problem:** When a Claude Monitor is running, its monitored process output isn't surfaced in the status banner.\n**Expected:** While a Monitor is active, the status banner continues to display the monitored process output.\n**Actual:** The status banner does not show the monitored process output during a Monitor run.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-16T20:16:56.119Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "when there are claude monitor running, continue to show the monitored process output to the status banner.",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "fr-12",
+      "text": "**Problem:** Plan tab has no way to find relevant items across a large list.\n**Expected:** A search box in the plan tab that leverages an LLM to surface all relevant items for a query (semantic, not just literal match).\n**Actual:** No search exists; users must manually scan the plan tab.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-16T20:56:40.332Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "add search to the plan tab which leverage llm to find all relevant items.",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "fr-13",
+      "text": "**Problem:** Mobile chat keeps the full message history in memory, causing memory pressure on constrained devices.\n**Expected:** On mobile only, retain just the last 25 messages in memory; older messages are swapped out and reloaded on scroll-up.\n**Actual:** All messages remain resident in memory regardless of platform.\n**Context:** Mobile-only behavior — desktop chat must remain unchanged.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-16T21:06:56.469Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "a8fd10d7bd7d",
+          "user": "kkrazy",
+          "text": "25 claude msg and 2 chrome groups",
+          "ts": "2026-05-16T21:08:44.525Z"
+        },
+        {
+          "id": "2738339b9f63",
+          "user": "kkrazy",
+          "text": "Instead of msg count, change to meomery size in kb. Initial load 1Kb only and allow loading upto 16kb. When history exceeds 16kb throw away the oldest. Make sure user input and claude ouput are ordered based on timestamp",
+          "ts": "2026-05-17T01:47:12.901Z"
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "Keep only the last  25 messages in the chat on mobile to save memory, the rest is swapped out and reloaded if user scroll up. Make sure this is for mobile only",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "fr-14",
+      "text": "**Problem:** The agent's policy to delegate slow Bash commands to a subagent (per `CLAUDE.md` `Bash command timing`) lives only in prose — every agent run depends on the LLM remembering to consult `_myco_/bash-elapsed.json` and route appropriately. Forgetting blocks the conversation loop behind a long shell.\n\n**Expected:** The `claude-agent-sdk` integration in `server/src/agent-session.js` enforces the policy via a `PreToolUse` hook on the `Bash` tool. The hook reads `_myco_/bash-elapsed.json` once per session, builds a regex set from `knownSlowPatterns`, and on every Bash invocation:\n  1. Records wall-clock elapsed time on completion → updates `samples`, recomputes `p95Ms` per pattern, persists.\n  2. If the matched pattern's `p95Ms` exceeds `SLOW_BASH_THRESHOLD_MS` AND the agent ran the command inline (not via a subagent), emits a chat-pane warning naming the command and suggesting `Agent({...})` next time.\n  3. If wall-clock exceeds a HARD ceiling (e.g. 5 min) mid-flight, the SDK aborts via the existing `AbortController` and returns a structured error suggesting subagent delegation.\n\n**Actual:** No SDK-level enforcement. The policy is documentation only.\n\n**Context — design recommendation (from the chat discussion 2026-05-17):**\n\n- **Do NOT put the slow-command list IN the SDK code.** Keep `_myco_/bash-elapsed.json` as the single source of truth — agents and the SDK hook both consult it. A hardcoded list in code would drift from the JSON memory and require deploys to update.\n- **Do NOT auto-route every match to a subagent.** The agent's judgment (with context the SDK can't see — \"is this a debug run or a CI loop?\") usually beats a static rule. The hook warns + enforces a hard ceiling; the agent decides routing.\n- **Keep agent-level policy (Tier 1) AND add SDK hook (Tier 2).** Tier 1 is ergonomic, Tier 2 is the safety net that catches forgetfulness.\n\n**Implementation sketch:**\n\n```js\n// server/src/agent-session.js — inside _ensureIteration's sdkOpts.hooks\nhooks: {\n  PreToolUse: [\n    { matcher: 'Bash',\n      hooks: [(input, toolUseID, ctx) => _bashTimingHook(input, toolUseID, ctx)] },\n    // ... existing allow-list hook stays alongside\n  ],\n}\n```\n\nThe hook:\n- Loads `_myco_/bash-elapsed.json` once per `AgentSession` construction (cached on `this._bashElapsedMemory`).\n- On invocation: matches `input.command` against `knownSlowPatterns`. If matched + recent samples confirm slowness, posts a chat-pane note `⚠ \"<cmd>\" historically runs ~Xs on this project; consider delegating via Agent(...) next time.`\n- Wires an `AbortController` timer at `HARD_BASH_CEILING_MS` (default 5 min). On timeout, aborts the tool call + returns a structured error so the agent can re-issue via subagent.\n- After completion, appends a sample `{cmd, elapsedMs, ts}` and writes the file back atomically (write-to-tmp + rename). Caps at 200 samples.\n\n**Files touched:** `server/src/agent-session.js` (hook + memory loader), `server/src/bash-timing.js` (new — the helper module), `test/bash-timing.test.js` (new — stubs the SDK hook context and asserts warn/abort/sample-update behaviors), `test.sh` static guards. ~150 lines server + ~80 lines test.\n\n**Out of scope:** auto-routing every match to a subagent (deliberately rejected per the discussion — keeps the agent in control of the routing decision under the policy).",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-17T02:00:00.000Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "force",
+        "originalText": "Claude code sdk used by myco should read from a list of cmds or tasks to decide whether it should use subagent for the cmd/task",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-16T15:34:35.672Z"
+  "updatedAt": "2026-05-17T02:00:00.000Z"
 }

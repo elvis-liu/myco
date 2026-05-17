@@ -781,15 +781,16 @@ function _attachAgentWebSocket(session, ws, opts = {}) {
   const user = opts.user || null;
   const sessionId = session.sessionId;
 
-  // bug-9 round 6: single pre-merged timeline frame. 1 KB worth of
-  // chat-history + 1 KB worth of agent events, sorted by ts on the
-  // server, shipped as ONE chronologically-ordered list. The client
-  // renders items in arrival order — no two-stream race, no tab-
-  // switch order corruption.
-  _shipTimelineInit(session, ws, sessionId,
-    sessionsMod.INITIAL_CHAT_HISTORY_BYTES,
-    INITIAL_AGENT_REPLAY_BYTES,
-    /*includeEvents*/ true);
+  // bug-9 round 6.1 (revert to round-5 shape after round-6 lost
+  // claude-output history rendering): keep the separate
+  // chat-history + agent-replay frames. The client's existing
+  // agent-replay handler arms the chat pane (state._agentChatPane
+  // Armed) AND wipes stale agent cards in one step — paths that
+  // _applyTimelineInit silently skipped. The order-on-tab-switch
+  // concern is handled by the client-side _resortChatPaneByTs
+  // defensive sort (added in round-5 and still in place).
+  _shipAgentReplay(session, ws, sessionId, INITIAL_AGENT_REPLAY_BYTES, 'initial');
+  _shipChatHistory(ws, sessionId, sessionsMod.INITIAL_CHAT_HISTORY_BYTES, 'initial');
   console.log(`[agent-attach] ${sessionId} user=${user || 'unknown'} mode=agent replay-events=${(session.buffer || []).length} sdk-session=${session.sdkSessionId || 'none'}`);
   if (session.sdkSessionId && !session._iterating && (!session.buffer || !session.buffer.length)) {
     console.log(`[agent-resume] ${sessionId} ready to resume sdk-session=${session.sdkSessionId} on next user message`);
@@ -958,12 +959,9 @@ function attachViewerWebSocket(session, ws, opts = {}) {
   const user = opts.user || null;
   const sessionId = session.sessionId;
 
-  // bug-9 round 6: viewers get the same pre-merged timeline frame
-  // (chat-only — read-only viewers don't subscribe to agent events).
-  _shipTimelineInit(session, ws, sessionId,
-    sessionsMod.INITIAL_CHAT_HISTORY_BYTES,
-    0,
-    /*includeEvents*/ false);
+  // bug-9 round 6.1 (revert): viewers get the chat-history frame
+  // only — they don't subscribe to agent events.
+  _shipChatHistory(ws, sessionId, sessionsMod.INITIAL_CHAT_HISTORY_BYTES, 'initial');
   _sendAttachSnapshot(session, ws);
 
   const onChat = (message) => {

@@ -1215,16 +1215,16 @@ function openSession(id, opts = {}) {
       } else if (msg.t === 'pong') {
         state.lastPongAt = Date.now();
       } else if (msg.t === 'timeline-init') {
-        // bug-9 round 6: pre-merged timeline frame. Items are
-        // sorted by ts server-side, mixing chat-message + agent-
-        // event payloads. We wipe both panes then render each item
-        // in arrival order — no two-stream race, no tab-switch
-        // order corruption.
+        // bug-9 round 6.1 (revert): timeline-init handler kept as a
+        // dormant fallback in case a future server experiments with
+        // the unified frame again. Today's server ships separate
+        // chat-history + agent-replay; this branch shouldn't fire.
         _applyTimelineInit(msg);
       } else if (msg.t === 'chat-history') {
-        // Legacy initial chat-history frame — kept for backward
-        // compat with older mycod that doesn't yet send
-        // timeline-init. Live deployments use timeline-init.
+        // bug-9 round 5: initial chat-history frame at 1 KB byte
+        // budget. Subsequent older windows fetched via GET
+        // /sessions/:id/chat/history?before=&limit= (the load-
+        // older button calls _fetchOlderChatFromServer).
         applyChatHistory(msg.messages, msg.total);
       } else if (msg.t === 'chat') {
         try {
