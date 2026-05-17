@@ -31,6 +31,41 @@
       "elapsedMs": 1500,
       "ts": "2026-05-17T00:00:00Z",
       "note": "Single-shot inspection probes — fast"
+    },
+    {
+      "cmd": "./test.sh",
+      "elapsedMs": 106872,
+      "ts": "2026-05-17T04:35:00Z",
+      "note": "Measured serial run before parallelization — 87 s of node tests + ~20 s static/static-feature + ~10 s server smoke"
+    },
+    {
+      "cmd": "./test.sh",
+      "elapsedMs": 85029,
+      "ts": "2026-05-17T04:40:00Z",
+      "note": "Post node_test_prelaunch parallelization — long pole now agent-session.test.js (~65 s SDK round-trip) running concurrently with everything else"
+    },
+    {
+      "cmd": "node test/agent-session.test.js",
+      "elapsedMs": 65310,
+      "ts": "2026-05-17T04:35:00Z",
+      "note": "Real SDK round-trip per phase-1 smoke test; skips if no creds"
+    },
+    {
+      "cmd": "node test/transcript-watcher-safety-poll.test.js",
+      "elapsedMs": 12090,
+      "ts": "2026-05-17T04:35:00Z",
+      "note": "fs.watch safety-poll exercise needs 12 s of wall-clock"
+    },
+    {
+      "cmd": "node test/chat-history-window.test.js",
+      "elapsedMs": 6670,
+      "ts": "2026-05-17T04:35:00Z"
+    },
+    {
+      "cmd": "npm install (server/)",
+      "elapsedMs": 7000,
+      "ts": "2026-05-17T04:30:00Z",
+      "note": "First-time install of the express/ws/uuid stack; subsequent runs reuse the cache"
     }
   ],
   "knownSlowPatterns": [
@@ -58,6 +93,16 @@
       "pattern": "^scp\\b.*\\.tgz\\b.*labxnow\\.ai",
       "p95Ms": 8000,
       "reason": "Source tarball ship to mycobeta/myco. Inline acceptable; delegate only as part of the full deploy chain."
+    },
+    {
+      "pattern": "^node test/agent-session\\.test\\.js",
+      "p95Ms": 70000,
+      "reason": "Real SDK round-trip; needs cred + network. When invoked standalone, delegate; the test.sh prelaunch already overlaps it with the other tests."
+    },
+    {
+      "pattern": "^npm install\\b",
+      "p95Ms": 30000,
+      "reason": "Cold install ~7-30 s depending on cache + network. Delegate first run; subsequent invocations are usually under 5 s."
     }
   ],
   "config": {
