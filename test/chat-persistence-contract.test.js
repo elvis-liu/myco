@@ -407,6 +407,45 @@ t('USER-REPORT REGRESSION 2026-05-17 round 2: renderChatPane preserves chat-msg-
     'renderChatPane preserve loop no longer keeps chat-msg-from-agent — switch-tab will lose the claude reply (user reported regression).');
 });
 
+// USER-REPORT REGRESSION 2026-05-17 round 2 (per best-practices rule 5):
+// User: "the display order... after I type 'search for shenzhen weather',
+// it asked for permission but the permission result appeared before my
+// input." → claude's permission-menu chat-msg was rendering at the TOP
+// of the chat pane instead of after the user's input.
+//
+// Root cause: renderChatMessage didn't emit `data-ts` directly in the
+// markup; instead a post-render stamp loop set it via index. If the
+// index-to-ts alignment ever drifted (e.g. an extra chat-msg-from-agent
+// was in the DOM), the menu row's data-ts was missing →
+// _resortChatPaneByTs treated it as no-ts → sorted it to TOP.
+//
+// Fix: renderChatMessage now emits `data-ts="<iso>"` directly when
+// m.ts is set, AND _appendChatMessageDom uses _insertChronological
+// for live appends so order is correct without depending on the resort
+// pass.
+t('USER-REPORT REGRESSION 2026-05-17 round 2: renderChatMessage emits data-ts attr directly in markup', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
+  // Search for the renderChatMessage return template and assert it
+  // includes a data-ts attribute when m.ts is present.
+  assert.ok(/tsAttr\s*=\s*m\.ts\s*\?\s*`\s*data-ts="\$\{escHtml\(m\.ts\)\}"`/.test(app),
+    'renderChatMessage no longer emits data-ts in markup — menu rows can float to TOP of chat (user reported regression).');
+});
+
+t('USER-REPORT REGRESSION 2026-05-17 round 2: _appendChatMessageDom inserts chronologically (not appendChild)', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
+  // Locate _appendChatMessageDom and assert it uses _insertChronological
+  // when message.ts is set.
+  const lines = app.split('\n');
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/function _appendChatMessageDom\(/.test(lines[i])) { start = i; break; }
+  }
+  assert.ok(start >= 0, '_appendChatMessageDom not found');
+  const body = lines.slice(start, start + 50).join('\n');
+  assert.ok(/_insertChronological\(list,\s*node/.test(body),
+    '_appendChatMessageDom no longer calls _insertChronological — live menu/chat arrivals will land at the wrong position when other rows pre-date them.');
+});
+
 t('agent-replay wipe-loop preserves chat-msg-from-agent bubbles only when re-creating them', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
   // Should mention removing chat-msg-from-agent on wipe (so the loop

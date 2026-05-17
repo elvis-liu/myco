@@ -1996,7 +1996,21 @@ function _appendChatMessageDom(message) {
   const node = _htmlToNode(html);
   if (!node) return;
   if (message.ts) node.dataset.ts = message.ts;
-  list.appendChild(node);
+  // 2026-05-17: chronological insertion. Plain appendChild() puts
+  // every live message at the end, but live arrival order ≠ message
+  // ts order — a delayed menu broadcast (claude asks permission AFTER
+  // some chrome activity already landed) used to plant the menu at
+  // the bottom even though its ts placed it earlier. Worse, a
+  // missing-or-stale data-ts on prior rows then made _resortChatPaneByTs
+  // float the menu to the TOP (user reported "permission result
+  // appeared before my input" on 2026-05-17 round 2). Always insert by
+  // ts so the live append matches the chronological order the post-
+  // resort would produce.
+  if (message.ts) {
+    _insertChronological(list, node, message.ts);
+  } else {
+    list.appendChild(node);
+  }
   scrollChatToLatest();
   _bindChatMenuClicks();
   // Mermaid runs only on the newly-appended node — existing SVGs (and
@@ -3375,7 +3389,16 @@ function renderChatMessage(m, isActiveMenu) {
   // line ('↗ Awaiting answer — open in popup' was retired); the row
   // itself is the affordance and gets `cursor: pointer` via CSS.
   const rowAttrs = (menuOpts && !isResolvedMenu) ? ' data-perm-reopen="1"' : '';
-  return `<div class="${cls}"${rowAttrs}>
+  // 2026-05-17: stamp data-ts directly in the markup so
+  // _resortChatPaneByTs always finds it, regardless of whether the
+  // post-render stamp loop in renderChatPane indexed this row
+  // correctly. Without this, a menu chat-msg with a missed stamp
+  // would have no data-ts and _resortChatPaneByTs would slot it to
+  // the TOP of the pane (no-ts sorts before all timestamps), making
+  // claude's permission-ask appear ABOVE prior chrome batches — the
+  // out-of-order rendering the user reported on 2026-05-17 round 2.
+  const tsAttr = m.ts ? ` data-ts="${escHtml(m.ts)}"` : '';
+  return `<div class="${cls}"${rowAttrs}${tsAttr}>
     <div class="chat-meta"><span class="chat-user">${escHtml(m.user || '?')}</span><span class="chat-ts">${escHtml(ts)}</span></div>
     ${textHtml}
     ${optsHtml}
