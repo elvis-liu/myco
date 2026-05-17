@@ -4217,6 +4217,47 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   font-size: 0.92rem;
   line-height: 1.55;
 }
+
+/* 2026-05-17 user-report (mobile): "the message is displayed as
+   part of the chrome batch". On mobile/narrow viewport, the
+   assistant_text card was visually merging with the chrome batches
+   above/below it because there was no whole-card framing — only
+   the inner body had the green wash. Add explicit margins +
+   a subtle background to the WHOLE card so it stands out as a
+   distinct "claude reply" bubble, never blendable with chrome.
+   The .agent-card-claude head kind also gets bolder + a chip
+   look so the "claude" label is unmistakable. */
+.agent-card.agent-card-assistant_text {
+  margin: 14px 0 !important;
+  padding: 10px 14px;
+  background: rgba(76, 175, 130, .04);
+  border-radius: 8px;
+  border-left: 3px solid var(--accent);
+}
+.agent-card.agent-card-assistant_text .agent-card-head {
+  margin-bottom: 4px;
+  opacity: 1;
+}
+.agent-card.agent-card-assistant_text .agent-card-claude {
+  background: rgba(76, 175, 130, .14);
+  color: rgba(76, 175, 130, 1);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+.agent-card.agent-card-assistant_text .agent-card-md {
+  background: transparent;
+  border-left: none;
+  padding: 0;
+}
+@media (max-width: 900px) {
+  .agent-card.agent-card-assistant_text {
+    margin: 16px 0 !important;
+    padding: 12px 14px;
+  }
+}
 /* tool_use input + tool_result preview — single subtle background so
    structured payloads stay visually distinct from surrounding prose. */
 .agent-card-tool-input {
