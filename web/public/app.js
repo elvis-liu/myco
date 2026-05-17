@@ -2467,6 +2467,13 @@ function clearChat() {
 function scrollChatToLatest() {
   const list = document.getElementById('chat-messages');
   if (!list) return;
+  // Fire BOTH synchronously and on the next rAF. Synchronous covers
+  // the case where the pane already has its final height (typical
+  // for re-render after a state change); rAF covers the case where
+  // the pane was display:none / 0-height at call time (initial
+  // mobile load, session-switch). Either path leaves the user at
+  // the latest message.
+  list.scrollTop = list.scrollHeight;
   requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
 }
 
@@ -3002,36 +3009,35 @@ function _ensureLoadOlderButton(list, hiddenCount) {
     btn.className = 'chat-load-older';
     btn.addEventListener('click', _revealOlderChat);
     list.insertBefore(btn, list.firstChild);
-    // Auto-load when the button scrolls into view: IntersectionObserver
-    // fires once the user reaches the top of #chat-messages, so a
-    // natural scroll-up gesture reveals more history without making
-    // them tap the button. The button is still clickable as a manual
-    // fallback (e.g. when the observer hasn't fired yet).
-    if (typeof IntersectionObserver !== 'undefined' && !list.dataset.olderObserver) {
-      list.dataset.olderObserver = '1';
-      const io = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting && entry.target.id === 'chat-load-older') {
-            _revealOlderChat();
-          }
-        }
-      }, { root: list, rootMargin: '64px 0px 0px 0px', threshold: 0.01 });
-      io.observe(btn);
-      // Stash so subsequent _ensureLoadOlderButton calls re-observe a
-      // freshly-inserted button (rare — the button is reused across
-      // renders, but renderChatPane's full wipe can drop it).
-      list._loadOlderObserver = io;
-    }
   } else if (btn !== list.firstChild) {
     // Keep it pinned at the top even after a fresh append shifted it.
     list.insertBefore(btn, list.firstChild);
   }
   btn.textContent = `Load older (${hiddenCount} hidden) — or scroll up`;
   btn.dataset.hiddenCount = String(hiddenCount);
-  // Re-observe in case the observer lost track (e.g. button was
-  // detached + re-inserted by renderChatPane).
-  if (list._loadOlderObserver) {
-    try { list._loadOlderObserver.observe(btn); } catch {}
+  // 2026-05-17: scroll-event trigger replaces IntersectionObserver.
+  // The observer was firing IMMEDIATELY on attach (because list.scrollTop
+  // starts at 0, the button at the top of the list IS in view) — that
+  // auto-triggered _revealOlderChat before the user did anything,
+  // and the chat-pane initial-scroll-to-bottom hadn't run yet. Now
+  // we listen for scroll events on the list and fire only when the
+  // user actively scrolls AND list.scrollTop is near 0.
+  if (!list.dataset.loadOlderScrollHandlerArmed) {
+    list.dataset.loadOlderScrollHandlerArmed = '1';
+    let userScrolledAtLeastOnce = false;
+    list.addEventListener('scroll', () => {
+      // Mark armed AFTER the first scroll so we don't fire on the
+      // synthetic scroll triggered by scrollChatToLatest on initial
+      // attach (which is "scrolled" from 0 to scrollHeight).
+      if (!userScrolledAtLeastOnce) {
+        userScrolledAtLeastOnce = true;
+        return;
+      }
+      if (list.scrollTop <= 64) {
+        const currentBtn = list.querySelector('#chat-load-older');
+        if (currentBtn && !currentBtn.disabled) _revealOlderChat();
+      }
+    }, { passive: true });
   }
 }
 
