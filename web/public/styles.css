@@ -527,6 +527,57 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   #no-session .ns-slogan {
     font-size: clamp(2rem, 11vw, 4rem);
   }
+  /* On mobile the sidebar IS the home page (full-screen). Hide the
+     terminal-pane slogan since it sits behind the sidebar; the
+     sidebar-slogan below picks up that role under the session cards. */
+  #no-session .ns-slogan { display: none; }
+}
+
+/* Sidebar slogan — only visible on mobile, sits as background
+   wallpaper below the session cards. Same low-contrast aesthetic
+   as the main-pane slogan but sized for the narrow sidebar column.
+   Absolutely positioned so it doesn't fight the existing scroll
+   layout (session-list flex:1) — it lives BEHIND the list at the
+   bottom of the sidebar. When the list is short, the slogan shows
+   through; when the list overflows + scrolls past it, the list
+   simply paints over. */
+#sidebar-slogan {
+  display: none;                  /* desktop: hidden */
+  user-select: none;
+  pointer-events: none;
+}
+@media (max-width: 900px) {
+  #sidebar-slogan {
+    display: block;
+    position: absolute;
+    /* Pin near the bottom, above the status bar. The status bar
+       sits at the bottom of #sidebar (last flex child) so the
+       slogan needs ~60px breathing room. */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 56px);
+    left: 0;
+    right: 0;
+    padding: 0 16px;
+    text-align: center;
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: clamp(1.6rem, 9vw, 3rem);
+    font-weight: 200;
+    letter-spacing: 0.02em;
+    line-height: 1.05;
+    color: rgba(255, 255, 255, .08);
+    background: linear-gradient(135deg,
+      rgba(76, 175, 130, .085) 0%,
+      rgba(255, 255, 255, .075) 50%,
+      rgba(76, 175, 130, .075) 100%);
+    -webkit-background-clip: text;
+            background-clip: text;
+    -webkit-text-fill-color: transparent;
+    z-index: 0;                   /* behind session cards */
+  }
+  /* Sidebar already is position:relative on mobile? Make sure so
+     the absolute slogan anchors to the sidebar, not the page. */
+  #sidebar { position: relative; }
+  /* Session-list paints over the slogan when long. */
+  #session-list { position: relative; z-index: 1; background: transparent; }
 }
 
 /* ── claude "waiting" indicator — minimalist three-dot typing animation.
