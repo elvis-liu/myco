@@ -714,6 +714,12 @@ const DEFAULT_CHAT_HISTORY_LIMIT = 50;
 //                      size window.
 //   opts.before        ISO ts — return only messages strictly older than
 //                      this. Used by the load-older paginator.
+//   opts.afterSeq      integer — return only messages with
+//                      meta.seq STRICTLY greater than this. Used by
+//                      the reconnect catch-up path: client passes
+//                      its last-seen seq, server returns only the
+//                      gap (no byte/limit truncation needed, since
+//                      the gap is bounded by what was missed).
 //   opts.includeAgent  boolean — when true, mirrored claude-text rows
 //                      (meta.fromAgent:true / meta.fromTranscript:true)
 //                      are INCLUDED in the result. Default false.
@@ -761,6 +767,12 @@ function getChatHistory(sessionId, opts) {
   if (opts.before) {
     const beforeTs = String(opts.before);
     filtered = filtered.filter((m) => m && m.ts && String(m.ts) < beforeTs);
+  }
+  if (typeof opts.afterSeq === 'number' && opts.afterSeq >= 0) {
+    // Catch-up window: only rows with seq strictly greater than the
+    // caller's last-seen seq. No byte/limit clamp afterward — the gap
+    // is bounded by what was actually missed.
+    filtered = filtered.filter((m) => m && m.meta && typeof m.meta.seq === 'number' && m.meta.seq > opts.afterSeq);
   }
   // Byte budget first — walks tail → head accumulating JSON-stringify
   // sizes; keeps the most-recent prefix that fits. ALWAYS keeps at

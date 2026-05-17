@@ -545,7 +545,14 @@ server.on('upgrade', (req, socket, head) => {
     }
   }
 
-  console.log(`[ws] upgrade request for session ${sessionId} readOnly=${readOnly} user=${user || '-'}`);
+  // Catch-up mode: ?afterSeq=N tells the server "I already have
+  // everything up to and including seq N; only ship me what's new."
+  // Used by the reconnect path so a brief WS drop doesn't force the
+  // full byte-budgeted replay.
+  const afterSeqRaw = url.searchParams.get('afterSeq');
+  const afterSeqNum = afterSeqRaw != null ? parseInt(String(afterSeqRaw), 10) : NaN;
+  const afterSeq = Number.isFinite(afterSeqNum) && afterSeqNum >= 0 ? afterSeqNum : null;
+  console.log(`[ws] upgrade request for session ${sessionId} readOnly=${readOnly} user=${user || '-'}${afterSeq != null ? ' afterSeq=' + afterSeq : ''}`);
   wss.handleUpgrade(req, socket, head, async (ws) => {
     startPing(ws);
     let session;
@@ -562,9 +569,9 @@ server.on('upgrade', (req, socket, head) => {
       // history of user/assistant/tool messages) + a docked live terminal-
       // tail panel that surfaces interactive prompts and intermediate state
       // that never make it into the transcript JSONL.
-      attachViewerWebSocket(session, ws, { user });
+      attachViewerWebSocket(session, ws, { user, afterSeq });
     } else {
-      attachWebSocket(session, ws, { readOnly, user });
+      attachWebSocket(session, ws, { readOnly, user, afterSeq });
     }
   });
 });
@@ -800,7 +807,7 @@ app.delete('/sessions/:id/file-chat', async (req, res) => {
 // (100) to keep the chat pane snappy on long sessions. Older messages
 // are fetched on demand by the client's "load older" button:
 //
-//   GET /sessions/:id/chat/history?before=<isoTs>&limit=<n>&includeAgent=1
+//   GET /sessions/:id/chat/history?before=<isoTs>&limit=<n>&includeAgent=1&afterSeq=<N>
 //
 //     before        — return messages with ts strictly less than this.
 //                     The client passes the oldest currently-rendered
@@ -818,6 +825,12 @@ app.delete('/sessions/:id/file-chat', async (req, res) => {
 //                     (events.jsonl / session.buffer only retain a
 //                     bounded tail, but rec.chat is durable up to
 //                     MAX_CHAT_MESSAGES).
+//     afterSeq      — integer; return only rows with meta.seq strictly
+//                     greater than this. Used by the reconnect catch-up
+//                     path so a client that briefly disconnected can
+//                     fetch JUST the messages it missed instead of the
+//                     byte-budgeted tail. limit/before are ignored in
+//                     this mode (the gap is bounded by what was missed).
 //
 // Response: { messages, total, hasMore }
 //   messages — oldest→newest within the window (matches the WS frame
@@ -835,12 +848,22 @@ app.get('/sessions/:id/chat/history', (req, res) => {
   if (!Number.isFinite(limit) || limit < 1) limit = sessionsMod.DEFAULT_CHAT_HISTORY_LIMIT;
   if (limit > 500) limit = 500;
   const includeAgent = req.query.includeAgent === '1' || req.query.includeAgent === 'true';
-  const opts = { before, limit, includeAgent };
+  // Catch-up mode: ?afterSeq=N short-circuits before/limit. Returns
+  // only rows the client hasn't seen yet, no truncation.
+  const afterSeqRaw = req.query.afterSeq;
+  const afterSeqNum = afterSeqRaw !== undefined ? parseInt(String(afterSeqRaw), 10) : NaN;
+  const afterSeq = Number.isFinite(afterSeqNum) && afterSeqNum >= 0 ? afterSeqNum : null;
+  const opts = afterSeq != null
+    ? { afterSeq, includeAgent }
+    : { before, limit, includeAgent };
   const window = sessionsMod.getChatHistory(ctx.id, opts);
   const total = sessionsMod.getChatHistoryLength(ctx.id, { includeAgent });
-  // hasMore = there's a message older than the window's oldest row.
+  // hasMore semantics:
+  //   - In afterSeq mode: false (catch-up returns the entire gap; no
+  //     older window to fetch).
+  //   - Otherwise: there's a message older than the window's oldest row.
   let hasMore = false;
-  if (window.length) {
+  if (afterSeq == null && window.length) {
     const oldestTs = window[0] && window[0].ts;
     if (oldestTs) {
       const earlier = sessionsMod.getChatHistory(ctx.id, { before: oldestTs, limit: 1, includeAgent });

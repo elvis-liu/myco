@@ -1089,6 +1089,9 @@ function _resetUiForNewSession(id) {
   state.permModalDismissed = false;
   state._lastPermQueueLen = 0;
   state._agentChatPaneArmed = false;         // re-arm auto-open for the next agent frame
+  // 2026-05-17 round 5: reset the seq-watermark so the first attach
+  // to a new session uses the byte-budget initial frames (no afterSeq).
+  state.lastSeenSeq = 0;
   // Hide the modal if it was open for the previous session.
   const modal = document.getElementById('perm-modal');
   if (modal) modal.hidden = true;
@@ -1127,11 +1130,31 @@ function _initOwnerXterm() {
 
 // Build the WS query string for /attach/:id. token authenticates owner
 // access; s carries the share token for viewer access. Both can be present.
-function _buildAttachQuery(isShared) {
+//
+// 2026-05-17 round 5 (catch-up reconnect): when opts.afterSeq is set
+// (set on reconnect, NOT on initial connect), append &afterSeq=N so
+// the server ships ONLY the gap — no byte-budget tail, no duplicate
+// rows. Bounded by what was missed during the disconnect window.
+function _buildAttachQuery(isShared, opts) {
+  opts = opts || {};
   const tokParam = state.token ? `token=${encodeURIComponent(state.token)}` : '';
   const shareParam = isShared && state.shareToken ? `s=${encodeURIComponent(state.shareToken)}` : '';
-  const qs = [tokParam, shareParam].filter(Boolean).join('&');
+  const afterSeqParam = (typeof opts.afterSeq === 'number' && opts.afterSeq >= 0)
+    ? `afterSeq=${opts.afterSeq}` : '';
+  const qs = [tokParam, shareParam, afterSeqParam].filter(Boolean).join('&');
   return qs ? `?${qs}` : '';
+}
+
+// Track the highest seq the client has rendered so the reconnect
+// path can ask for only-what-was-missed. Updated on every chat
+// frame, agent-event, agent-replay, chat-history. Reset on session
+// switch (back to 0 for a fresh session — initial attach uses the
+// byte-budget tail, not afterSeq).
+function _bumpLastSeenSeq(seq) {
+  if (typeof seq !== 'number' || !Number.isFinite(seq)) return;
+  if (typeof state.lastSeenSeq !== 'number' || seq > state.lastSeenSeq) {
+    state.lastSeenSeq = seq;
+  }
 }
 
 function openSession(id, opts = {}) {
@@ -1169,16 +1192,26 @@ function openSession(id, opts = {}) {
     try { showArtifactView('plan'); } catch {}
   }
 
-  // websocket with auto-reconnect. `connect` is closure-bound to `id` and
-  // `qs` so reconnect-after-close stays on this session; the `state.ws !==
+  // websocket with auto-reconnect. `connect` is closure-bound to `id`
+  // so reconnect-after-close stays on this session; the `state.ws !==
   // ws` guard inside the message handler also prevents stale-WS messages
   // from leaking into a freshly-switched session.
+  //
+  // 2026-05-17 round 5: catch-up on reconnect. First connect uses the
+  // standard byte-budget initial frames. Subsequent reconnects pass
+  // afterSeq=<state.lastSeenSeq> so the server ships ONLY events +
+  // chat rows the client missed during the disconnect window. The qs
+  // is rebuilt per-connect so a long-lived lastSeenSeq updates each
+  // time `connect()` re-fires.
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const qs = _buildAttachQuery(isShared);
+  let isReconnect = false;
   let reconnectDelay = 1000;
   const maxDelay = 15000;
 
   function connect() {
+    const qs = _buildAttachQuery(isShared, {
+      afterSeq: isReconnect && typeof state.lastSeenSeq === 'number' ? state.lastSeenSeq : undefined,
+    });
     const ws = new WebSocket(`${proto}://${location.host}/attach/${encodeURIComponent(id)}${qs}`);
     state.ws = ws;
 
@@ -1225,7 +1258,20 @@ function openSession(id, opts = {}) {
         // budget. Subsequent older windows fetched via GET
         // /sessions/:id/chat/history?before=&limit= (the load-
         // older button calls _fetchOlderChatFromServer).
-        applyChatHistory(msg.messages, msg.total);
+        //
+        // 2026-05-17 round 5: catch-up frame (msg.afterSeq set) means
+        // the server shipped only rows missed during the reconnect.
+        // Append them WITHOUT wiping state.chatMessages — they're
+        // additive to what's already rendered.
+        if (typeof msg.afterSeq === 'number') {
+          _applyCatchupChatHistory(msg.messages, msg.total);
+        } else {
+          applyChatHistory(msg.messages, msg.total);
+        }
+        // Track max seq seen so the next reconnect knows where to resume.
+        for (const m of (msg.messages || [])) {
+          if (m && m.meta) _bumpLastSeenSeq(m.meta.seq);
+        }
       } else if (msg.t === 'chat') {
         try {
           const m = msg.message || {};
@@ -1233,6 +1279,7 @@ function openSession(id, opts = {}) {
           const uuid = meta.transcriptUuid ? String(meta.transcriptUuid).slice(0, 8) : '-';
           console.log('[ws-chat] user=' + (m.user || '?') + ' uuid=' + uuid + ' kind=' + (meta.kind || '-') + ' textLen=' + (m.text ? m.text.length : 0));
         } catch {}
+        if (msg.message && msg.message.meta) _bumpLastSeenSeq(msg.message.meta.seq);
         appendChatMessage(msg.message);
       } else if (msg.t === 'claude-status') {
         // Live spinner-line readout from the server's headless terminal.
@@ -1278,6 +1325,13 @@ function openSession(id, opts = {}) {
         // event-log pane defined below — phase 3 will swap this for
         // a rich structured renderer.
         _handleAgentFrame(msg);
+        // Track max seq for catch-up reconnect.
+        if (msg.event && typeof msg.event.seq === 'number') _bumpLastSeenSeq(msg.event.seq);
+        if (Array.isArray(msg.events)) {
+          for (const ev of msg.events) {
+            if (ev && typeof ev.seq === 'number') _bumpLastSeenSeq(ev.seq);
+          }
+        }
       } else if (msg.t === 'exit') {
         state.term?.writeln('\r\n[session ended]');
       } else if (msg.t === 'error') {
@@ -1296,6 +1350,11 @@ function openSession(id, opts = {}) {
     ws.addEventListener('close', () => {
       if (state.activeId !== id) return; // switched session OR error cleared activeId
       showConnOverlay('Reconnecting', null, 'Restoring session…');
+      // 2026-05-17 round 5: flag the next connect as a reconnect so
+      // _buildAttachQuery appends ?afterSeq=<lastSeenSeq>. Initial
+      // open uses the byte-budget initial frames; reconnect uses
+      // catch-up.
+      isReconnect = true;
       setTimeout(() => {
         if (state.activeId === id) connect();
       }, reconnectDelay);
@@ -1610,6 +1669,37 @@ function _applyTimelineInit(msg) {
   _rescanPendingMenu();
   _renderPendingMenuCallout();
   scrollChatToLatest();
+}
+
+// 2026-05-17 round 5: catch-up chat-history (server response to
+// ?afterSeq=N). Append only — DO NOT wipe state.chatMessages, the
+// existing rows are correct and authoritative. Dedup by seq so a
+// race between the catch-up frame and a live `chat` frame doesn't
+// double-render. Renders each new row via _appendChatMessageDom.
+function _applyCatchupChatHistory(messages, total) {
+  if (!Array.isArray(messages) || !messages.length) {
+    if (typeof total === 'number') state.chatTotal = total;
+    return;
+  }
+  // Build a set of seqs already in state.chatMessages.
+  const seen = new Set();
+  for (const m of (state.chatMessages || [])) {
+    const s = m && m.meta && m.meta.seq;
+    if (typeof s === 'number') seen.add(s);
+  }
+  let appended = 0;
+  for (const m of messages) {
+    if (!m || !m.meta || typeof m.meta.seq !== 'number') continue;
+    if (seen.has(m.meta.seq)) continue;
+    seen.add(m.meta.seq);
+    // Use appendChatMessage so the state.chatMessages array stays
+    // canonical AND the DOM picks up the new bubble via the standard
+    // path (chronological insertion, menu-resolve handling, etc.).
+    appendChatMessage(m);
+    appended++;
+  }
+  if (typeof total === 'number') state.chatTotal = total;
+  if (appended > 0) console.log(`[catch-up] applied ${appended} chat-history row(s) (server total=${total})`);
 }
 
 function applyChatHistory(messages, total) {
@@ -3767,6 +3857,11 @@ function _handleAgentFrame(msg) {
     if (wrap && state._agentMainPaneShouldHide !== false) wrap.hidden = true;
   }
   if (msg.t === 'agent-replay' && Array.isArray(msg.events)) {
+    // 2026-05-17 round 5: catch-up mode. When msg.afterSeq is set,
+    // the server shipped only events the client missed during the
+    // last reconnect — the existing DOM is correct and should not
+    // be wiped. Just append the new events.
+    const isCatchup = typeof msg.afterSeq === 'number';
     // Every WS attach (initial AND every reconnect) re-sends the full
     // session.buffer. Without wiping the previously-rendered cards,
     // the second attach re-appends every event next to the existing
@@ -3779,7 +3874,7 @@ function _handleAgentFrame(msg) {
     // handled by applyChatHistory's preserve-and-rebuild path; this
     // mirrors that contract for the agent-event stream.
     const pane = _ensureAgentLogPane();
-    if (pane) {
+    if (pane && !isCatchup) {
       for (const el of [...pane.children]) {
         if (!el.classList) continue;
         // Preserve human chat-msg bubbles (applyChatHistory's

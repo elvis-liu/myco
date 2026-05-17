@@ -581,6 +581,115 @@ t('USER-SUGGESTION 2026-05-17: renderChatMessage emits data-seq when meta.seq is
     'renderChatMessage no longer emits data-seq attr — chat-msg rows lose seq-based ordering.');
 });
 
+// 2026-05-17 round 5: seq-based catch-up on reconnect.
+// User: "Want me to add the ?afterSeq=N catch-up route so reconnecting
+// devices fetch only missed messages?" → "yes".
+// Server adds afterSeq to getChatHistory + /chat/history route + WS
+// attach (?afterSeq=N → ship only the gap, no byte-budget tail).
+// Client tracks state.lastSeenSeq, includes it on reconnect.
+t('catch-up: getChatHistory({afterSeq:N}) returns only rows with seq > N', () => {
+  const sid = 'sess-catchup-1';
+  seed(sid);
+  const sessions = require('../server/src/sessions');
+  sessions.appendChatMessage(sid, { user: 'alice', text: 'a' });
+  sessions.appendChatMessage(sid, { user: 'alice', text: 'b' });
+  sessions.appendChatMessage(sid, { user: 'alice', text: 'c' });
+  sessions.appendChatMessage(sid, { user: 'alice', text: 'd' });
+  const all = chatOf(sid);
+  const cutoff = all[1].meta.seq;  // seq after 'b'
+  const gap = sessions.getChatHistory(sid, { afterSeq: cutoff });
+  // Default includeAgent=false; all rows here are human → all included.
+  assert.deepStrictEqual(gap.map((r) => r.text), ['c', 'd'],
+    `afterSeq=${cutoff} should return ['c','d'], got: ${JSON.stringify(gap.map((r) => r.text))}`);
+});
+
+t('catch-up: afterSeq=0 returns everything (no rows hidden)', () => {
+  const sid = 'sess-catchup-zero';
+  seed(sid);
+  const sessions = require('../server/src/sessions');
+  sessions.appendChatMessage(sid, { user: 'alice', text: 'x' });
+  sessions.appendChatMessage(sid, { user: 'alice', text: 'y' });
+  const all = sessions.getChatHistory(sid, { afterSeq: 0 });
+  assert.deepStrictEqual(all.map((r) => r.text), ['x', 'y']);
+});
+
+t('catch-up: afterSeq with includeAgent=true surfaces fromAgent rows in the gap', () => {
+  const sid = 'sess-catchup-agent';
+  seed(sid);
+  const sessions = require('../server/src/sessions');
+  sessions.appendChatMessage(sid, { user: 'alice',  text: 'q' });
+  sessions.appendChatMessage(sid, { user: 'claude', text: 'a', meta: { fromAgent: true } });
+  sessions.appendChatMessage(sid, { user: 'alice',  text: 'q2' });
+  const rows = chatOf(sid);
+  const after = rows[0].meta.seq;
+  const gap = sessions.getChatHistory(sid, { afterSeq: after, includeAgent: true });
+  assert.deepStrictEqual(gap.map((r) => r.text), ['a', 'q2']);
+});
+
+t('catch-up: server attach.js _shipAgentReplay accepts + applies afterSeq', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'attach.js'), 'utf8');
+  assert.ok(/_shipAgentReplay\(session, ws, sessionId, maxBytes, phase, afterSeq\)/.test(src),
+    '_shipAgentReplay signature no longer accepts afterSeq — catch-up mode broken.');
+  assert.ok(/events\.filter\(\(ev\)\s*=>\s*typeof ev\.seq === ['"]number['"] && ev\.seq > afterSeq\)/.test(src),
+    '_shipAgentReplay no longer filters buffer to events.seq > afterSeq — catch-up will ship the byte-budget tail again.');
+});
+
+t('catch-up: server attach.js _shipChatHistory accepts + applies afterSeq', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'attach.js'), 'utf8');
+  assert.ok(/_shipChatHistory\(ws, sessionId, maxBytes, phase, afterSeq\)/.test(src),
+    '_shipChatHistory signature no longer accepts afterSeq — catch-up mode broken.');
+  assert.ok(/getChatHistory\(sessionId, \{\s*afterSeq,\s*includeAgent:\s*true\s*\}\)/.test(src),
+    '_shipChatHistory no longer requests includeAgent=true in catch-up — fromAgent rows missed during disconnect will be invisible.');
+});
+
+t('catch-up: server WS upgrade parses afterSeq from url.searchParams', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'index.js'), 'utf8');
+  assert.ok(/url\.searchParams\.get\(['"]afterSeq['"]\)/.test(src),
+    'WS upgrade no longer reads afterSeq — client reconnects with ?afterSeq=N will be ignored.');
+  assert.ok(/attachWebSocket\(session, ws, \{[^}]*afterSeq[^}]*\}\)/.test(src),
+    'WS upgrade no longer forwards afterSeq into attachWebSocket opts.');
+});
+
+t('catch-up: HTTP /chat/history route accepts afterSeq query', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'src', 'index.js'), 'utf8');
+  assert.ok(/req\.query\.afterSeq/.test(src),
+    '/chat/history no longer reads afterSeq query param.');
+  assert.ok(/\{ afterSeq, includeAgent \}/.test(src),
+    '/chat/history no longer forwards afterSeq into getChatHistory opts.');
+});
+
+t('catch-up: client _buildAttachQuery appends afterSeq when reconnecting', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
+  assert.ok(/afterSeqParam\s*=.*opts\.afterSeq/.test(app),
+    'client _buildAttachQuery no longer emits afterSeq — reconnects can\'t request catch-up.');
+});
+
+t('catch-up: client tracks state.lastSeenSeq via _bumpLastSeenSeq', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
+  assert.ok(/_bumpLastSeenSeq\(seq\)/.test(app),
+    'client _bumpLastSeenSeq missing — lastSeenSeq watermark won\'t advance.');
+  assert.ok(/state\.lastSeenSeq\s*=\s*seq/.test(app),
+    'client _bumpLastSeenSeq no longer writes state.lastSeenSeq.');
+});
+
+t('catch-up: client agent-replay handler skips wipe when msg.afterSeq is set', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
+  // Find the agent-replay branch and verify the wipe is gated on !isCatchup.
+  const lines = app.split('\n');
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/msg\.t\s*===\s*['"]agent-replay['"]\s*&&\s*Array\.isArray\(msg\.events\)/.test(lines[i])) {
+      start = i; break;
+    }
+  }
+  assert.ok(start >= 0, 'agent-replay handler not found');
+  const branch = lines.slice(start, start + 50).join('\n');
+  assert.ok(/const isCatchup\s*=\s*typeof msg\.afterSeq === ['"]number['"]/.test(branch),
+    'agent-replay handler no longer detects catch-up frames — wipe will nuke previously-rendered cards on reconnect.');
+  assert.ok(/if\s*\(pane\s*&&\s*!isCatchup\)/.test(branch),
+    'agent-replay handler wipes pane even in catch-up mode — defeats the catch-up shape.');
+});
+
 t('USER-REPORT REGRESSION 2026-05-17 round 2: _appendChatMessageDom inserts chronologically (not appendChild)', () => {
   const app = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
   // Locate _appendChatMessageDom and assert it uses _insertChronological

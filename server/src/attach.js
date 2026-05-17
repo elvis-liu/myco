@@ -730,7 +730,12 @@ function _shipTimelineInit(session, ws, sessionId, chatBytes, eventBytes, includ
 // frame, once for the backfill ~200ms later. Same frame type both
 // times so the client's existing wipe-and-render handler in
 // _handleAgentFrame absorbs the second send transparently.
-function _shipAgentReplay(session, ws, sessionId, maxBytes, phase) {
+// 2026-05-17 round 5: when `afterSeq` is set, short-circuit the
+// byte-budget logic and ship ONLY events with seq strictly greater
+// than afterSeq. Used by the reconnect catch-up path so a brief WS
+// drop doesn't force the full replay — the client already has
+// everything up to its last-seen seq, just send the gap.
+function _shipAgentReplay(session, ws, sessionId, maxBytes, phase, afterSeq) {
   if (!Array.isArray(session.buffer) || !session.buffer.length) return;
   if (ws.readyState !== ws.OPEN) return;
   // Dedup (bug-7 round 2).
@@ -746,6 +751,13 @@ function _shipAgentReplay(session, ws, sessionId, maxBytes, phase) {
   }
   if (dropped > 0 && phase === 'initial') {
     console.log(`[agent-replay] ${sessionId} dedup dropped ${dropped} duplicate event(s) from session.buffer of ${session.buffer.length} total — bug-7 backstop`);
+  }
+  // afterSeq catch-up mode: keep only seq > afterSeq, no byte-trim.
+  if (typeof afterSeq === 'number' && afterSeq >= 0) {
+    const gap = events.filter((ev) => typeof ev.seq === 'number' && ev.seq > afterSeq);
+    try { ws.send(JSON.stringify({ t: 'agent-replay', events: gap, afterSeq })); } catch {}
+    console.log(`[agent-replay] ${sessionId} ${phase} afterSeq=${afterSeq} → ${gap.length} event(s) (of ${events.length} in buffer)`);
+    return;
   }
   // Byte-trim (bug-9 round 3, parametrized by phase).
   let trimmed = events;
@@ -770,11 +782,29 @@ function _shipAgentReplay(session, ws, sessionId, maxBytes, phase) {
 // bug-9 round 4 — shared shipper for the chat-history WS frame.
 // Reads from rec.chat via getChatHistory({maxBytes}). Used twice on
 // attach: small initial frame + backfill.
-function _shipChatHistory(ws, sessionId, maxBytes, phase) {
+//
+// 2026-05-17 round 5: when `afterSeq` is set, short-circuit the
+// byte-budget logic and ship ONLY rows with meta.seq strictly greater
+// than afterSeq. Catch-up mode used by the reconnect path. includeAgent
+// is forced true in catch-up so fromAgent assistant_text rows reach
+// the client too (the live channel would have delivered them; on
+// reconnect they need to arrive via chat-history).
+function _shipChatHistory(ws, sessionId, maxBytes, phase, afterSeq) {
   if (ws.readyState !== ws.OPEN) return;
-  const history = sessionsMod.getChatHistory(sessionId, { maxBytes });
+  let history;
+  let total;
+  if (typeof afterSeq === 'number' && afterSeq >= 0) {
+    history = sessionsMod.getChatHistory(sessionId, { afterSeq, includeAgent: true });
+    total = sessionsMod.getChatHistoryLength(sessionId, { includeAgent: true });
+    try {
+      ws.send(JSON.stringify({ t: 'chat-history', messages: history, total, afterSeq }));
+      console.log(`[chat-history] ${sessionId} ${phase} afterSeq=${afterSeq} → ${history.length} row(s) of ${total} total`);
+    } catch {}
+    return;
+  }
+  history = sessionsMod.getChatHistory(sessionId, { maxBytes });
   if (!history.length) return;
-  const total = sessionsMod.getChatHistoryLength(sessionId);
+  total = sessionsMod.getChatHistoryLength(sessionId);
   try {
     ws.send(JSON.stringify({ t: 'chat-history', messages: history, total }));
     console.log(`[chat-history] ${sessionId} ${phase} sent ${history.length} of ${total} message(s) within ${maxBytes}-byte budget`);
@@ -784,17 +814,28 @@ function _shipChatHistory(ws, sessionId, maxBytes, phase) {
 function _attachAgentWebSocket(session, ws, opts = {}) {
   const user = opts.user || null;
   const sessionId = session.sessionId;
+  // 2026-05-17 round 5: catch-up mode. If the client (typically a
+  // reconnecting tab) passed ?afterSeq=N, ship only events + chat
+  // rows with seq strictly greater than N. Skips byte budgets
+  // entirely — the gap is bounded by what was missed during the
+  // disconnect window. Lossless catch-up with no duplicate render.
+  const afterSeq = typeof opts.afterSeq === 'number' && opts.afterSeq >= 0 ? opts.afterSeq : null;
 
-  // bug-9 round 6.1 (revert to round-5 shape after round-6 lost
-  // claude-output history rendering): keep the separate
-  // chat-history + agent-replay frames. The client's existing
-  // agent-replay handler arms the chat pane (state._agentChatPane
-  // Armed) AND wipes stale agent cards in one step — paths that
-  // _applyTimelineInit silently skipped. The order-on-tab-switch
-  // concern is handled by the client-side _resortChatPaneByTs
-  // defensive sort (added in round-5 and still in place).
-  _shipAgentReplay(session, ws, sessionId, INITIAL_AGENT_REPLAY_BYTES, 'initial');
-  _shipChatHistory(ws, sessionId, sessionsMod.INITIAL_CHAT_HISTORY_BYTES, 'initial');
+  if (afterSeq != null) {
+    _shipAgentReplay(session, ws, sessionId, 0, 'catch-up', afterSeq);
+    _shipChatHistory(ws, sessionId, 0, 'catch-up', afterSeq);
+  } else {
+    // bug-9 round 6.1 (revert to round-5 shape after round-6 lost
+    // claude-output history rendering): keep the separate
+    // chat-history + agent-replay frames. The client's existing
+    // agent-replay handler arms the chat pane (state._agentChatPane
+    // Armed) AND wipes stale agent cards in one step — paths that
+    // _applyTimelineInit silently skipped. The order-on-tab-switch
+    // concern is handled by the client-side _resortChatPaneByTs
+    // defensive sort (added in round-5 and still in place).
+    _shipAgentReplay(session, ws, sessionId, INITIAL_AGENT_REPLAY_BYTES, 'initial');
+    _shipChatHistory(ws, sessionId, sessionsMod.INITIAL_CHAT_HISTORY_BYTES, 'initial');
+  }
   console.log(`[agent-attach] ${sessionId} user=${user || 'unknown'} mode=agent replay-events=${(session.buffer || []).length} sdk-session=${session.sdkSessionId || 'none'}`);
   if (session.sdkSessionId && !session._iterating && (!session.buffer || !session.buffer.length)) {
     console.log(`[agent-resume] ${sessionId} ready to resume sdk-session=${session.sdkSessionId} on next user message`);
@@ -962,10 +1003,16 @@ function _sendAttachSnapshot(session, ws) {
 function attachViewerWebSocket(session, ws, opts = {}) {
   const user = opts.user || null;
   const sessionId = session.sessionId;
+  const afterSeq = typeof opts.afterSeq === 'number' && opts.afterSeq >= 0 ? opts.afterSeq : null;
 
   // bug-9 round 6.1 (revert): viewers get the chat-history frame
   // only — they don't subscribe to agent events.
-  _shipChatHistory(ws, sessionId, sessionsMod.INITIAL_CHAT_HISTORY_BYTES, 'initial');
+  // 2026-05-17 round 5: catch-up mode honored for viewers too.
+  if (afterSeq != null) {
+    _shipChatHistory(ws, sessionId, 0, 'catch-up', afterSeq);
+  } else {
+    _shipChatHistory(ws, sessionId, sessionsMod.INITIAL_CHAT_HISTORY_BYTES, 'initial');
+  }
   _sendAttachSnapshot(session, ws);
 
   const onChat = (message) => {
