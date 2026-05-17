@@ -271,16 +271,19 @@ t('USER-REPORT REGRESSION 2026-05-17: chrome batches across assistant_text cards
   assert.strictEqual(chromeB.dataset.chromeCount, '1', 'chromeB count unchanged');
 });
 
-t('static guard: merge call lives BEFORE the cards.length <= CHAT_VISIBLE_LIMIT early return', () => {
-  // bug-10 round 2 regression: the original placement of the merge
-  // call was below the `if (cards.length <= CHAT_VISIBLE_LIMIT) return;`
-  // early-return, which silently skipped the merge for every chat
-  // under 50 cards (the common case). User reproduced 5 stacked
-  // `× N perm asked · Bash` rows on a chat with 6 batches; fix lifts
-  // the call to the TOP of _enforceChatHistoryCap so it always fires.
+t('static guard: load-older button is computed regardless of CHAT_VISIBLE_LIMIT (2026-05-17 fix)', () => {
+  // 2026-05-17 user-report regression: the original
+  // _enforceChatHistoryCap had `if (cards.length <= CHAT_VISIBLE_LIMIT)
+  // return;` BEFORE the serverPending+archived load-older computation
+  // — so when DOM had < 50 cards (the common case), the load-older
+  // button was never created, even when the server had hundreds of
+  // unfetched messages on disk. User reported: "scroll up doesn't
+  // seem to trigger loading more history records" because the
+  // IntersectionObserver had no button to fire against.
+  //
+  // Fix: drop the early return; always compute serverPending and
+  // call _ensureLoadOlderButton when it's non-zero.
   const src = fs.readFileSync(path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
-  // Extract the function body via a brace-balanced scan so we can
-  // reason about ordering inside it.
   const sigIdx = src.indexOf('function _enforceChatHistoryCap');
   assert.ok(sigIdx >= 0, '_enforceChatHistoryCap not found in app.js');
   const bodyStart = src.indexOf('{', sigIdx);
@@ -293,12 +296,14 @@ t('static guard: merge call lives BEFORE the cards.length <= CHAT_VISIBLE_LIMIT 
   }
   assert.ok(bodyEnd > 0, 'could not find _enforceChatHistoryCap body end');
   const body = src.slice(sigIdx, bodyEnd + 1);
-  const mergeIdx = body.indexOf('_mergeIdenticalChromeBatches(list)');
-  const earlyReturnIdx = body.search(/if \(cards\.length <= CHAT_VISIBLE_LIMIT\)/);
-  assert.ok(mergeIdx > 0, '_mergeIdenticalChromeBatches call missing inside _enforceChatHistoryCap');
-  assert.ok(earlyReturnIdx > 0, 'CHAT_VISIBLE_LIMIT early-return guard missing — has the function shape changed?');
-  assert.ok(mergeIdx < earlyReturnIdx,
-    'merge call must appear BEFORE the cards.length <= CHAT_VISIBLE_LIMIT early return — otherwise it never fires for chats under 50 cards, the common case (user repro: 6 batches, merge silently skipped)');
+  // Old early-return pattern must be gone.
+  assert.ok(!/if \(cards\.length <= CHAT_VISIBLE_LIMIT\)\s*\{[^}]*return;/.test(body),
+    'CHAT_VISIBLE_LIMIT early-return is back — load-older button will be silently skipped when DOM has < 50 cards, even though server has more rows on disk. Re-introduces user-reported "scroll up doesn\'t trigger loading more history" bug.');
+  // The load-older calculation must still be present.
+  assert.ok(/_ensureLoadOlderButton\(list,\s*total\)/.test(body),
+    '_ensureLoadOlderButton call missing — load-older button never created.');
+  assert.ok(/serverPending\s*=\s*Math\.max\(0,\s*\(state\.chatTotal/.test(body),
+    'serverPending computation missing — scroll-up won\'t know about server-side unfetched rows.');
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

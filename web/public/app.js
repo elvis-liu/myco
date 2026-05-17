@@ -2626,35 +2626,34 @@ function _enforceChatHistoryCap() {
     for (let i = 0; i < drop; i++) cards[i].remove();
     cards = cards.slice(drop);
   }
-  if (cards.length <= CHAT_VISIBLE_LIMIT) {
-    const btn = list.querySelector('#chat-load-older');
-    if (btn) btn.remove();
-    return;
-  }
-  // Auto-archive cards beyond the visible window — but NEVER archive
-  // a card the user has already explicitly revealed (data-revealed).
-  // Without this guard, a fresh appendAgentEvent re-hides the rows
-  // the user just clicked "Load older" to see.
-  const overflow = cards.length - CHAT_VISIBLE_LIMIT;
+  // 2026-05-17 bug fix: compute archived + serverPending BEFORE the
+  // early-return. The old logic short-circuited when cards.length <=
+  // CHAT_VISIBLE_LIMIT (the common case), which removed the load-
+  // older button even when the server had more messages on disk
+  // that the initial 1KB chat-history frame omitted. User report:
+  // "scroll up doesn't seem to trigger loading more history records"
+  // — the IntersectionObserver had no button to fire against because
+  // _ensureLoadOlderButton was never called.
+  const overflow = Math.max(0, cards.length - CHAT_VISIBLE_LIMIT);
   let archived = 0;
   for (let i = 0; i < cards.length; i++) {
     const c = cards[i];
     if (i < overflow && !c.dataset.revealed) {
       c.classList.add('chat-msg-archived');
       // Strip heavy DOM (mermaid SVGs, hljs token trees) from the
-      // card to drop its memory footprint while it's hidden. Done
-      // once per card via the dataset.stripped flag; safe because
-      // archived cards aren't rendered or interacted with.
+      // card to drop its memory footprint while it's hidden.
       _stripArchivedCard(c);
       archived++;
     } else {
       c.classList.remove('chat-msg-archived');
     }
   }
-  // bug-9: server may still have older messages that the initial
-  // chat-history frame omitted (capped at DEFAULT_CHAT_HISTORY_LIMIT).
-  // Add that gap to the load-older count so the user sees one button
-  // covering both "locally hidden" + "still on server".
+  // serverPending = rows the server has on disk that the client
+  // hasn't pulled yet. Initial chat-history frame is capped at
+  // INITIAL_CHAT_HISTORY_BYTES=1KB and DEFAULT_CHAT_HISTORY_LIMIT=50,
+  // so a long session can leave hundreds of rows on the server. The
+  // load-older button surfaces both: archived (locally hidden) +
+  // serverPending (never received).
   const serverPending = Math.max(0, (state.chatTotal || 0) - state.chatMessages.length);
   const total = archived + serverPending;
   if (total > 0) {
@@ -2983,6 +2982,12 @@ function _stripArchivedCard(card) {
 
 function _ensureLoadOlderButton(list, hiddenCount) {
   let btn = list.querySelector('#chat-load-older');
+  const isNew = !btn;
+  try {
+    console.log('[diag-load-older] ensure: hiddenCount=' + hiddenCount + ' isNew=' + isNew
+      + ' state.chatMessages=' + (state.chatMessages || []).length
+      + ' state.chatTotal=' + (state.chatTotal || 0));
+  } catch {}
   if (!btn) {
     btn = document.createElement('button');
     btn.id = 'chat-load-older';
@@ -3027,6 +3032,10 @@ function _revealOlderChat() {
   const list = document.getElementById('chat-messages');
   if (!list) return;
   const archived = Array.from(list.querySelectorAll('.chat-msg-archived'));
+  try {
+    const serverPending = Math.max(0, (state.chatTotal || 0) - (state.chatMessages || []).length);
+    console.log('[diag-load-older] reveal: archived=' + archived.length + ' serverPending=' + serverPending);
+  } catch {}
   if (!archived.length) {
     // bug-9: no more locally-archived cards to reveal — but the
     // server may still have older messages we never received
