@@ -1089,9 +1089,6 @@ function _resetUiForNewSession(id) {
   state.permModalDismissed = false;
   state._lastPermQueueLen = 0;
   state._agentChatPaneArmed = false;         // re-arm auto-open for the next agent frame
-  // 2026-05-17 round 5: reset the seq-watermark so the first attach
-  // to a new session uses the byte-budget initial frames (no afterSeq).
-  state.lastSeenSeq = 0;
   // Hide the modal if it was open for the previous session.
   const modal = document.getElementById('perm-modal');
   if (modal) modal.hidden = true;
@@ -1130,31 +1127,11 @@ function _initOwnerXterm() {
 
 // Build the WS query string for /attach/:id. token authenticates owner
 // access; s carries the share token for viewer access. Both can be present.
-//
-// 2026-05-17 round 5 (catch-up reconnect): when opts.afterSeq is set
-// (set on reconnect, NOT on initial connect), append &afterSeq=N so
-// the server ships ONLY the gap — no byte-budget tail, no duplicate
-// rows. Bounded by what was missed during the disconnect window.
-function _buildAttachQuery(isShared, opts) {
-  opts = opts || {};
+function _buildAttachQuery(isShared) {
   const tokParam = state.token ? `token=${encodeURIComponent(state.token)}` : '';
   const shareParam = isShared && state.shareToken ? `s=${encodeURIComponent(state.shareToken)}` : '';
-  const afterSeqParam = (typeof opts.afterSeq === 'number' && opts.afterSeq >= 0)
-    ? `afterSeq=${opts.afterSeq}` : '';
-  const qs = [tokParam, shareParam, afterSeqParam].filter(Boolean).join('&');
+  const qs = [tokParam, shareParam].filter(Boolean).join('&');
   return qs ? `?${qs}` : '';
-}
-
-// Track the highest seq the client has rendered so the reconnect
-// path can ask for only-what-was-missed. Updated on every chat
-// frame, agent-event, agent-replay, chat-history. Reset on session
-// switch (back to 0 for a fresh session — initial attach uses the
-// byte-budget tail, not afterSeq).
-function _bumpLastSeenSeq(seq) {
-  if (typeof seq !== 'number' || !Number.isFinite(seq)) return;
-  if (typeof state.lastSeenSeq !== 'number' || seq > state.lastSeenSeq) {
-    state.lastSeenSeq = seq;
-  }
 }
 
 function openSession(id, opts = {}) {
@@ -1196,13 +1173,6 @@ function openSession(id, opts = {}) {
   // `qs` so reconnect-after-close stays on this session; the `state.ws !==
   // ws` guard inside the message handler also prevents stale-WS messages
   // from leaking into a freshly-switched session.
-  //
-  // 2026-05-17 round 5 REVERTED (06:10): the client-side auto-catch-up
-  // (sending ?afterSeq=<lastSeenSeq> on every reconnect) was disabled
-  // after a user-reported input regression. The server-side afterSeq
-  // support stays in place (HTTP /chat/history?afterSeq=N + WS
-  // ?afterSeq=N) for explicit callers; the client just always uses
-  // the standard byte-budget initial frames on reconnect.
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const qs = _buildAttachQuery(isShared);
   let reconnectDelay = 1000;
@@ -1255,20 +1225,7 @@ function openSession(id, opts = {}) {
         // budget. Subsequent older windows fetched via GET
         // /sessions/:id/chat/history?before=&limit= (the load-
         // older button calls _fetchOlderChatFromServer).
-        //
-        // 2026-05-17 round 5: catch-up frame (msg.afterSeq set) means
-        // the server shipped only rows missed during the reconnect.
-        // Append them WITHOUT wiping state.chatMessages — they're
-        // additive to what's already rendered.
-        if (typeof msg.afterSeq === 'number') {
-          _applyCatchupChatHistory(msg.messages, msg.total);
-        } else {
-          applyChatHistory(msg.messages, msg.total);
-        }
-        // Track max seq seen so the next reconnect knows where to resume.
-        for (const m of (msg.messages || [])) {
-          if (m && m.meta) _bumpLastSeenSeq(m.meta.seq);
-        }
+        applyChatHistory(msg.messages, msg.total);
       } else if (msg.t === 'chat') {
         try {
           const m = msg.message || {};
@@ -1276,7 +1233,6 @@ function openSession(id, opts = {}) {
           const uuid = meta.transcriptUuid ? String(meta.transcriptUuid).slice(0, 8) : '-';
           console.log('[ws-chat] user=' + (m.user || '?') + ' uuid=' + uuid + ' kind=' + (meta.kind || '-') + ' textLen=' + (m.text ? m.text.length : 0));
         } catch {}
-        if (msg.message && msg.message.meta) _bumpLastSeenSeq(msg.message.meta.seq);
         appendChatMessage(msg.message);
       } else if (msg.t === 'claude-status') {
         // Live spinner-line readout from the server's headless terminal.
@@ -1322,13 +1278,6 @@ function openSession(id, opts = {}) {
         // event-log pane defined below — phase 3 will swap this for
         // a rich structured renderer.
         _handleAgentFrame(msg);
-        // Track max seq for catch-up reconnect.
-        if (msg.event && typeof msg.event.seq === 'number') _bumpLastSeenSeq(msg.event.seq);
-        if (Array.isArray(msg.events)) {
-          for (const ev of msg.events) {
-            if (ev && typeof ev.seq === 'number') _bumpLastSeenSeq(ev.seq);
-          }
-        }
       } else if (msg.t === 'exit') {
         state.term?.writeln('\r\n[session ended]');
       } else if (msg.t === 'error') {
@@ -1661,37 +1610,6 @@ function _applyTimelineInit(msg) {
   _rescanPendingMenu();
   _renderPendingMenuCallout();
   scrollChatToLatest();
-}
-
-// 2026-05-17 round 5: catch-up chat-history (server response to
-// ?afterSeq=N). Append only — DO NOT wipe state.chatMessages, the
-// existing rows are correct and authoritative. Dedup by seq so a
-// race between the catch-up frame and a live `chat` frame doesn't
-// double-render. Renders each new row via _appendChatMessageDom.
-function _applyCatchupChatHistory(messages, total) {
-  if (!Array.isArray(messages) || !messages.length) {
-    if (typeof total === 'number') state.chatTotal = total;
-    return;
-  }
-  // Build a set of seqs already in state.chatMessages.
-  const seen = new Set();
-  for (const m of (state.chatMessages || [])) {
-    const s = m && m.meta && m.meta.seq;
-    if (typeof s === 'number') seen.add(s);
-  }
-  let appended = 0;
-  for (const m of messages) {
-    if (!m || !m.meta || typeof m.meta.seq !== 'number') continue;
-    if (seen.has(m.meta.seq)) continue;
-    seen.add(m.meta.seq);
-    // Use appendChatMessage so the state.chatMessages array stays
-    // canonical AND the DOM picks up the new bubble via the standard
-    // path (chronological insertion, menu-resolve handling, etc.).
-    appendChatMessage(m);
-    appended++;
-  }
-  if (typeof total === 'number') state.chatTotal = total;
-  if (appended > 0) console.log(`[catch-up] applied ${appended} chat-history row(s) (server total=${total})`);
 }
 
 function applyChatHistory(messages, total) {
@@ -2078,31 +1996,7 @@ function _appendChatMessageDom(message) {
   const node = _htmlToNode(html);
   if (!node) return;
   if (message.ts) node.dataset.ts = message.ts;
-  // 2026-05-17 round 3: stamp data-seq (server-allocated monotonic
-  // counter) for sort-by-seq. data-seq takes precedence over data-ts
-  // in _insertChronological + _resortChatPaneByTs.
-  if (message.meta && typeof message.meta.seq === 'number') {
-    node.dataset.seq = String(message.meta.seq);
-  }
-  // Chronological insertion. Plain appendChild() puts every live
-  // message at the end, but live arrival order ≠ message order — a
-  // delayed menu broadcast used to plant at the bottom even when its
-  // seq placed it earlier. _insertChronological prefers seq when set.
-  //
-  // 2026-05-17 round 5: wrap in try/catch + always-append fallback so
-  // a bug in chronological insertion can NEVER swallow a live message.
-  // Symptom this guards against: user types "hi", Enter — message
-  // doesn't appear, can't tell if it sent.
-  let inserted = false;
-  if (message.ts || (message.meta && typeof message.meta.seq === 'number')) {
-    try {
-      _insertChronological(list, node, message.ts);
-      inserted = node.parentNode === list;
-    } catch (err) {
-      console.error('[appendChatMessage] _insertChronological failed:', err);
-    }
-  }
-  if (!inserted) list.appendChild(node);
+  list.appendChild(node);
   scrollChatToLatest();
   _bindChatMenuClicks();
   // Mermaid runs only on the newly-appended node — existing SVGs (and
@@ -2589,40 +2483,22 @@ function scrollChatToLatest() {
 function _resortChatPaneByTs() {
   const list = document.getElementById('chat-messages');
   if (!list) return;
-  // Snapshot children + their seq/ts. Skip the load-older button so
-  // it stays pinned at the top of the list. data-seq is the
-  // authoritative ordering key (server-stamped monotonic counter,
-  // see sessions.allocSeq); data-ts is the fallback when seq is
-  // missing (older buffer events, pre-seq sessions).
+  // Snapshot children + their ts. Skip the load-older button so it
+  // stays pinned at the top of the list.
   const loadOlder = list.querySelector('#chat-load-older');
   const items = [];
   for (const el of list.children) {
     if (el === loadOlder) continue;
-    const seqStr = el.dataset && el.dataset.seq;
-    const seq = seqStr != null && seqStr !== '' ? parseInt(seqStr, 10) : null;
-    items.push({
-      el,
-      seq: Number.isFinite(seq) ? seq : null,
-      ts: el.dataset && el.dataset.ts ? el.dataset.ts : '',
-    });
+    items.push({ el, ts: el.dataset && el.dataset.ts ? el.dataset.ts : '' });
   }
   if (items.length < 2) return;
-  // Decorate with original index so the sort is stable: equal-key
+  // Decorate with original index so the sort is stable: equal-ts
   // elements keep their relative order.
   for (let i = 0; i < items.length; i++) items[i].idx = i;
   items.sort((a, b) => {
-    // Prefer seq when both sides have one — it's the authoritative
-    // monotonic ordering (immune to clock drift).
-    if (a.seq != null && b.seq != null) {
-      if (a.seq === b.seq) return a.idx - b.idx;
-      return a.seq - b.seq;
-    }
-    // Mixed seq/no-seq: rows WITH seq are newer than rows without
-    // (seq was introduced 2026-05-17; pre-seq rows are older).
-    if (a.seq != null && b.seq == null) return 1;
-    if (a.seq == null && b.seq != null) return -1;
-    // Both no-seq: fall back to ts. No-ts elements sort to the TOP
-    // (legacy behavior — chrome rows / pre-history).
+    // No-ts elements sort to the TOP (they're either pre-history or
+    // chrome rows whose ts couldn't be determined; keeping them at
+    // the front preserves the existing visual hierarchy).
     if (!a.ts && b.ts) return -1;
     if (a.ts && !b.ts) return 1;
     if (a.ts === b.ts) return a.idx - b.idx;
@@ -2645,39 +2521,15 @@ function _resortChatPaneByTs() {
 function _insertChronological(list, el, ts) {
   if (!list || !el) return;
   if (ts) el.dataset.ts = ts;
-  // Prefer numeric seq when set on the inserting element (server-
-  // stamped monotonic counter). Fall back to ts string comparison
-  // when seq is missing. Matches _resortChatPaneByTs's comparator.
-  const seqStr = el.dataset && el.dataset.seq;
-  const elSeq = seqStr != null && seqStr !== '' ? parseInt(seqStr, 10) : null;
   const tsStr = el.dataset.ts || '';
-  if (elSeq == null && !tsStr) { list.appendChild(el); return; }
+  if (!tsStr) { list.appendChild(el); return; }
   const children = list.children;
   for (let i = children.length - 1; i >= 0; i--) {
     const c = children[i];
     if (c === el) continue;
     if (c.id === 'chat-load-older') continue;
-    const cSeqStr = c.dataset && c.dataset.seq;
-    const cSeq = cSeqStr != null && cSeqStr !== '' ? parseInt(cSeqStr, 10) : null;
-    let cmp = null;   // -1 / 0 / +1 — cmp(c, el): c older → -1, c newer → +1
-    if (cSeq != null && elSeq != null) {
-      cmp = cSeq < elSeq ? -1 : (cSeq > elSeq ? 1 : 0);
-    } else if (cSeq != null && elSeq == null) {
-      // c has seq, el doesn't → el is older (pre-seq legacy)
-      cmp = 1;
-    } else if (cSeq == null && elSeq != null) {
-      // c doesn't have seq, el does → c is older
-      cmp = -1;
-    } else {
-      // Both no-seq, fall back to ts.
-      const cts = c.dataset.ts || '';
-      if (!cts && !tsStr) cmp = 0;
-      else if (!cts) cmp = -1;  // legacy no-ts sorts oldest
-      else if (!tsStr) cmp = 1;
-      else cmp = cts < tsStr ? -1 : (cts > tsStr ? 1 : 0);
-    }
-    if (cmp <= 0) {
-      // c is older-or-equal to el → insert el after c
+    const cts = c.dataset.ts || '';
+    if (!cts || cts <= tsStr) {
       const after = c.nextSibling;
       if (after) list.insertBefore(el, after); else list.appendChild(el);
       return;
@@ -3208,14 +3060,12 @@ async function _fetchOlderChatFromServer() {
   const btn = list ? list.querySelector('#chat-load-older') : null;
   if (btn) { btn.disabled = true; btn.textContent = 'Loading older…'; }
   try {
-    // includeAgent=1: pull the durable rec.chat mirror of claude's
-    // replies (meta.fromAgent:true rows). The initial chat-history WS
-    // frame on attach intentionally hides those to avoid duplicate-
-    // rendering against the live agent-event / agent-replay cards.
-    // Once the user has scrolled past what session.buffer kept (capped
-    // tail), fromAgent rows are the ONLY surviving record of older
-    // claude text — render them as plain chat bubbles. Server contract:
-    // see app.get('/sessions/:id/chat/history') in server/src/index.js.
+    // 2026-05-17: includeAgent=1 surfaces persisted claude-text rows
+    // (meta.fromAgent:true) that the initial WS chat-history frame
+    // intentionally filters out (to avoid duplicate-render against
+    // agent-replay cards while session.buffer is fresh). When scrolling
+    // past the agent-replay byte window, fromAgent rows are the only
+    // surviving record of older claude replies — surface them.
     const url = `/sessions/${encodeURIComponent(sid)}/chat/history`
       + `?before=${encodeURIComponent(oldest.ts)}&limit=${CHAT_LOAD_OLDER_BATCH}`
       + `&includeAgent=1`;
@@ -3285,35 +3135,17 @@ function renderChatPane(scrollToBottom = false) {
   }
   // Preserve non-chat-message children. The chat-pane DOM is shared
   // between two streams:
-  //   1. state.chatMessages → chat bubbles + menu rows (.chat-msg
-  //      WITHOUT the chat-msg-from-agent marker) → rebuilt from
-  //      state.chatMessages.
+  //   1. state.chatMessages → chat bubbles + menu rows (.chat-msg)
   //   2. agent-event stream → agent cards, turn footers, chrome
-  //      batches, load-older button, AND chat-msg-from-agent bubbles
-  //      (assistant_text reply rendered as chat-bubble — created by
-  //      _appendAgentEvent, NOT in state.chatMessages because
-  //      getChatHistory filters meta.fromAgent rows out by default).
-  //      These must be PRESERVED, not rebuilt.
+  //      batches, load-older button (NOT in state.chatMessages)
   // The old `list.innerHTML = …` wipe destroyed stream-2 content
   // every time chat-history arrived from the server — manifesting as
-  // "history disappears after refresh." Detach the preserved children,
-  // rebuild the .chat-msg list (human-only), then re-merge by ts so
+  // "history disappears after refresh." Detach the preserved
+  // children, rebuild the .chat-msg list, then re-merge by ts so
   // both streams interleave chronologically.
-  //
-  // 2026-05-17 fix (round 3): chat-msg-from-agent bubbles
-  // (assistant_text reply rendered as a bubble) MUST be preserved.
-  // Previously they fell into the "rebuilt" bucket because they
-  // matched the .chat-msg selector, but state.chatMessages doesn't
-  // include them — so they got wiped on every renderChatPane call
-  // with no source to rebuild from. Hence "switch tab loses recent
-  // claude reply": the assistant_text bubble is created by
-  // _appendAgentEvent on agent-replay, then the very next
-  // applyChatHistory (which fires every attach) wiped it.
   const preserve = [];
   for (const el of list.children) {
-    if (!el.classList) { preserve.push(el); continue; }
-    if (el.classList.contains('chat-msg-from-agent')) { preserve.push(el); continue; }   // agent-stream bubble — preserve
-    if (el.classList.contains('chat-msg')) continue;   // human chat bubble/menu → rebuilt
+    if (el.classList && el.classList.contains('chat-msg')) continue;   // chat bubble/menu → rebuilt
     preserve.push(el);
   }
   for (const el of preserve) el.remove();
@@ -3523,23 +3355,7 @@ function renderChatMessage(m, isActiveMenu) {
   // line ('↗ Awaiting answer — open in popup' was retired); the row
   // itself is the affordance and gets `cursor: pointer` via CSS.
   const rowAttrs = (menuOpts && !isResolvedMenu) ? ' data-perm-reopen="1"' : '';
-  // 2026-05-17: stamp data-ts directly in the markup so
-  // _resortChatPaneByTs always finds it, regardless of whether the
-  // post-render stamp loop in renderChatPane indexed this row
-  // correctly. Without this, a menu chat-msg with a missed stamp
-  // would have no data-ts and _resortChatPaneByTs would slot it to
-  // the TOP of the pane (no-ts sorts before all timestamps), making
-  // claude's permission-ask appear ABOVE prior chrome batches — the
-  // out-of-order rendering the user reported on 2026-05-17 round 2.
-  const tsAttr = m.ts ? ` data-ts="${escHtml(m.ts)}"` : '';
-  // 2026-05-17 round 3: data-seq (monotonic per-session sequence
-  // number stamped server-side by sessions.allocSeq) is the
-  // authoritative ordering key. Older messages without seq fall
-  // back to data-ts. _insertChronological + _resortChatPaneByTs
-  // prefer numeric seq when present on both sides of a comparison.
-  const seq = m.meta && typeof m.meta.seq === 'number' ? m.meta.seq : null;
-  const seqAttr = seq != null ? ` data-seq="${seq}"` : '';
-  return `<div class="${cls}"${rowAttrs}${tsAttr}${seqAttr}>
+  return `<div class="${cls}"${rowAttrs}>
     <div class="chat-meta"><span class="chat-user">${escHtml(m.user || '?')}</span><span class="chat-ts">${escHtml(ts)}</span></div>
     ${textHtml}
     ${optsHtml}
@@ -3859,11 +3675,6 @@ function _handleAgentFrame(msg) {
     if (wrap && state._agentMainPaneShouldHide !== false) wrap.hidden = true;
   }
   if (msg.t === 'agent-replay' && Array.isArray(msg.events)) {
-    // 2026-05-17 round 5: catch-up mode. When msg.afterSeq is set,
-    // the server shipped only events the client missed during the
-    // last reconnect — the existing DOM is correct and should not
-    // be wiped. Just append the new events.
-    const isCatchup = typeof msg.afterSeq === 'number';
     // Every WS attach (initial AND every reconnect) re-sends the full
     // session.buffer. Without wiping the previously-rendered cards,
     // the second attach re-appends every event next to the existing
@@ -3876,19 +3687,11 @@ function _handleAgentFrame(msg) {
     // handled by applyChatHistory's preserve-and-rebuild path; this
     // mirrors that contract for the agent-event stream.
     const pane = _ensureAgentLogPane();
-    if (pane && !isCatchup) {
+    if (pane) {
       for (const el of [...pane.children]) {
-        if (!el.classList) continue;
-        // Preserve human chat-msg bubbles (applyChatHistory's
-        // preserve-and-rebuild owns them) — those don't carry the
-        // chat-msg-from-agent marker. Wipe everything else:
-        //   - agent cards (tool_use / tool_result / chrome / fatal)
-        //   - chrome batches + turn footers + load-older button
-        //   - chat-msg-from-agent bubbles (assistant_text — these get
-        //     re-created from the agent-replay events loop below).
-        const isHumanChatMsg = el.classList.contains('chat-msg')
-          && !el.classList.contains('chat-msg-from-agent');
-        if (!isHumanChatMsg) el.remove();
+        if (!el.classList || !el.classList.contains('chat-msg')) {
+          el.remove();
+        }
       }
     }
     // bug-7 round 2: defensive dedup. If session.buffer itself contains
@@ -4253,63 +4056,23 @@ function _appendAgentEvent(ev) {
 
   // assistant_text — concatenate consecutive blocks into one rendered
   // markdown body so claude's narration reads as one continuous reply.
-  //
-  // 2026-05-17: switched the assistant_text DOM from `.agent-card.chat-msg-agent`
-  // to a real `.chat-msg.from-claude` bubble so claude's reply visually
-  // matches the user's bubble (avatar + ts + bubble styling) instead of
-  // hiding inside the agent-event chrome strip. The merge logic still
-  // operates on the bubble's `.chat-text` body via the same data-ev-type
-  // and data-assistant-text markers — consecutive assistant_text events
-  // append into the SAME bubble so streaming narrations read as one
-  // continuous reply (not 5 separate bubbles per turn).
   if (ev.type === 'assistant_text') {
     const prev = pane.lastElementChild;
     if (prev && prev.dataset && prev.dataset.evType === 'assistant_text') {
       const count = (parseInt(prev.dataset.combineCount || '1', 10)) + 1;
       prev.dataset.combineCount = String(count);
-      const body = prev.querySelector('.chat-text') || prev.querySelector('.agent-card-body');
+      const body = prev.querySelector('.agent-card-body');
       if (body) {
         const merged = (prev.dataset.assistantText || '') + '\n\n' + (ev.text || '');
         prev.dataset.assistantText = merged;
         body.innerHTML = renderMd(merged);
         renderMermaidInContainer(body).catch(() => {});
       }
+      // (No head-summary refresh: assistant_text head is just "<ts>
+      // claude" now, the body underneath is the live preview.)
       pane.scrollTop = pane.scrollHeight;
       return;
     }
-  }
-  // First assistant_text in a new streaming run: build a chat-msg
-  // bubble with `from-claude` styling. Carries data-ev-type +
-  // data-ts + data-seq + data-assistant-text so the merge branch
-  // above + the post-replay _resortChatPaneByTs can find / extend /
-  // sort it. data-seq is the authoritative ordering attribute (see
-  // sessions.js allocSeq); data-ts is a fallback when seq is missing
-  // (older buffer events / non-SDK sessions).
-  if (ev.type === 'assistant_text') {
-    const bubble = document.createElement('div');
-    bubble.className = 'chat-msg from-claude chat-msg-from-agent';
-    bubble.dataset.evType = 'assistant_text';
-    bubble.dataset.combineCount = '1';
-    bubble.dataset.assistantText = ev.text || '';
-    bubble.dataset.ts = ev.ts || new Date().toISOString();
-    if (typeof ev.seq === 'number') bubble.dataset.seq = String(ev.seq);
-    const meta = document.createElement('div');
-    meta.className = 'chat-meta';
-    meta.innerHTML = `<span class="chat-user">claude</span><span class="chat-ts">${escHtml(ts)}</span>`;
-    bubble.appendChild(meta);
-    const body = document.createElement('div');
-    body.className = 'chat-text';
-    body.innerHTML = renderMd(ev.text || '');
-    bubble.appendChild(body);
-    // Use chronological insertion (by seq if available, else ts) so
-    // streaming arrivals land in the right slot even if other rows
-    // pre-date them. Plain appendChild lands at end; that breaks
-    // ordering when chat-msg / chrome rows were rendered first.
-    _insertChronological(pane, bubble, bubble.dataset.ts);
-    renderMermaidInContainer(body).catch(() => {});
-    pane.scrollTop = pane.scrollHeight;
-    _enforceChatHistoryCap();
-    return;
   }
 
   const card = document.createElement('div');
@@ -4321,12 +4084,6 @@ function _appendAgentEvent(ev) {
   card.className = 'agent-card chat-msg-agent agent-card-' + (ev.type || 'unknown');
   card.dataset.evType = ev.type || 'unknown';
   card.dataset.combineCount = '1';
-  // 2026-05-17 round 3: stamp data-ts + data-seq on every agent card
-  // so _insertChronological + _resortChatPaneByTs can place it in the
-  // correct slot. data-seq (server-allocated monotonic counter) is
-  // the authoritative key when present; data-ts is the fallback.
-  if (ev.ts) card.dataset.ts = ev.ts;
-  if (typeof ev.seq === 'number') card.dataset.seq = String(ev.seq);
   const head = document.createElement('div');
   head.className = 'agent-card-head';
   head.innerHTML = `<span class="agent-card-ts">${escHtml(ts)}</span>`;
@@ -4335,11 +4092,20 @@ function _appendAgentEvent(ev) {
   body.className = 'agent-card-body';
   card.appendChild(body);
 
-  // Non-chrome events that survived to here: tool_use, tool_result,
-  // turn_result, fatal, and the catch-all "unknown" body.
-  // (assistant_text is handled by the chat-msg-bubble branch above and
-  // returns before reaching the agent-card fallback.)
-  if (ev.type === 'tool_use') {
+  // Non-chrome events that survived to here: assistant_text (first
+  // block of a new run — subsequent blocks merge above), tool_use,
+  // tool_result, turn_result, fatal, and the catch-all "unknown" body.
+  if (ev.type === 'assistant_text') {
+    // Head is just "<ts> claude" — the body renders the full markdown
+    // immediately below (assistant_text is in AGENT_DEFAULT_EXPANDED,
+    // so the body is visible without a click). The 120-char first-line
+    // preview was redundant with the body underneath.
+    head.innerHTML += `<span class="agent-card-kind agent-card-claude">claude</span>`;
+    body.className += ' agent-card-md';
+    body.innerHTML = renderMd(ev.text || '');
+    card.dataset.assistantText = ev.text || '';   // seed merge accumulator
+    renderMermaidInContainer(body).catch(() => {});
+  } else if (ev.type === 'tool_use') {
     const icon = _agentToolIcon(ev.name);
     const summary = _agentToolSummary(ev.name, ev.input);
     head.innerHTML += `<span class="agent-card-kind agent-card-tool">${escHtml(icon)} ${escHtml(ev.name)}</span>
@@ -4798,13 +4564,6 @@ function _createChromeBatch(ev, ts) {
   card.dataset.chromeCount = '1';
   card.dataset.firstTs = ts;
   card.dataset.lastTs = ts;
-  // 2026-05-17 round 3: stamp data-ts + data-seq so sort-by-seq
-  // (and ts fallback) place this chrome batch in chronological order.
-  // For batches, data-ts/data-seq track the FIRST event in the batch;
-  // _appendToChromeBatch keeps them as-is since batches anchor on
-  // their start position.
-  if (ev.ts) card.dataset.ts = ev.ts;
-  if (typeof ev.seq === 'number') card.dataset.seq = String(ev.seq);
   const head = document.createElement('div');
   head.className = 'agent-card-head';
   head.innerHTML =
