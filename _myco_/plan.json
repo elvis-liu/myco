@@ -610,19 +610,32 @@
       "id": "fr-9",
       "text": "**Problem:** The file explorer UX is thin — users can't see git change state at a glance or pull files out of the workspace.\n**Expected:** File explorer surfaces git-change decorators on modified/added/deleted entries and supports downloading files.\n**Actual:** No git decorators in the tree; files aren't downloadable from the explorer.",
       "layer": "Feature",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-16T15:31:49.445Z",
       "addedBy": "kkrazy",
       "source": "user",
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "az6me54qbtyq",
+          "user": "claude",
+          "ts": "2026-05-17T12:56:08.192Z",
+          "text": "✅ Implemented + tested + committed in c97576c.\n\nGit decorators: server/src/files.js _gitStatusMap() runs `git -C absRoot status --porcelain -uall` once per listDir, parses 2-char codes into M/A/D/R/C/U/?/! letters. _dirGitStatus() aggregates child status onto parents. Each listDir entry carries gitStatus when the workspace is a git repo (field omitted otherwise — zero overhead on non-git).\n\nClient renderGitStatusBadge() emits a colored chip (.ft-git-M / -A / -D / etc.) between the kind icon and filename, with conventional VCS coloring.\n\nDownload: new route GET /sessions/:id/file/download?path=&token= — same auth + safeJoin as the read route, streams raw bytes via res.sendFile with Content-Disposition: attachment;filename=\"<base>\". Client triggerFileDownload() creates an <a download> with the URL + token query param (browser native downloads can't send Bearer headers; userFromRequest already accepts ?token= for this case).\n\nPer-file ⬇ button on every file row (hover-visible desktop, opacity 0.5 on touch). Click stopPropagation so it doesn't also open the file viewer.\n\nTests: test/files-git-decorators.test.js (11 cases). Real git-tempdir fixture covering tracked-modified/staged-added/untracked/nested-aggregate/non-git paths + static guards on all the touch points. Wired into ./test.sh.\n\nDrive-by: bumped two stale chat-history-window.test.js assertions for this morning's 8KB initial / 1MB cap / state._scrolledBack changes.\n\nClosing.",
+          "meta": {
+            "kind": "run-summary",
+            "manual": true
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "improve the UX for the file explorer, add decorator for git changes, make files downloadable, etc.",
         "rewritten": true
-      }
+      },
+      "doneAt": "2026-05-17T12:56:08.192Z",
+      "doneBy": "kkrazy"
     },
     {
       "id": "fr-10",
