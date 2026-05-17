@@ -82,11 +82,10 @@ Static SPA — Express serves it with `Cache-Control: no-store`, so a tab refres
 
 | File | Lines | Responsibility |
 |------|------:|---------------|
-| `index.html` | — | Shell: sidebar (sessions), terminal pane, chat pane, modals |
-| `app.js` | 962 | State, auth, session list, terminal attach, chat, log panel, share-link viewer |
-| `keyboard.js` | 135 | Mobile soft keyboard (Esc / Esc-Esc / 1-3 / Enter, native-input toggle) |
+| `index.html` | — | Shell: sidebar (sessions), chat pane, artifact tabs (Plan / Arch / Test), file explorer, modals |
+| `app.js` | — | State, auth, session list, WS attach, chat rendering, agent-event rendering, file explorer, share-link viewer |
 | `styles.css` | — | Mobile-first layout, dark theme, mutually-exclusive sidebar/chatpane on mobile |
-| `vendor/xterm/*` | — | xterm.js + WebGL/Canvas/Fit addons (vendored from `node_modules` at install time) |
+| `vendor/*` | — | Vendored dependencies: marked (markdown), highlight.js, mermaid |
 
 ### CLI (`cli/`)
 
