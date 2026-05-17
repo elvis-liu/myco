@@ -777,6 +777,19 @@ function _shipAgentReplay(session, ws, sessionId, maxBytes, phase, afterSeq) {
     }
   }
   try { ws.send(JSON.stringify({ t: 'agent-replay', events: trimmed })); } catch {}
+  // 2026-05-17 diag: log every shipped assistant_text so we can
+  // verify the server is actually delivering claude replies on attach.
+  // If a user reports "claude reply disappeared after tab switch" and
+  // these logs DON'T list the expected text, the bug is server-side
+  // (buffer hydrate / seq filter / byte trim). If the logs DO list it,
+  // the bug is client-side (render path).
+  try {
+    const texts = trimmed.filter((e) => e.type === 'assistant_text')
+      .map((e) => ({ seq: e.seq, ts: e.ts, preview: String(e.text || '').replace(/\s+/g, ' ').slice(0, 30) }));
+    if (texts.length > 0) {
+      console.log(`[agent-replay-diag] ${sessionId} ${phase} shipped ${texts.length} assistant_text(s): ${JSON.stringify(texts)}`);
+    }
+  } catch {}
 }
 
 // bug-9 round 4 — shared shipper for the chat-history WS frame.

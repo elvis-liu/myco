@@ -4057,6 +4057,16 @@ function _appendAgentEvent(ev) {
   // assistant_text — concatenate consecutive blocks into one rendered
   // markdown body so claude's narration reads as one continuous reply.
   if (ev.type === 'assistant_text') {
+    // 2026-05-17 diag: trace assistant_text rendering on every fire so
+    // we can correlate against the user-reported "tab switch loses
+    // claude reply" symptom. Logs include ts + first 30 chars + the
+    // prev-element's evType so we can see whether merge or new-card
+    // branch fires.
+    try {
+      const prevType = (pane.lastElementChild && pane.lastElementChild.dataset && pane.lastElementChild.dataset.evType) || '(none)';
+      const preview = String(ev.text || '').replace(/\s+/g, ' ').slice(0, 30);
+      console.log('[diag-assistant-text] ts=' + ev.ts + ' seq=' + (ev.seq || '-') + ' prevType=' + prevType + ' text=' + JSON.stringify(preview));
+    } catch {}
     const prev = pane.lastElementChild;
     if (prev && prev.dataset && prev.dataset.evType === 'assistant_text') {
       const count = (parseInt(prev.dataset.combineCount || '1', 10)) + 1;
