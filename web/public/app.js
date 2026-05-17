@@ -4075,15 +4075,32 @@ function _appendAgentEvent(ev) {
     // merged into the pre-text batch.
     const prev = pane.lastElementChild;
     let batch;
-    if (prev && prev.dataset && prev.dataset.evType === '_chrome_batch') {
+    // 2026-05-17 user rule: "group msg of the same type only if they
+    // have consecutive seq # and of the same type". For chrome
+    // batches, "same type" = both chrome; "consecutive seq" =
+    // prev.lastSeq + 1 === ev.seq. The previous adjacency-only
+    // check ("is prev a chrome batch?") could fold a chrome event
+    // from turn N+2 into a chrome batch from turn N if no
+    // assistant_text rendered between them — adjacency in DOM
+    // doesn't imply adjacency in event order after the chrome-
+    // batch-merge or chronological re-sort steps run. The seq
+    // gap is the authoritative break-point.
+    const prevLastSeq = prev && prev.dataset && prev.dataset.lastSeq ? parseInt(prev.dataset.lastSeq, 10) : null;
+    const evSeq = typeof ev.seq === 'number' ? ev.seq : null;
+    const seqsConsecutive = Number.isFinite(prevLastSeq) && Number.isFinite(evSeq) && evSeq === prevLastSeq + 1;
+    if (prev && prev.dataset && prev.dataset.evType === '_chrome_batch' && seqsConsecutive) {
       _appendToChromeBatch(prev, ev, ts);
+      if (Number.isFinite(evSeq)) prev.dataset.lastSeq = String(evSeq);
       batch = prev;
     } else {
       batch = _createChromeBatch(ev, ts);
       if (ev.ts) batch.dataset.ts = ev.ts;
-      // 2026-05-17: chrome batches also carry data-seq for global
-      // ordering. Anchor on the batch's FIRST event's seq.
-      if (typeof ev.seq === 'number') batch.dataset.seq = String(ev.seq);
+      // Anchor on the batch's FIRST event's seq. lastSeq tracks the
+      // most-recently-merged seq for the consecutive-seq check above.
+      if (typeof ev.seq === 'number') {
+        batch.dataset.seq = String(ev.seq);
+        batch.dataset.lastSeq = String(ev.seq);
+      }
       pane.appendChild(batch);
     }
     // turn_result IS a chrome event, so it lands in this same batch.
@@ -4107,21 +4124,34 @@ function _appendAgentEvent(ev) {
 
   // assistant_text — concatenate consecutive blocks into one rendered
   // markdown body so claude's narration reads as one continuous reply.
+  //
+  // 2026-05-17 user rule: "group msg of the same type only if they
+  // have consecutive seq # and of the same type". Multi-block replies
+  // from the SAME turn have consecutive seqs (block 1: seq=N, block 2:
+  // seq=N+1, …). Replies from DIFFERENT turns are separated by chrome
+  // events (turn_result, system_init, etc.) that consume seqs in
+  // between, so an assistant_text in turn 2 is NOT consecutive with
+  // the previous turn's assistant_text. Without this guard, agent-
+  // replay collapsed all of claude's replies into one giant merged
+  // card whenever the chrome batches between them happened to be
+  // visually adjacent (post the chrome-batch-merge bug). The seq
+  // gap is now the authoritative break-point.
   if (ev.type === 'assistant_text') {
-    // 2026-05-17 diag: trace assistant_text rendering on every fire so
-    // we can correlate against the user-reported "tab switch loses
-    // claude reply" symptom. Logs include ts + first 30 chars + the
-    // prev-element's evType so we can see whether merge or new-card
-    // branch fires.
     try {
       const prevType = (pane.lastElementChild && pane.lastElementChild.dataset && pane.lastElementChild.dataset.evType) || '(none)';
       const preview = String(ev.text || '').replace(/\s+/g, ' ').slice(0, 30);
       console.log('[diag-assistant-text] ts=' + ev.ts + ' seq=' + (ev.seq || '-') + ' prevType=' + prevType + ' text=' + JSON.stringify(preview));
     } catch {}
     const prev = pane.lastElementChild;
-    if (prev && prev.dataset && prev.dataset.evType === 'assistant_text') {
+    const prevLastSeq = prev && prev.dataset && prev.dataset.lastSeq ? parseInt(prev.dataset.lastSeq, 10) : null;
+    const evSeq = typeof ev.seq === 'number' ? ev.seq : null;
+    const seqsConsecutive = Number.isFinite(prevLastSeq) && Number.isFinite(evSeq) && evSeq === prevLastSeq + 1;
+    if (prev && prev.dataset && prev.dataset.evType === 'assistant_text' && seqsConsecutive) {
       const count = (parseInt(prev.dataset.combineCount || '1', 10)) + 1;
       prev.dataset.combineCount = String(count);
+      // Track the latest merged seq so the next merge check can
+      // verify the new event continues the consecutive run.
+      if (Number.isFinite(evSeq)) prev.dataset.lastSeq = String(evSeq);
       const body = prev.querySelector('.agent-card-body');
       if (body) {
         const merged = (prev.dataset.assistantText || '') + '\n\n' + (ev.text || '');
@@ -4165,6 +4195,15 @@ function _appendAgentEvent(ev) {
     body.className += ' agent-card-md';
     body.innerHTML = renderMd(ev.text || '');
     card.dataset.assistantText = ev.text || '';   // seed merge accumulator
+    // Seed data-lastSeq — used by the merge branch above to verify
+    // the next assistant_text event has consecutive seq before
+    // folding into this card. Without this, the merge check sees
+    // dataset.lastSeq=undefined → parseInt(NaN) → fails the
+    // consecutive check → always a new card. That's actually fine
+    // semantically (no merging for the first block) but stamping
+    // lets a multi-block claude reply (block 1: seq=N, block 2:
+    // seq=N+1) properly fold blocks 2+ into block 1's card.
+    if (typeof ev.seq === 'number') card.dataset.lastSeq = String(ev.seq);
     renderMermaidInContainer(body).catch(() => {});
   } else if (ev.type === 'tool_use') {
     const icon = _agentToolIcon(ev.name);
@@ -4685,15 +4724,49 @@ function _createChromeBatch(ev, ts) {
 // later batches just become "× N more of the same" in the count.
 function _mergeIdenticalChromeBatches(list) {
   if (!list) return;
-  const firstBySig = new Map();
+  // 2026-05-17 ADJACENCY FIX: previously the merge keyed off a global
+  // firstBySig map, which collapsed chrome batches across the ENTIRE
+  // pane that happened to share a label. That worked for the bug-10
+  // case (multiple consecutive "perm asked · Bash" rows) but caused
+  // a worse regression: chrome batches between different turns that
+  // shared the same turn_result label (e.g. "■ success · $0.0001")
+  // got merged across, REMOVING the chrome batch that separated two
+  // adjacent assistant_text cards. The cards then ended up adjacent
+  // in DOM, and the assistant_text merge branch in _appendAgentEvent
+  // ("if prev is assistant_text, fold into it") collapsed all of
+  // claude's replies into one giant card — surfacing as the user-
+  // reported "the agent reply message gets merged with previous
+  // agent replies" symptom.
+  //
+  // Adjacency-aware walk: only merge a chrome batch INTO the
+  // previously-walked anchor when (a) they share a sig AND (b)
+  // nothing other than chrome batches has appeared between them.
+  // ANY non-chrome element (assistant_text card, chat-msg bubble,
+  // turn-footer) resets the anchor — a fresh anchor starts on the
+  // next chrome batch encountered.
+  let anchor = null;
+  let anchorSig = null;
   // Snapshot children — we mutate during the walk.
   for (const el of [...list.children]) {
-    if (!el || !el.dataset || el.dataset.evType !== '_chrome_batch') continue;
-    const sig = _chromeBatchHeadSig(el);
-    if (!sig) continue;
-    const anchor = firstBySig.get(sig);
-    if (!anchor) {
-      firstBySig.set(sig, el);
+    if (!el || !el.classList) continue;
+    if (el.id === 'chat-load-older') continue;          // skip the button, don't reset anchor
+    if (el.dataset && el.dataset.evType === '_chrome_batch') {
+      const sig = _chromeBatchHeadSig(el);
+      if (!sig) { anchor = null; anchorSig = null; continue; }
+      if (anchor && sig === anchorSig) {
+        // Fall through to merge code below.
+      } else {
+        // Different sig (or no prior anchor) — this chrome batch
+        // becomes the new anchor for any same-sig successors.
+        anchor = el;
+        anchorSig = sig;
+        continue;
+      }
+    } else {
+      // Non-chrome element — reset the anchor so the next chrome
+      // batch starts fresh.
+      anchor = null;
+      anchorSig = null;
       continue;
     }
     // Absorb `el` into `anchor`: bump count, append body rows,
