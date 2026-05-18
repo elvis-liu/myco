@@ -1093,7 +1093,25 @@
         "rewritten": true
       },
       "ranAt": "2026-05-18T02:10:08.459Z"
+    },
+    {
+      "id": "bug-13",
+      "text": "**Problem:** Chrome batch messages are only visible to the session owner, not other participants.\n**Expected:** Batch messages should be visible to all users in the session.\n**Actual:** Only the owner sees them.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-18T02:19:43.766Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "chrome batch messages should be visible to all users in the session, right now it's only visible to owner",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-18T02:04:14.486Z"
+  "updatedAt": "2026-05-18T02:19:47.654Z"
 }

@@ -1020,21 +1020,38 @@ function _sendAttachSnapshot(session, ws) {
 }
 
 // Read-only share-link attach. Streams chat history + transcript +
-// snapshot + state mutations, but does NOT forward agent-event frames
-// (those carry tool inputs that may be sensitive). Viewers can post
-// chat and pick menu rows — chat is the collaborative steering channel.
+// snapshot + state mutations + agent-event frames so viewers see the
+// same chrome-batch timeline (tool calls, tool results, permission
+// requests, turn results) as the owner. Viewers can post chat and
+// pick menu rows — chat is the collaborative steering channel.
+//
+// bug-13 (2026-05-18): agent-event frames USED to be deliberately
+// withheld from viewers under a "tool inputs may be sensitive" rule.
+// kkrazy filed bug-13 ("Chrome batch messages are only visible to the
+// session owner, not other participants — should be visible to all
+// users") flipping that policy: visibility wins. Sessions with truly
+// sensitive tool input shouldn't be shared via share-link in the
+// first place; the share-link is the consent boundary.
 function attachViewerWebSocket(session, ws, opts = {}) {
   const user = opts.user || null;
   const sessionId = session.sessionId;
   const afterSeq = typeof opts.afterSeq === 'number' && opts.afterSeq >= 0 ? opts.afterSeq : null;
 
-  // bug-9 round 6.1 (revert): viewers get the chat-history frame
-  // only — they don't subscribe to agent events.
+  // bug-13: viewers also get the initial agent-replay tail + the
+  // agent-init snapshot, mirroring the owner attach path
+  // (_attachAgentWebSocket). Without these the viewer's chrome
+  // batches would start blank — they'd only see events going forward
+  // from the moment of attach, not the recent backfill.
   // 2026-05-17 round 5: catch-up mode honored for viewers too.
   if (afterSeq != null) {
+    _shipAgentReplay(session, ws, sessionId, 0, 'catch-up', afterSeq);
     _shipChatHistory(ws, sessionId, 0, 'catch-up', afterSeq);
   } else {
+    _shipAgentReplay(session, ws, sessionId, INITIAL_AGENT_REPLAY_BYTES, 'initial');
     _shipChatHistory(ws, sessionId, sessionsMod.INITIAL_CHAT_HISTORY_BYTES, 'initial');
+  }
+  if (session._initSnapshot) {
+    ws.send(JSON.stringify({ t: 'agent-init', snapshot: session._initSnapshot }));
   }
   _sendAttachSnapshot(session, ws);
 
@@ -1044,8 +1061,20 @@ function attachViewerWebSocket(session, ws, opts = {}) {
   const onStateUpdate = (payload) => {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'state-update', ...payload }));
   };
+  // bug-13: subscribe to agent-event + exit so viewers see chrome
+  // batches + know when the session has ended. Together with the
+  // pre-existing chat + state-update subscriptions, viewers now
+  // receive the SAME stream of session events the owner does.
+  const onAgentEvent = (event) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'agent-event', event }));
+  };
+  const onExit = (code) => {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ t: 'exit', code }));
+  };
   session.on('chat', onChat);
   session.on('state-update', onStateUpdate);
+  session.on('agent-event', onAgentEvent);
+  session.on('exit', onExit);
 
   const ownerLogin = sessionsMod.getSessionRecord(sessionId)?.user || null;
   ws.send(JSON.stringify({ t: 'viewer-mode', owner: ownerLogin }));
@@ -1093,6 +1122,12 @@ function attachViewerWebSocket(session, ws, opts = {}) {
   ws.on('close', () => {
     session.off('chat', onChat);
     session.off('state-update', onStateUpdate);
+    // bug-13: clean up the agent-event + exit listeners too —
+    // otherwise a reconnecting viewer would accumulate listeners on
+    // the session and every event would multi-fire across the dangling
+    // refs.
+    session.off('agent-event', onAgentEvent);
+    session.off('exit', onExit);
     stopTranscript();
     _unregisterPresence(sessionId, presenceInfo);
     _broadcastPresence(sessionId);

@@ -2291,6 +2291,13 @@ test_chat_window() {
   # artifacts-init handler tagging the cache with state.activeId, and
   # the _resetUiForNewSession reset.
   node_test_result test/plan-cache-session-isolation.test.js "test/plan-cache-session-isolation.test.js (9 cases)"
+  # bug-13 regression: chrome batch messages (agent-event frames) +
+  # exit notifications must reach share-link viewers, not just the
+  # session owner. Locks attachViewerWebSocket to subscribe + unsub
+  # to agent-event AND exit, and to ship the initial agent-replay
+  # tail on attach so viewers see recent chrome batches not just
+  # events going forward.
+  node_test_result test/viewer-agent-events.test.js "test/viewer-agent-events.test.js (9 cases)"
   # fr-9: file explorer surfaces git change decorators + download
   # button. Tests the server-side listDir gitStatus enrichment
   # (modified/added/untracked/dir-aggregate paths against a real
