@@ -58,7 +58,14 @@
       "addedBy": "kkrazy",
       "source": "user",
       "voters": [],
-      "comments": []
+      "comments": [
+        {
+          "id": "615c406574d0",
+          "user": "kkrazy",
+          "text": "the purpose is to reduce duplicate permission asks",
+          "ts": "2026-05-18T14:55:45.768Z"
+        }
+      ]
     },
     {
       "id": "bug-4",
@@ -1142,7 +1149,89 @@
         "originalText": "git commit to use current user github id so that the work is accountable. please add some design to this fr as you rewrite and adding to plan item list",
         "rewritten": true
       }
+    },
+    {
+      "id": "bug-14",
+      "text": "**Problem:** Stop button does not actually stop the underlying process.\n**Expected:** Stop button invokes the Claude Code SDK call that interrupts the current task (equivalent to the `esc` keystroke).\n**Actual:** Stop button sends the literal text `'esc'` instead of the `esc` keystroke, so the underlying process keeps running.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-18T16:06:35.089Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the stop button actually send the text 'esc' instead of sending the key stroke esc, which will not actually stop the underlying process. Make sure stop button is calling the right claude code sdk to stop the cuurrent task",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "bug-15",
+      "text": "**Problem:** myco gets stuck whenever WebFetch is used on production (reported by @kkrazy 2026-05-18).\n\n**Repro status:** Does NOT reproduce on this server. Subagent test fired `WebFetch(\"https://example.com\")` → returned in ~3 s with ~30 byte body, clean SDK round-trip through `_canUseTool` → `_handlePermissionRequest` → `agent-event`. Historical events.jsonl across 3 prior session archives shows WebFetch listed in `system_init.tools` but ZERO actual `tool_use` events ever fired — so no past hangs in the local archives either.\n\n**Static-analysis findings:** No WebFetch-specific code path. It uses the same `_canUseTool` flow as every other tool (Bash/Read/Edit/Grep). Permission menu emits via `_emit({type:'permission_request'...})` + `emit('menu',...)`, fanned to all attached WSes. SDK options passed: `permissionMode:'default'`, no `allowedTools`/`disallowedTools`, no WebFetch-specific settings.\n\n**Likely root causes** (ranked by probability):\n1. Permission menu doesn't render on reporter's client (CSS / device-specific) → callback promise never resolves → indefinite hang from the outside\n2. Specific URL is slow/unreachable from prod server (no per-call timeout on `canUseTool`)\n3. Different SDK version / settings on prod vs this server\n4. Huge tool_result content jams the client browser (chrome batch with multi-MB body)\n\n**Need from reporter to advance:**\n- Which URL was being fetched\n- Which server (myco.labxnow.ai / mycobeta.labxnow.ai / other)\n- Was the permission menu visible in the chat pane at the time of the hang?\n- Browser console errors\n- If reproducible, attach output of `./collect-logs.sh --skip-mycobeta` grepped for `WebFetch|permission_request|agent-hook`\n\n**Possible fixes once root cause confirmed:**\n- `[diag-webfetch]` instrumentation (low-risk, ~30 lines, no behavior change) to capture next repro\n- 30s timeout on `canUseTool` promises with auto-deny + log\n- Cap `tool_result.content` at 64 KB in the wire frame (full content still in events.jsonl)",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-18T16:31:08.834Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "fr-27",
+      "text": "**Problem:** myco's wire protocol (server `attach.js` ↔ client `app.js`) is ad-hoc — `JSON.stringify({ t: 'agent-event', event })` everywhere, flat event objects, no shared schema. Adding a new event type means editing the server emitter AND the client switch-statement AND remembering all the places that filter/route by `event.type`. Easy to drift.\n\n**Source:** multica `server/pkg/protocol/{messages.go, events.go}`. Single `Message{Type string, Payload json.RawMessage}` envelope, ~13 event-category constants grouped by domain (`task:dispatch`, `task:progress`, `chat:message`, …). Decoupling envelope from typed payload lets you add events without touching the dispatcher.\n\n**Expected:** A `server/src/protocol.js` (and matching `web/public/protocol.js`) module with:\n- Event-type string constants (`AGENT_EVENT`, `CHAT`, `STATE_UPDATE`, `PRESENCE`, `MENU_PICK`, …)\n- Typed payload shapes (JSDoc or TS-comment style) per event\n- Helper builders: `protocol.agentEvent(ev)` returns `{ t: 'agent-event', event: ev }` etc.\n- Helper decoders: `protocol.decode(json)` returns `{ kind, payload }`\n\n**Why now (multi-user context):** With viewers + owner + multiple invited users attached to a session, the wire surface is wider than it was when myco was just owner-only. Each new frame type currently risks viewer parity bugs like `bug-13` (viewers missed agent-event for months). A typed catalog forces every new frame to be considered against every attach path.\n\n**Effort:** ~½ day. Server side smaller (~50 lines refactor); client side bigger (~200-300 lines reducer cleanup). Tests: schema-shape tests + a regression that every WS frame the server emits matches a registered protocol type.\n\n**Source code to study:** `multica-ai/multica` repo, `server/pkg/protocol/messages.go` and `server/pkg/protocol/events.go`.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-18T16:46:57.688Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "fr-28",
+      "text": "**Problem:** myco's `attach.js` fans every `agent-event` / `chat` / `state-update` frame to every WS attached to a session, regardless of relevance. With bug-13 widening viewer fan-out, a session with 5 attached clients (owner + 4 viewers) ships every event 5×. There's no per-client subscription filter — viewers who only care about chat still receive every tool_use blob.\n\n**Source:** multica `server/internal/daemonws/hub.go` + `server/internal/realtime/broadcaster.go`. They split daemon-facing (agent processes reporting in) from browser-facing (UIs observing) WebSockets, with scope types `workspace / user / task / chat / daemon_runtime`. Clients subscribe per-scope; broadcaster fans only to matching subs.\n\n**Expected for myco** (revised: myco is multi-user, this is directly applicable now, not future):\n- Subscription frame on attach: `{ t:'sub', scopes:['chat','agent-event','presence'] }` — viewer can omit `agent-event` if they only care about chat\n- Server tracks per-WS scope set; `_broadcastTo(sessionId, scope, frame)` instead of `session.on('agent-event', onAgentEvent)` blanket subscribe\n- Default scope set per role: owner=all, viewer=all (preserves bug-13 behavior), share-link=chat+presence only (privacy floor)\n- Presence chip surfaces per-viewer scope set so owners can see who is listening to what\n\n**Why it matters for multi-user myco:** Wire-volume scales with attached-client count today; scoped subscriptions make a 10-viewer session cheap instead of 10× duplicated. Also unblocks future \"silent observer\" modes (analytics, replay tooling) that need a subset of events.\n\n**Out of scope:** redis/pubsub multi-node fan-out (multica has this; myco is single-host, won't need it until horizontal scale).\n\n**Effort:** ~1 day. Net diff is moderate — touches every `session.on(...)` in attach.js plus the client's WS connect path. Tests: assert viewer with chat-only scope does NOT receive agent-event frames.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-18T16:46:57.688Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "fr-29",
+      "text": "**Problem:** Today, WS event handlers in `web/public/app.js` patch in-memory state directly (`state.artifacts.byType[type] = artifact`, `_appendAgentEvent(ev)` mutates DOM). When a frame is dropped or arrives out of order across N attached clients, each client's local state drifts from server truth — exactly the class of bug that `bug-9`, `bug-11`, `ryan-blues stale-plan` were instances of.\n\n**Source:** multica CLAUDE.md hard rule — \"WebSocket events invalidate TanStack Query keys rather than writing directly to Zustand stores.\" Combined with workspace-scoped query-key convention. WS frames carry a `(scope, id)` tuple; the client's reaction is `queryClient.invalidateQueries([scope, id])` → React re-fetches; no in-memory patching.\n\n**Expected for myco:**\n- A small `state-cache.js` layer (no need for TanStack Query — we don't use React) that wraps the existing HTTP fetches (`/sessions/:id/artifact`, `/sessions/:id/chat/history`, `/sessions`) with cache + staleness\n- WS frames trigger `cache.invalidate(key)` instead of patching `state.*` directly\n- Reactive layer re-fetches + re-renders the affected pane\n\n**Why it matters for multi-user myco:** Every attached client today does its own in-memory bookkeeping from the WS stream. When user A's tab patches `state.chatMessages` from a chat frame, user B's tab does the same — independently. Drift across clients is invisible unless someone refreshes. With invalidation-driven re-reads, server is the single source of truth, every client converges to the same view on next render.\n\n**Trade-off:** more HTTP round-trips. Mitigated by ETag / If-Modified-Since on the artifact / chat-history endpoints (server can short-circuit unchanged responses with 304).\n\n**Effort:** ~2 days. Touches every WS frame handler in app.js. Tests: drop a WS frame and verify the next render still matches server state.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-18T16:46:57.688Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "fr-30",
+      "text": "**Problem:** myco's session/task dispatch paths (session spawn, `/run` plan-item dispatch, chat→agent forwarding) don't have an explicit \"acquire capacity slot BEFORE claiming work\" invariant documented or enforced. If any of these paths claims work before confirming it has the slot/budget to run it, the work piles up in a `dispatched` state with no `StartTask` follow-up — silent loss.\n\n**Source:** multica `server/internal/daemon/daemon.go runRuntimePoller` + `handleTask`. Their code comment explicitly warns: *\"acquiring the execution slot AFTER ClaimTask causes tasks to pile up in dispatched state with no StartTask.\"* They use a per-runtime semaphore acquired first, claim second.\n\n**Expected for myco:**\n- Audit the 3 candidate paths: `sessions.spawnSession`, `slashcmds.handleRunPlanItem`, `attach.handleChatMessage` (claude-forward branch)\n- For each, identify what acts as the \"capacity slot\" (max-concurrent-sessions, SDK iteration in-progress, etc.)\n- Reorder so slot is acquired BEFORE claim, never after\n- Add a stable comment marker (e.g. `// SLOT-THEN-CLAIM (multica-pattern)`) at each enforcement site\n- Static-grep test in test.sh asserting the marker exists at all known dispatch sites — catches future code that reverses the order\n\n**Why it matters for multi-user myco:** Multiple users sharing a session = more concurrent dispatch events than the single-user case ever produced. The hazard is more likely to fire under multi-user load. Also: shared sessions mean dropped work is a worse failure (multiple users notice the loss).\n\n**Effort:** ~½ day for the audit + comment markers + grep test. Larger if any path actually has the inverted order and needs refactoring.\n\n**Reference:** Read multica's `runRuntimePoller` (~30 lines) for the canonical pattern.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-18T16:46:57.688Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "fr-31",
+      "text": "**Problem:** Codex / Gemini / Cursor / other coding agents look for `AGENTS.md` at repo root; Claude Code looks for `CLAUDE.md`. Maintaining two files = drift risk. myco's project-spawn flow + best-practices-template.md only handle `CLAUDE.md` today.\n\n**Source:** multica does this. Their `AGENTS.md` is a one-liner: `# See CLAUDE.md`. Other-agent users get the same instructions for free, with zero duplication or sync risk.\n\n**Expected:**\n- Add `AGENTS.md` at the myco repo root with `# See [CLAUDE.md](./CLAUDE.md) for project instructions.`\n- Update `injectBestPracticesIntoClaudeMd` in `server/src/sessions.js` to ALSO create/maintain `AGENTS.md` redirect file in spawned project dirs (idempotent: if AGENTS.md exists with non-redirect content, leave it alone)\n- Add a static-grep test: `test -f AGENTS.md` exists at repo root + content matches the redirect pattern\n\n**Why it matters for myco specifically (multi-agent context):** myco's sessions are agent-native, and the auto-injected CLAUDE.md gives consistent guidance. Right now that consistency is Claude-only. As users mix agents — running Codex in one session, Claude in another — AGENTS.md ensures the non-Claude tools see the same project-shaped rules without us maintaining two templates.\n\n**Effort:** ~10 min for the repo-root file + commit. Optional second pass (~½ hour) for the per-project mirror in sessions.js + test.\n\n**Out of scope:** Maintaining a fully-separate AGENTS.md template with agent-tool-neutral phrasing. The CLAUDE.md content is already mostly agent-tool-neutral (just says \"the agent\" not \"Claude\" in most rules); a redirect is sufficient until that breaks down.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-18T16:46:57.688Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
     }
   ],
-  "updatedAt": "2026-05-18T04:44:11.335Z"
+  "updatedAt": "2026-05-18T16:46:57.688Z"
 }
