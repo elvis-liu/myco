@@ -230,6 +230,59 @@ the absolute path, and use it as an explicit prefix on every
 subsequent Bash command. The cost of an extra 60 characters per
 command is trivial; the cost of running the wrong file is not.
 
+## 8. Anti-bloat, anti-assumption discipline for AI-assisted edits
+
+*(Adapted from the [karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills)
+`CLAUDE.md` — Andrej Karpathy's January 2026 critique of how LLMs
+misbehave when writing code, distilled into agent rules.)*
+
+These rules apply BEFORE you start typing code, not after.
+
+1. **State assumptions explicitly when the request is ambiguous.** If
+   "add validation to the login form" admits more than one
+   interpretation — what kinds of validation? client- or server-side?
+   what error UX? — list the interpretations in your reply BEFORE you
+   write a line of code, and pick the one the user confirms. Silently
+   picking an interpretation is the #1 source of work the user has to
+   throw away.
+
+2. **Surface confusion; ask rather than guess.** When something is
+   unclear — an API contract you can't find, two files with the same
+   name, a config that contradicts the docs — say so explicitly and
+   ask. Plausible-looking-but-wrong code is more expensive than a
+   clarifying question.
+
+3. **No speculative features, abstractions, or configurability.**
+   Build exactly what was asked, nothing more. No flags "for later
+   use", no interfaces with one implementation, no error handling for
+   branches that can't fire today, no factory functions in front of a
+   single concrete class. If the user needs the abstraction tomorrow,
+   they'll ask tomorrow.
+
+4. **Surgical edits — every changed line must trace to the request.**
+   When you open a file to fix bug X, fix bug X. Do not also tidy
+   adjacent code, normalize unrelated comments, or "improve"
+   formatting that you happen to see. If you notice a smell, mention
+   it in the commit message or as a follow-up note — don't ship it as
+   part of the bug-fix diff. (This is the boundary on §1's "refactor
+   opportunistically": refactor when the *change rationale* demands
+   it, not when the file happens to be open.)
+
+5. **Multi-step work ships with a numbered plan + per-step
+   verification.** When a task has 3+ distinct steps, write them out
+   as `1. … 2. … 3. …` BEFORE starting, and end each step with an
+   explicit `verify:` clause naming the check that proves the step
+   landed (an assertion, a test run, a curl, a `git diff --stat`).
+   Strong checks let the agent iterate autonomously; vague checks
+   ("make it work") force the user to babysit.
+
+**Why these matter for myco specifically.** Sessions are long,
+parallel, and partly autonomous (the `/run` mechanism dispatches work
+without per-step approval). Multi-user sharing means a silently-wrong
+assumption shows up not just to the requester but to every collaborator
+attached to the session. These rules front-load the clarifying step so
+the autonomous portion runs on a confirmed, witnessed premise.
+
 ---
 
 *Toggle this section off via the **Best practices** checkbox if your

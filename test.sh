@@ -336,6 +336,13 @@ test_best_practices_template() {
   grep -qF 'Anchor every Bash command to the session workspace' web/public/best-practices-template.md \
     && pass "best-practices-template.md: §7 session-wks anchoring rule present" \
     || fail "best-practices-template.md: §7 session-wks anchoring rule missing — auto-injection won't carry it to project CLAUDE.md files"
+  # Section 8: karpathy-skills-derived anti-bloat / anti-assumption
+  # discipline (state assumptions before coding, surface confusion,
+  # no speculative abstractions, surgical edits, numbered plan with
+  # verify). Auto-injects into every project's CLAUDE.md.
+  grep -qF 'Anti-bloat, anti-assumption discipline for AI-assisted edits' web/public/best-practices-template.md \
+    && pass "best-practices-template.md: §8 karpathy-skills discipline rules present" \
+    || fail "best-practices-template.md: §8 karpathy-skills discipline rules missing — auto-injection won't carry them to project CLAUDE.md files"
   grep -qF 'id="bp-toggle"' web/public/index.html \
     && pass "index.html: bp-toggle checkbox in arch-wrap header" \
     || fail "index.html: bp-toggle checkbox missing — no UI to enable/disable injection"
