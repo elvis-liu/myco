@@ -4,7 +4,7 @@
       "id": "bug-1",
       "text": "After redoply, the claude session enter resume window and unable to auto recover from it.",
       "layer": "Bug",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-12T10:07:39.716Z",
       "addedBy": "ryan-blues",
       "source": "user",
@@ -25,19 +25,25 @@
           "ts": "2026-05-18T19:33:42.364Z"
         },
         {
-          "id": "ed5267b3caaa",
+          "id": "13fee91d4908",
           "user": "claude",
-          "text": "✓ closed — architecturally obsolete (verification per @kkrazy comment).\n\n**Why this failure mode can no longer occur.** Bug-1 described the pre-Phase-9 PTY-era symptom where `claude --resume <id>` would render an interactive TUI \"resume window\" prompt that the PTY scraper couldn't reliably auto-dismiss. Phase 9 (commit `6a73a4f docs: prune stale PTY/TUI references — SDK-driven sessions only`) retired the entire PTY driver: `pty.js`, `menu-interceptor.js`, `pty-patterns.js` deleted; all sessions run as `AgentSession` instances driven by `@anthropic-ai/claude-agent-sdk`'s `query()` loop.\n\n**Current post-redeploy resume flow** (server/src/sessions.js `ensureLiveSession` L529-569 → agent-session.js L247): server restart kills the in-memory AgentSession; `sessions.json` persists `rec.sdkSessionId` to disk; next user attach calls `ensureLiveSession(sessionId)` → respawns AgentSession with `resumeSdkSessionId`; first user message triggers `query({ ..., resume: this.sdkSessionId })`. The SDK reads the JSONL transcript directly and continues the conversation. **No TUI prompt anywhere in the path**; no auto-recovery mechanism that could fail.\n\n**What's already locked in to prevent regression:**\n- `test_phase9_retirement` in `test.sh` asserts `pty.js`, `menu-interceptor.js`, `pty-patterns.js` STAY deleted — any revert that brings back PTY scraping fails this gate.\n- `test/capture-claude-session-id.test.js` covers the SDK-resume happy path including the related fix for stale jsonl-id replacement when the SDK creates a new jsonl post-resume.\n- Zero matches in `server/src/` for `resume.window`, `RESUME_PROMPT`, `isResumePrompt`, or `[diag-resume]` log markers — the failure-mode detection code that would be needed to even DESCRIBE this bug is gone.\n\n**Verified failure modes that do exist in the new flow** (separate bugs, not this one):\n- `sdkSessionId` points at a deleted jsonl → SDK throws on resume → AgentSession emits `fatal` event. Visible failure, not silent hang.\n- SDK's subscription auth expired during the restart window → similar visible error path.\nNeither matches bug-1's \"stuck in resume window needing manual intervention\" symptom.\n\nClosing.",
-          "ts": "2026-05-18T19:35:57.322Z",
+          "text": "✓ success · 361.6s · $23.3861 · 18↓/20252↑\n\n**Pushed `d924e63`** ✅ — 6 closures (+ bug-1 from `96097df` = **7 items closed** in git history right now).\n\n## State\n\n| Item | done | Implementing commit | bug-8 button behavior |\n|---|---|---|---|\n| `bug-1` | ✅ | architecturally obsolete (Phase 9) | \"▶ Fix\" disabled |\n| `bug-7` | ✅ | `5b8287b` | \"▶ Fix\" disabled |\n| `bug-11` | ✅ | `1fee18c` (this session) | \"▶ Fix\" disabled |\n| `bug-14` | ✅ | `1c7ae4c` (this session) | \"▶ Fix\" disabled |\n| `fr-6` | ✅ | `79076eb` | \"▶ Implement\" disabled |\n| `fr-7` | ✅ | `6ce4fea` | \"▶ Implement\" disabled |\n| `td-11` | ✅ | `75b5858` chain | \"▶ Do\" disabled |\n\nThe bug-8 fix (commit `6882608`) means once `done: true`, the action button:\n- Label flips to layer-aware verb (Bug → Fix, Feature → Implement, Todo → Do)\n- `disabled` attribute set\n- Tooltip beco…",
+          "ts": "2026-05-18T19:39:45.458Z",
           "meta": {
-            "kind": "closure",
-            "closedBy": "claude",
-            "closedAt": "2026-05-18T19:35:57.322Z",
-            "reason": "architecturally obsolete (Phase 9)"
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-18T19:33:43.848Z"
           }
         }
       ],
-      "ranAt": "2026-05-18T19:35:57.322Z"
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-18T19:39:45.458Z",
+          "startedAt": "2026-05-18T19:33:43.848Z",
+          "summary": "361.6s · 18→20252 tok",
+          "result": "**Pushed `d924e63`** ✅ — 6 closures (+ bug-1 from `96097df` = **7 items closed** in git history right now).\n\n## State\n\n| Item | done | Implementing commit | bug-8 button behavior |\n|---|---|---|---|\n| `bug-1` | ✅ | architecturally obsolete (Phase 9) | \"▶ Fix\" disabled |\n| `bug-7` | ✅ | `5b8287b` | \"▶ Fix\" disabled |\n| `bug-11` | ✅ | `1fee18c` (this session) | \"▶ Fix\" disabled |\n| `bug-14` | ✅ | `1c7ae4c` (this session) | \"▶ Fix\" disabled |\n| `fr-6` | ✅ | `79076eb` | \"▶ Implement\" disabled |\n| `fr-7` | ✅ | `6ce4fea` | \"▶ Implement\" disabled |\n| `td-11` | ✅ | `75b5858` chain | \"▶ Do\" disabled |\n\nThe bug-8 fix (commit `6882608`) means once `done: true`, the action button:\n- Label flips to layer-aware verb (Bug → Fix, Feature → Implement, Todo → Do)\n- `disabled` attribute set\n- Tooltip becomes *\"This item is marked done — Run is disabled. Reopen the item to re-run.\"*\n\n## ⚠️ Important: durability warning\n\n**The previous closure round (commit `695b241`) was REVERTED by the running myco server**, which overwrites plan.json from its in-memory state on every chat-pane mutation. Same will likely happen to this round.\n\nThe server's flow:\n1. Loads plan.json into `rec.artifacts.plan` (in-memory)\n2. Mutations (vote, comment, run-outcome) modify the in-memory copy\n3. `persistArtifact` writes in-memory state back to disk\n4. If my disk edit happens BETWEEN step 1 and step 3, my edit gets overwritten\n\n**Real fix:** `fr-24` (plan-tool.mjs proper mutation API) + `fr-37` (template drift auto-upgrade). Until those land, the closures live durably in **git history** but may flicker in the **UI** depending on server timing.\n\n## Items I did NOT close (no implementing-commit evidence)\n\n61 open items remain. Many are clearly not-yet-done (the recently-filed FRs `fr-23` through `fr-37`, the `td-1` arch-refresh that I started but didn't ship, etc.). I'm not closing those — they're real open work.\n\nIf you want me to dig deeper into any specific item to verify it's not silently fixed, name it and "
+        }
+      ]
     },
     {
       "id": "td-1",
@@ -243,25 +249,12 @@
       "id": "td-11",
       "text": "the main window load all history at once, which cause performance problem on mobile device. Need to optimze to only load the recent history need to current window and trigger loading of history when user scroll the window up.",
       "layer": "Todo",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-15T01:15:58.370Z",
       "addedBy": "ryan-blues",
       "source": "user",
       "voters": [],
-      "comments": [
-        {
-          "id": "6346b57f6ee4",
-          "user": "claude",
-          "text": "✓ closed — implemented in `75b5858+434f24c+079cedc+c3b85fb+e5d6de6`.\n\nShipped upstream across the chat-history pagination chain: `75b5858 chat: bug-9 cap initial chat-history at 100 + paginate older via /chat/history?before=` introduced server-side `before=<ts>` pagination + initial-cap of 100; `434f24c`, `079cedc`, `c3b85fb`, `e5d6de6` polished client-side scroll-up load-more (wheel-up trigger at scrollTop=0, infinite-fetch-loop fix, 1MB in-memory cap, retire load-older button when server reports 0 older rows). Mobile no longer loads full history on attach (1KB initial + 16KB rolling cap per CLAUDE.md \"Chat persistence\" §3); scrolling up paginates older rows. Matches td-11's expected behavior.",
-          "ts": "2026-05-18T19:38:50.194Z",
-          "meta": {
-            "kind": "closure",
-            "closedBy": "claude",
-            "closedAt": "2026-05-18T19:38:50.194Z"
-          }
-        }
-      ],
-      "ranAt": "2026-05-18T19:38:50.194Z"
+      "comments": []
     },
     {
       "id": "td-12",
@@ -398,7 +391,7 @@
       "id": "bug-7",
       "text": "fix duolicate entries in the chat pane like the following: 16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes",
       "layer": "Bug",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-16T08:35:18.181Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -421,17 +414,6 @@
             "kind": "run-summary",
             "runStartedAt": "2026-05-16T14:52:29.833Z"
           }
-        },
-        {
-          "id": "a0046512b20f",
-          "user": "claude",
-          "text": "✓ closed — implemented in `5b8287b`.\n\nShipped upstream as `5b8287b chat: bug-7 round 2 — dedup identical agent-replay events at the wire (+ client backstop)`. The \"16:06:43 ▸ × 10 ✓ result · 3671 bytes\" stacked-duplicate symptom is resolved. Wire-level dedup at the server stops re-sending events whose `seq` the client has already seen via `?afterSeq=N`; client backstop in `_appendChatMessageDom` for any escapees. Run-summary comment exists on this item from a prior /run; `done` flag never flipped.",
-          "ts": "2026-05-18T19:38:50.194Z",
-          "meta": {
-            "kind": "closure",
-            "closedBy": "claude",
-            "closedAt": "2026-05-18T19:38:50.194Z"
-          }
         }
       ],
       "runs": [
@@ -449,8 +431,7 @@
           "summary": "519.9s · 28→25761 tok",
           "result": "Pushed `75b5858..5b8287b` to `origin/main`.\n\n## bug-7 round 2 — root cause + three-layer fix\n\n**Why round 1 (`7cb8ed5`) wasn't enough.** It wiped the cards before re-rendering on each agent-replay frame, which handles the *cross-reconnect* doubling case. But your re-dispatch shows three identical `▸ × 10 ✓ result · 3671 bytes` batches stacked **from a single agent-replay frame** — the wipe ran exactly once, and the N copies all arrived in that one payload. That means `session.buffer` itself is carrying duplicates.\n\n**Suspected upstream:** container restart → `_hydrateBufferFromDisk` loads the events.jsonl tail (MAX_EVENTS=5000) → SDK `query({ resume: sdkSessionId })` re-walks the conversation tail → our `_handleEvent` re-emits those messages → `_emit` pushes to `this.buffer` AND appends to events.jsonl AGAIN. Now the buffer (and disk) carry recent events twice; the chrome-batch adjacency rule turns it into stacked-batch render.\n\n**Three layers of defense shipped (`5b8287b`):**\n\n| Layer | Where | What |\n|---|---|---|\n| Primary | `attach._attachAgentWebSocket` | JSON-stringify dedup of `session.buffer` before shipping the agent-replay frame. Two legit events always carry different `ts` (set by `_emit`'s `new Date().toISOString()` wrap), so this only catches byte-identical dups. Logs dropped count: `[agent-replay] <sid> dedup dropped N duplicate event(s) …`. |\n| Defense in depth | `_handleAgentFrame` agent-replay branch | Matching client-side dedup pre-loop. Belt-and-braces for any future server change. |\n| Pre-existing | `_handleAgentFrame` wipe (from `7cb8ed5`) | Still handles the cross-reconnect doubling case. |\n\n**Tests:** new `test/agent-replay-dedup.test.js` (7 cases) — 30-identical-`tool_result` reproducer, ts-differing legit case, order preservation, non-serializable safety, source-grep guards. All 20 node tests pass.\n\n**Root cause not patched here.** Once `5b8287b` is live, the `[agent-replay] … dedup dropped N` log line will tell us *which sessions* are hitti"
         }
-      ],
-      "ranAt": "2026-05-18T19:38:50.194Z"
+      ]
     },
     {
       "id": "fr-3",
@@ -515,7 +496,7 @@
       "id": "fr-6",
       "text": "add link to fr/td/bug for easy navigation to the specific items in the plan view",
       "layer": "Feature",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-16T09:57:23.487Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -532,17 +513,6 @@
             "kind": "run-summary",
             "runStartedAt": "2026-05-16T12:35:44.471Z"
           }
-        },
-        {
-          "id": "f67e23690a58",
-          "user": "claude",
-          "text": "✓ closed — implemented in `79076eb`.\n\nShipped upstream as `79076eb plan: fr-6 deep-link to plan items via #<id> URL hash` + closed in `33ca75c plan.json: close fr-6 with verification comment`. Each plan-item `<li>` carries `id=\"artifact-item-<itemId>\"`; URLs of the form `/?session=<sid>#<itemId>` scroll the plan tab to the named item on load. `done` flag never landed in the verification commit.",
-          "ts": "2026-05-18T19:38:50.194Z",
-          "meta": {
-            "kind": "closure",
-            "closedBy": "claude",
-            "closedAt": "2026-05-18T19:38:50.194Z"
-          }
         }
       ],
       "runs": [
@@ -553,14 +523,13 @@
           "summary": "365.7s · 31→15302 tok",
           "result": "**fr-6 implementation summary:**\n\n| Surface | Change |\n|---|---|\n| **`web/public/app.js renderItem`** | Each `<li>` now carries `id=\"artifact-item-<itemId>\"`. The id chip gets `data-deep-link-id`, `role=\"button\"`, `tabindex=\"0\"`, and a tooltip \"Click to copy a deep link to this item\". |\n| **`web/public/app.js _copyArtifactItemDeepLink`** | Click / Enter / Space on the id chip writes `<origin><pathname>#<id>` to `navigator.clipboard`, updates `location.hash` via `history.replaceState` (no history pollution), and flashes a 1.2 s green \"copied\" badge on the chip. |\n| **`web/public/app.js _focusArtifactItemFromHash`** | Reads `location.hash`, finds which artifact type contains the id, opens that tab via `showArtifactView`, then scrolls the matching `<li>` into view with a 2 s deep-link pulse. Bails out cleanly if the cache isn't populated yet — stashes the id on `state.pendingDeepLinkId` and consumes it on the next cache update / render. |\n| **`web/public/app.js _onArtifactsCacheUpdated`** | Tries to resolve the hash on every cache update — handles the initial-load case where the artifacts-init frame arrives after the URL was parsed. |\n| **`web/public/app.js` hashchange listener** | Module-level `window.addEventListener('hashchange', …)` — pasting a permalink in the address bar re-focuses the item. |\n| **`web/public/app.js renderArtifact bind block`** | Consumes `state.pendingDeepLinkId` post-render so a deep link that arrived before the items had DOM ids still lands cleanly. |\n| **`web/public/styles.css`** | `.artifact-item-id[data-deep-link-id]` gets `cursor: copy` + hover/focus styles; `.artifact-item-id-copied` is the 1.2 s green flash; `.artifact-item-deep-link-focused` runs a 1.6 s × 2 cool-blue box-shadow pulse keyframe on the focused `<li>`. |\n| **`test.sh`** | Seven new static guards: stable li id, `data-deep-link-id` chip, copy helper, focus helper, hashchange listener, plus both CSS classes. |\n| **Tests** | All 18 node tests still pass. |\n\nReady to commit + p"
         }
-      ],
-      "ranAt": "2026-05-18T19:38:50.194Z"
+      ]
     },
     {
       "id": "fr-7",
       "text": "**Problem:** Users miss chat events that require their attention when the browser tab isn't focused.\n**Expected:** Promote in-chat notifications to the browser level so the OS surfaces them natively.\n**Actual:** Notifications stay confined to the chat UI and are only visible when the user is already looking at it.",
       "layer": "Feature",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-16T13:41:23.687Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -577,17 +546,6 @@
             "kind": "run-summary",
             "manual": true
           }
-        },
-        {
-          "id": "c6ca3bdfedd1",
-          "user": "claude",
-          "text": "✓ closed — implemented in `6ce4fea`.\n\nShipped upstream as `6ce4fea chat: fr-7 OS notifications for permission menus + long-turn completion`. `_maybeNotifyMenuPending` + `_maybeNotifyTurnComplete` in `web/public/app.js` fire native Web Notifications (icon `/hetu.png`) when a permission_request lands while the user isn't foregrounded, and when a long-running turn completes. Mobile-Android reliability gap (Android suspends backgrounded tabs) deferred to fr-8 (Web Push) + fr-23 (PWA conversion) — those are the follow-ups; fr-7 itself is implementation-complete.",
-          "ts": "2026-05-18T19:38:50.194Z",
-          "meta": {
-            "kind": "closure",
-            "closedBy": "claude",
-            "closedAt": "2026-05-18T19:38:50.194Z"
-          }
         }
       ],
       "meta": {
@@ -601,8 +559,7 @@
           "ts": "2026-05-16T13:45:55.994Z",
           "summary": null
         }
-      ],
-      "ranAt": "2026-05-18T19:38:50.194Z"
+      ]
     },
     {
       "id": "bug-8",
@@ -849,7 +806,7 @@
       "id": "bug-11",
       "text": "**Problem:** Collapsed Chrome batch rows display only the last sub-item's byte size instead of the aggregate.\n**Expected:** `× 5 ✓ result · N bytes` where N is the sum of bytes across all included sub-items.\n**Actual:** Shows `4 bytes` (the last sub-item's size) even though 5 results are batched.\n**Context:** Example batch row `12:10:23 ▸ × 5 ✓ result · 4 bytes` collapsing sub-items each reporting `4 bytes`.",
       "layer": "Bug",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-17T04:24:48.661Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -872,17 +829,6 @@
             "kind": "run-summary",
             "runStartedAt": "2026-05-17T16:18:46.770Z"
           }
-        },
-        {
-          "id": "ad7e4376bcd0",
-          "user": "claude",
-          "text": "✓ closed — implemented in `1fee18c`.\n\nShipped in this session as `1fee18c chat: bug-11 — collapsed chrome batch shows AGGREGATE tool_result bytes`. Per-batch `dataset.toolResultBytes` accumulator + bytes-free merge signature + `_chromeBatchHeadLabel(card, ev)` helper now compute aggregate display. Regression test `test/chrome-batch-bytes-aggregate.test.js` (10 cases) covers the user's repro (5×4=20) and the comment-thread repro (9×921=8289). bug-10 sibling tests still 9/9 — no regression.",
-          "ts": "2026-05-18T19:38:50.194Z",
-          "meta": {
-            "kind": "closure",
-            "closedBy": "claude",
-            "closedAt": "2026-05-18T19:38:50.194Z"
-          }
         }
       ],
       "meta": {
@@ -898,8 +844,7 @@
           "summary": "408.1s · 26→27798 tok",
           "result": "**bug-11 shipped** — pushed to `origin/main` as `1fee18c`.\n\n## What landed\n\n| File | Change |\n|---|---|\n| `web/public/app.js` | 4 edits: aggregator helper, batch head label, bytes-free sig, merge byte combination |\n| `test/chrome-batch-bytes-aggregate.test.js` | New — 10 cases (red-flipped first per Best Practices §5) |\n| `test.sh` | Wired the new test into the suite |\n\n## The fix in one diagram\n\n```mermaid\ngraph LR\n    EV1[tool_result<br/>10 bytes]\n    EV2[tool_result<br/>20 bytes]\n    EV3[tool_result<br/>30 bytes]\n\n    subgraph \"Before — bug\"\n        SUM_B[\"head: ✓ result · 30 bytes<br/>(only last event)\"]\n    end\n\n    subgraph \"After — fix\"\n        ACC[\"dataset.toolResultBytes<br/>accumulator\"]\n        SUM_A[\"head: ✓ result · 60 bytes<br/>(aggregate)\"]\n    end\n\n    EV1 --> SUM_B\n    EV2 --> SUM_B\n    EV3 --> SUM_B\n\n    EV1 --> ACC\n    EV2 --> ACC\n    EV3 --> ACC\n    ACC --> SUM_A\n```\n\n## Test results\n\n```\ntest/chrome-batch-bytes-aggregate.test.js  10 passed, 0 failed\ntest/chrome-batch-merge.test.js             9 passed, 0 failed  (regression check — no break)\n```\n\nThe reproducer test \"× 5 tool_results of 4 bytes each → head shows 20, not 4\" goes green. The user-comment reproducer \"× 9 tool_results of 921 bytes → head shows 8289\" also goes green. A bytes-free merge signature keeps bug-10's merge-eligibility behavior unchanged even as the visible label now varies with aggregate totals.\n\nHeads-up: pending task #2 (post-SDK arch refresh) still open."
         }
-      ],
-      "ranAt": "2026-05-18T19:38:50.194Z"
+      ]
     },
     {
       "id": "fr-15",
@@ -1243,32 +1188,19 @@
       "id": "bug-14",
       "text": "**Problem:** Stop button does not actually stop the underlying process.\n**Expected:** Stop button invokes the Claude Code SDK call that interrupts the current task (equivalent to the `esc` keystroke).\n**Actual:** Stop button sends the literal text `'esc'` instead of the `esc` keystroke, so the underlying process keeps running.",
       "layer": "Bug",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-18T16:06:35.089Z",
       "addedBy": "kkrazy",
       "source": "user",
       "voters": [
         "kkrazy"
       ],
-      "comments": [
-        {
-          "id": "37acb6c84830",
-          "user": "claude",
-          "text": "✓ closed — implemented in `1c7ae4c`.\n\nShipped in this session as `1c7ae4c stop: bug-14 — dedicated interrupt WS frame, no more chat-pollution path`. New `{t:'interrupt'}` WS frame handled by both owner + viewer attach paths in `server/src/attach.js` — calls `session.interrupt()` + emits a brief assistant ack with `meta.kind='interrupt-ack'`. Client-side `_sendStopAgent` in `web/public/app.js` sends the interrupt frame directly (no more `sendChatMessage('esc')` → no more phantom \"esc\" user-typed chat row, no more broadcast pollution to viewers). Regression test `test/stop-button-interrupt.test.js` (8 cases) red-flipped on 3 of 4 static guards before fix; all 8 green after. Legacy typed-\"esc\" → interrupt path kept untouched in `handleChatPostfixes` for backward compat.",
-          "ts": "2026-05-18T19:38:50.194Z",
-          "meta": {
-            "kind": "closure",
-            "closedBy": "claude",
-            "closedAt": "2026-05-18T19:38:50.194Z"
-          }
-        }
-      ],
+      "comments": [],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "the stop button actually send the text 'esc' instead of sending the key stroke esc, which will not actually stop the underlying process. Make sure stop button is calling the right claude code sdk to stop the cuurrent task",
         "rewritten": true
-      },
-      "ranAt": "2026-05-18T19:38:50.194Z"
+      }
     },
     {
       "id": "bug-15",
@@ -1401,7 +1333,23 @@
       "source": "user",
       "voters": [],
       "comments": []
+    },
+    {
+      "id": "fr-38",
+      "text": "**Problem:** Ad-hoc messages to Claude can trigger code/functionality changes without an approved work item gating them.\n**Expected:** All code changes must be triggered by an approved td/fr/bug.\n**Actual:** Arbitrary chat messages to Claude can initiate code or functionality changes with no approved td/fr/bug backing them.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-18T20:02:08.697Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "all code changes should be triggered by an approved td/fr/bug. No adhoc msg to claude should trigger any code/functionality change.",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-18T19:38:50.194Z"
+  "updatedAt": "2026-05-18T20:02:14.818Z"
 }

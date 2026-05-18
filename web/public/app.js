@@ -6048,11 +6048,27 @@ function renderArtifact(type, artifact) {
   }
   // plan / test → checkbox list. Plan items also get vote button + comment thread.
   const items = (artifact && Array.isArray(artifact.items)) ? artifact.items : [];
+  // Plan tab: "Open only" toggle filters out done items so the list
+  // surfaces only what still needs work. Default OFF (show all) so
+  // the behavior is opt-in + preserves prior expectations. Persisted
+  // per-browser in localStorage.myco_plan_open_only. Test items don't
+  // have a done-vs-open distinction in the same sense, so the filter
+  // is plan-only.
+  const planOpenOnly = type === 'plan'
+    && (localStorage.getItem('myco_plan_open_only') || '0') === '1';
+  const displayItems = planOpenOnly ? items.filter((it) => !it.done) : items;
   if (!items.length) {
     body.innerHTML = '<div class="artifact-empty">Nothing extracted. The recent session activity may not contain todos.</div>';
     // Re-attach preservedCallout (no flicker rule applies on the empty
     // path too — the user just merged the last item, the callout might
     // still have more proposals to render).
+    if (preservedCallout) body.insertBefore(preservedCallout, body.firstChild);
+    return;
+  }
+  if (!displayItems.length) {
+    // Filter is active and everything is done — explicit message so
+    // the user understands the list isn't empty, just filtered.
+    body.innerHTML = `<div class="artifact-empty">All ${items.length} item(s) are done. Uncheck <strong>Open only</strong> to see them.</div>`;
     if (preservedCallout) body.insertBefore(preservedCallout, body.firstChild);
     return;
   }
@@ -6200,10 +6216,11 @@ function renderArtifact(type, artifact) {
     // Group plan items by layer; preserve extraction order within each layer
     // AND first-seen layer order overall. A single shared layer ("Other" by
     // default) means the UI still degrades cleanly when the model returns the
-    // legacy untagged shape.
+    // legacy untagged shape. Uses displayItems (post-filter) so the "Open
+    // only" toggle hides layers that have no open items after filtering.
     const layers = [];
     const buckets = new Map();
-    for (const it of items) {
+    for (const it of displayItems) {
       const layer = (it.layer && String(it.layer).trim()) || 'Other';
       if (!buckets.has(layer)) { layers.push(layer); buckets.set(layer, []); }
       buckets.get(layer).push(it);
@@ -6215,7 +6232,7 @@ function renderArtifact(type, artifact) {
       </div>
     `).join('');
   } else {
-    bodyHtml = `<ul class="artifact-items">${items.map(renderItem).join('')}</ul>`;
+    bodyHtml = `<ul class="artifact-items">${displayItems.map(renderItem).join('')}</ul>`;
   }
   body.innerHTML = bodyHtml +
     (artifact.updatedAt ? `<div class="artifact-updated">Updated ${escHtml(formatChatTs(artifact.updatedAt) || artifact.updatedAt)}</div>` : '');
@@ -8056,7 +8073,29 @@ document.addEventListener('DOMContentLoaded', () => {
   bindLoginUi();
   bootstrap();
   bindBestPracticesToggle();
+  bindPlanOpenOnlyToggle();
 });
+
+// Plan tab "Open only" toggle. Default OFF (show all items) so the
+// behavior is opt-in. Persisted per-browser in
+// localStorage.myco_plan_open_only ('1' = on, '0' = off). When ON,
+// renderArtifact filters out done items so the user sees only open
+// bugs / features / todos.
+function bindPlanOpenOnlyToggle() {
+  const toggle = document.getElementById('plan-open-only-toggle');
+  if (!toggle) return;
+  const enabled = (localStorage.getItem('myco_plan_open_only') || '0') === '1';
+  toggle.checked = enabled;
+  toggle.addEventListener('change', () => {
+    localStorage.setItem('myco_plan_open_only', toggle.checked ? '1' : '0');
+    // Re-render with the current cached plan artifact so the filter
+    // takes effect immediately without an HTTP round-trip.
+    const cached = state.artifacts
+      && state.artifacts.byType
+      && state.artifacts.byType.plan;
+    if (cached) renderArtifact('plan', cached);
+  });
+}
 
 // Inject-best-practices toggle on the Arch tab. Default on; persisted
 // per-browser in localStorage (key: myco_bp_enabled). Template body is

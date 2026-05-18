@@ -2329,6 +2329,14 @@ test_chat_window() {
   # interrupt frame handler in both owner + viewer attach paths +
   # the client-side _sendStopAgent rewrite.
   node_test_result test/stop-button-interrupt.test.js "test/stop-button-interrupt.test.js (8 cases)"
+  # Plan tab "Open only" toggle: checkbox in plan-wrap header filters
+  # out done items so the user sees only open bugs / features / todos.
+  # Persisted in localStorage.myco_plan_open_only (default off).
+  # Locks the HTML checkbox, app.js bindPlanOpenOnlyToggle helper +
+  # boot call, the localStorage key + default-off semantics, the
+  # filter application in renderArtifact, and the explicit "all done"
+  # empty-state message.
+  node_test_result test/plan-open-only-toggle.test.js "test/plan-open-only-toggle.test.js (9 cases)"
   # fr-9: file explorer surfaces git change decorators + download
   # button. Tests the server-side listDir gitStatus enrichment
   # (modified/added/untracked/dir-aggregate paths against a real
