@@ -169,6 +169,67 @@ single `grep` that asserts the fix's marker stays present is a
 sufficient floor. The point is: the user's complaint must be encoded
 in code so the next iteration can't quietly re-break it.
 
+## 7. Anchor every Bash command to the session workspace directory
+
+Every Bash invocation must run with the **session workspace directory**
+as its working directory — the folder that contains this `CLAUDE.md`,
+the `_myco_/` artifact mirror, and the project's checked-out source.
+Concretely, that's `WORKSPACE/<user>/<session-id>/` (e.g.
+`/wks/kkrazy/myco-kkrazy-6bd8b83e/`), the path the SDK sets as
+`options.cwd` when launching the agent.
+
+**Why this is a rule, not a default.** Some harnesses (and some
+parallel-tool execution patterns) reset the working directory between
+Bash invocations. A command that worked in turn N — `cd foo && ./test.sh`
+— may resolve `foo` against a completely different parent dir in turn N+1,
+silently failing or running the wrong binary. Anchoring every command
+removes the foot-gun.
+
+**Patterns that work:**
+
+- **Absolute paths under the session wks**, the cleanest option:
+  ```bash
+  wc -l /wks/kkrazy/myco-kkrazy-abc/src/index.js
+  cat /wks/kkrazy/myco-kkrazy-abc/_myco_/plan.json
+  ```
+- **`-C <dir>` flags** on tools that accept them — no cwd dependency:
+  ```bash
+  git   -C /wks/kkrazy/myco-kkrazy-abc status
+  make  -C /wks/kkrazy/myco-kkrazy-abc test
+  ```
+- **`cd <session-wks> && <command>`** chained in a single Bash
+  invocation. The `cd` is local to that one call, so it's safe — just
+  don't expect it to persist to the next call.
+- **`working_directory` parameter** if your Bash tool exposes one —
+  takes precedence over inherited cwd. Use it when available.
+
+**Patterns that break:**
+
+- `cd foo` in one Bash call, then `ls` in the next — the second call
+  may run from `/`, `/root`, or wherever the harness reset cwd to.
+- Relying on shell exports / aliases across invocations.
+- Relative paths without anchoring: `./test.sh` in a "set-and-forget"
+  context can run any test.sh that happens to live in the current dir.
+- Assuming `~` expands to the human user's home — in containerized
+  agent runs, `~` is typically `/root` or `/home/agent`, not the
+  session wks.
+
+**How to find "the session workspace" at runtime:**
+
+- It's the directory containing this `CLAUDE.md`.
+- It's `process.cwd()` on the agent's first Bash invocation in a
+  fresh session (before any `cd`).
+- For parallel tool calls, capture it explicitly:
+  ```bash
+  pwd > /tmp/session-wks.txt   # once at start
+  SESSION_WKS=$(cat /tmp/session-wks.txt) <command>   # everywhere else
+  ```
+
+**When in doubt:** run `pwd && ls` once at the start of a task, store
+the absolute path, and use it as an explicit prefix on every
+subsequent Bash command. The cost of an extra 60 characters per
+command is trivial; the cost of running the wrong file is not.
+
 ---
 
 *Toggle this section off via the **Best practices** checkbox if your

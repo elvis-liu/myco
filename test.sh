@@ -329,6 +329,13 @@ test_best_practices_template() {
   test -f web/public/best-practices-template.md \
     && pass "web/public/best-practices-template.md exists" \
     || fail "best-practices-template.md missing — Arch tab will render without the banner"
+  # Section 7: Bash commands anchor to session wks. This rule auto-
+  # injects into every spawned/resumed project's CLAUDE.md and is what
+  # prevents claude from running stale `cd foo` / relative-path
+  # commands that resolve against the wrong dir between turns.
+  grep -qF 'Anchor every Bash command to the session workspace' web/public/best-practices-template.md \
+    && pass "best-practices-template.md: §7 session-wks anchoring rule present" \
+    || fail "best-practices-template.md: §7 session-wks anchoring rule missing — auto-injection won't carry it to project CLAUDE.md files"
   grep -qF 'id="bp-toggle"' web/public/index.html \
     && pass "index.html: bp-toggle checkbox in arch-wrap header" \
     || fail "index.html: bp-toggle checkbox missing — no UI to enable/disable injection"
