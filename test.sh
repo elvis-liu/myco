@@ -2379,6 +2379,16 @@ test_chat_window() {
   # retroactively auto-resolves any pending menu A whose (tool, input)
   # now matches the rule.
   node_test_result test/bug-21-parallel-permission-menus.test.js "test/bug-21-parallel-permission-menus.test.js (16 cases)"
+  # bug-21 pattern 2 (reaper-kills-subagent-mid-flight): the 5-min
+  # keepalive reaper used to call killSession unconditionally on timer
+  # fire — even when an Agent (subagent) or other long-running tool was
+  # still in flight (the parent stream is quiet during subagent
+  # internal model-thinking, so the parent looks "idle"). Fix in
+  # attach.js _onKillTimerFire: read the live AgentSession's
+  # openToolCalls.size; defer reap for another 5-min grace slice
+  # while > 0; SESSION_MAX_DEFER_MS = 30min hard cap so a genuinely-
+  # hung tool can't indefinitely pin a session.
+  node_test_result test/bug-21-keepalive-defers-while-tool-in-flight.test.js "test/bug-21-keepalive-defers-while-tool-in-flight.test.js (10 cases)"
   # fr-9: file explorer surfaces git change decorators + download
   # button. Tests the server-side listDir gitStatus enrichment
   # (modified/added/untracked/dir-aggregate paths against a real

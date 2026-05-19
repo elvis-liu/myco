@@ -564,32 +564,81 @@ function streamTranscriptToWs(sessionId, ws) {
 // past that the SDK process is reaped to free memory + tokens.
 // Reattaching within the window cancels the pending kill.
 const SESSION_KEEPALIVE_GRACE_MS = 5 * 60 * 1000;
+// bug-21 pattern 2 (reaper-kills-subagent-mid-flight): when the 5-min
+// timer fires with no attached clients, we used to call killSession
+// unconditionally. Long-running research subagents routinely have
+// multi-minute internal phases (model thinking / synthesis / sub-API
+// calls) that produce no events on the parent stream, so the parent
+// looks "idle" to the reaper even though work is genuinely in flight.
+// Killing in that window orphans the Agent tool_use — the parent SDK
+// iteration is left waiting on a tool_result that will never arrive.
+//
+// FIX: on timer fire, consult the live AgentSession's openToolCalls
+// Map (already tracked for the chat-pane "waiting on Tool · 47s"
+// indicator). If > 0, defer the reap for another grace slice. The
+// SESSION_MAX_DEFER_MS hard cap below protects against a genuinely-
+// hung tool indefinitely pinning a session in memory — past the cap
+// we reap anyway with reason 'max-defer-exceeded'.
+const SESSION_MAX_DEFER_MS = 30 * 60 * 1000;  // 30 min hard cap
 const _sessionKillTimers = new Map();
+const _sessionDeferState = new Map();   // sessionId → { totalDeferMs }
 
 function _scheduleSessionKill(sessionId, reason) {
   const existing = _sessionKillTimers.get(sessionId);
   if (existing) clearTimeout(existing);
-  const timer = setTimeout(() => {
-    _sessionKillTimers.delete(sessionId);
-    // Only kill if STILL idle — defensive in case the timer fires
-    // a hair after a reconnect cancelled it (race with setTimeout's
-    // clearing semantics is rare but possible).
-    const set = _sessionPresence.get(sessionId);
-    if (set && set.size > 0) {
-      console.log(`[keepalive] ${sessionId} grace expired but ${set.size} client(s) reattached — staying alive`);
+  const timer = setTimeout(() => _onKillTimerFire(sessionId, reason), SESSION_KEEPALIVE_GRACE_MS);
+  _sessionKillTimers.set(sessionId, timer);
+}
+
+// Extracted from _scheduleSessionKill so the defer path can re-arm the
+// timer without duplicating the setTimeout call. Also makes the
+// inspect-then-defer-or-kill decision tree easier to read.
+function _onKillTimerFire(sessionId, reason) {
+  _sessionKillTimers.delete(sessionId);
+  // Only kill if STILL idle — defensive in case the timer fires
+  // a hair after a reconnect cancelled it (race with setTimeout's
+  // clearing semantics is rare but possible).
+  const set = _sessionPresence.get(sessionId);
+  if (set && set.size > 0) {
+    console.log(`[keepalive] ${sessionId} grace expired but ${set.size} client(s) reattached — staying alive`);
+    _sessionDeferState.delete(sessionId);  // fresh defer window if they later disconnect again
+    return;
+  }
+  // bug-21 pattern 2: defer reap while in-flight tool work exists.
+  const session = sessions.get(sessionId);
+  const openToolCalls = (session && session.openToolCalls && session.openToolCalls.size) || 0;
+  if (openToolCalls > 0) {
+    const ds = _sessionDeferState.get(sessionId) || { totalDeferMs: 0 };
+    ds.totalDeferMs += SESSION_KEEPALIVE_GRACE_MS;
+    _sessionDeferState.set(sessionId, ds);
+    if (ds.totalDeferMs >= SESSION_MAX_DEFER_MS) {
+      console.log(`[keepalive] ${sessionId} max-defer-exceeded after ${ds.totalDeferMs}ms with ${openToolCalls} tool(s) still in flight — reaping anyway (likely hung tool)`);
+      _sessionDeferState.delete(sessionId);
+      killSession(sessionId);
       return;
     }
-    console.log(`[keepalive] ${sessionId} grace expired (${reason || 'no clients'}) — reaping`);
-    killSession(sessionId);
-  }, SESSION_KEEPALIVE_GRACE_MS);
-  _sessionKillTimers.set(sessionId, timer);
+    console.log(`[keepalive] ${sessionId} deferring reap — ${openToolCalls} tool(s) in flight (totalDeferMs=${ds.totalDeferMs}, capMs=${SESSION_MAX_DEFER_MS})`);
+    // Re-arm for another grace slice.
+    const timer = setTimeout(() => _onKillTimerFire(sessionId, reason), SESSION_KEEPALIVE_GRACE_MS);
+    _sessionKillTimers.set(sessionId, timer);
+    return;
+  }
+  console.log(`[keepalive] ${sessionId} grace expired (${reason || 'no clients'}) — reaping`);
+  _sessionDeferState.delete(sessionId);
+  killSession(sessionId);
 }
 
 function _cancelSessionKill(sessionId) {
   const existing = _sessionKillTimers.get(sessionId);
-  if (!existing) return;
+  if (!existing) {
+    _sessionDeferState.delete(sessionId);  // defensive cleanup
+    return;
+  }
   clearTimeout(existing);
   _sessionKillTimers.delete(sessionId);
+  // bug-21 pattern 2: clear accumulated defer time so the next
+  // disconnect cycle starts with a fresh 30-min cap window.
+  _sessionDeferState.delete(sessionId);
   console.log(`[keepalive] ${sessionId} reaper cancelled — client reattached during grace`);
 }
 
