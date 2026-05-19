@@ -389,7 +389,7 @@
     },
     {
       "id": "bug-7",
-      "text": "fix duolicate entries in the chat pane like the following: 16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes",
+      "text": "**Problem:** Chrome batch rows in the chat pane render duplicated — the same `▸ × N ✓ result · M bytes` summary appears multiple times at the same timestamp.\n\n**Expected:** Each chrome batch shows exactly once per agent-event sequence. Duplicates dedup at the wire (server-side via `?afterSeq=N` catch-up) with a client-side render backstop in `_appendChatMessageDom` for any escapees.\n\n**Actual:** The same row appears 5+ times in a row, e.g.:\n```\n16:06:43 ▸ × 10 ✓ result · 3671 bytes\n16:06:43 ▸ × 10 ✓ result · 3671 bytes\n16:06:43 ▸ × 10 ✓ result · 3671 bytes\n16:06:43 ▸ × 10 ✓ result · 3671 bytes\n16:06:43 ▸ × 10 ✓ result · 3671 bytes\n```",
       "layer": "Bug",
       "done": false,
       "addedAt": "2026-05-16T08:35:18.181Z",
@@ -431,7 +431,14 @@
           "summary": "519.9s · 28→25761 tok",
           "result": "Pushed `75b5858..5b8287b` to `origin/main`.\n\n## bug-7 round 2 — root cause + three-layer fix\n\n**Why round 1 (`7cb8ed5`) wasn't enough.** It wiped the cards before re-rendering on each agent-replay frame, which handles the *cross-reconnect* doubling case. But your re-dispatch shows three identical `▸ × 10 ✓ result · 3671 bytes` batches stacked **from a single agent-replay frame** — the wipe ran exactly once, and the N copies all arrived in that one payload. That means `session.buffer` itself is carrying duplicates.\n\n**Suspected upstream:** container restart → `_hydrateBufferFromDisk` loads the events.jsonl tail (MAX_EVENTS=5000) → SDK `query({ resume: sdkSessionId })` re-walks the conversation tail → our `_handleEvent` re-emits those messages → `_emit` pushes to `this.buffer` AND appends to events.jsonl AGAIN. Now the buffer (and disk) carry recent events twice; the chrome-batch adjacency rule turns it into stacked-batch render.\n\n**Three layers of defense shipped (`5b8287b`):**\n\n| Layer | Where | What |\n|---|---|---|\n| Primary | `attach._attachAgentWebSocket` | JSON-stringify dedup of `session.buffer` before shipping the agent-replay frame. Two legit events always carry different `ts` (set by `_emit`'s `new Date().toISOString()` wrap), so this only catches byte-identical dups. Logs dropped count: `[agent-replay] <sid> dedup dropped N duplicate event(s) …`. |\n| Defense in depth | `_handleAgentFrame` agent-replay branch | Matching client-side dedup pre-loop. Belt-and-braces for any future server change. |\n| Pre-existing | `_handleAgentFrame` wipe (from `7cb8ed5`) | Still handles the cross-reconnect doubling case. |\n\n**Tests:** new `test/agent-replay-dedup.test.js` (7 cases) — 30-identical-`tool_result` reproducer, ts-differing legit case, order preservation, non-serializable safety, source-grep guards. All 20 node tests pass.\n\n**Root cause not patched here.** Once `5b8287b` is live, the `[agent-replay] … dedup dropped N` log line will tell us *which sessions* are hitti"
         }
-      ]
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "rewritten": true,
+        "originalText": "fix duolicate entries in the chat pane like the following: 16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes\n16:06:43\n▸\n× 10\n✓ result · 3671 bytes",
+        "rewrittenBy": "claude",
+        "rewrittenAt": "2026-05-19T04:58:07.256Z"
+      }
     },
     {
       "id": "fr-3",
@@ -1471,6 +1478,12 @@
           "user": "ryan-blues",
           "text": "There are use case where the program need to run on remote machine instead of local. Such as when only target machine has needed GPU devices installed. So the workflow is write code on local machine and sync to remote server for execution and debug. This feature will collect information about remote machine, generate ssh private key and ask user to add it to remote host. collect information about where to install the code, how to install, how to run the program. Then instruct claude code to use the remote envrionment when needed.",
           "ts": "2026-05-19T03:11:01.322Z"
+        },
+        {
+          "id": "659b725442a2",
+          "user": "ryan-blues",
+          "text": "refactor the overall problem description and requirements of this TODO",
+          "ts": "2026-05-19T03:24:28.955Z"
         }
       ]
     },
@@ -1489,7 +1502,71 @@
         "originalText": "when add new message but denied by permission, such as add a new feature. The context of the new feature is not displayed in the discussion panel. and the request is denied for read only. But the content is not shown anywhere so unable to recover. Should display the message in discussion panel and then response with denied.",
         "rewritten": true
       }
+    },
+    {
+      "id": "fr-41",
+      "text": "**Problem:** Comment handling is passive — the agent appends to the list without reading or acting on them.\n**Expected:** Read incoming comments, take action when one requests it (e.g. td-28's 2nd comment), and post replies to answer questions or clarify understanding.\n**Actual:** Comments are only appended to the list; no parsing, no action, no participation in discussion.\n**Context:** Reference case: td-28, 2nd comment requests an action.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-19T03:37:35.279Z",
+      "addedBy": "ryan-blues",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "The current code doesn't handle comments, it just adds to the list. enhance it to read the messages and take action when needed. such as the td-28, the 2nd comments is asking you to take actions. Also you can participate in the discussion by adding comments to answer questions or clarify understanding.",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "bug-20",
+      "text": "**Problem:** When multiple projects are checked out in the same session, plan.json lookup is inconsistent across projects.\n**Expected:** Look into all checked-out projects for plan.json and consistently use the same one.\n**Actual:** Resolution is ambiguous when more than one project is present, so different lookups may pick different files (or none).\n**Context:** Propose a strategy for managing plan.json ownership/selection when multiple projects are checked out in one session.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-19T03:46:53.136Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "when there are multiple projects checked out in the same session, should look into all projects for the plan.json and always use the same one. Propose a way to manage this when multiple projects are checked out.",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "fr-42",
+      "text": "**Problem:** Todo/feature management lacks an autonomous loop to prioritize, implement, and ship items end-to-end with user gating.\n\n**Expected:** A background or cron task periodically reviews the todo/feature list, picks the highest-value item, implements it to e2e-working state, generates a summary report (what was implemented, how to use it, extra value added), and surfaces the report + PR for user review. Merge to master only after user acceptance.\n\n**Actual:** No background/cron worker exists; todos are not auto-prioritized or auto-implemented, and there is no generated summary or user-gated merge flow.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-19T04:45:21.938Z",
+      "addedBy": "ryan-blues",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "for the todo and feature management, should start a background or cron task to review them pick the most important or valued one to implement. After e2e working, generate a summary include what has been implemented, how to use it, what extra values it added. And ask use to review the report and pr. Commit to master branch until accepted by user.",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "td-29",
+      "text": "**Problem:** Claude Code SDK usage in myco may lag behind the multica implementation, but the gaps aren't catalogued.\n**Expected:** A written report comparing myco's Claude Code SDK integration to multica's, with a prioritized list of work items to bring myco up to par.\n**Actual:** No such analysis exists; differences and improvement opportunities are unknown.\n**Context:** Cross-repo comparison between `myco` and `multica`; deliverable is a report, not code changes.",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-05-19T04:51:50.787Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "analyze how claude code sdk is used in myco, compare to multica implementation and give me a report on work items to improve.",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-19T03:07:10.489Z"
+  "updatedAt": "2026-05-19T04:58:07.256Z"
 }
