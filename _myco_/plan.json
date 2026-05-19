@@ -960,7 +960,7 @@
     },
     {
       "id": "td-21",
-      "text": "**Problem:** Define + document the per-tool AI trust ladder for this team\n\n**Practice change** + light artifact. Source: §5.1 (\"Calibrate AI trust per tool, not per session\").\n\n**What:** New file `_myco_/policy/ai-allowed-tools.md` documenting per-tool tier (allow / queue-for-review / deny) and the rationale. Reviewed quarterly.\n\n**Starting heuristic:**\n- `Read`, `Glob`, `Grep`, `WebFetch` (docs) → allow\n- `Bash` (read-only commands like `git status`, `ls`, `cat`) → allow\n- `Edit`, `Write` on source files → queue at first, promote to allow per-path after observation\n- `Bash` (mutating: `git push`, `npm install`, `rm`, `docker`) → queue\n- Anything touching prod creds, deploy keys, customer DBs → deny\n\n**Depends on:** fr-16 (review queue + trust ladder feature). Without fr-16 the file is documentation only; with fr-16 it becomes the actual policy the server enforces.",
+      "text": "**Problem:** No team-shared policy on which tools should auto-allow, queue-for-review, or auto-deny. AI trust today is scattered across per-session `permissions.js` entries — inconsistent across teammates, no rationale documented, no review cadence.\n\n**Expected:** A single `_myco_/policy/ai-allowed-tools.md` documents the per-tool tier + rationale + quarterly review. Server enforces against this file (via fr-16) instead of each session re-deriving its own rules.\n\n**Starting tiers:**\n\n| Tier | Tools |\n|---|---|\n| **Allow** | `Read`, `Glob`, `Grep`, `WebFetch` (docs), `Bash` read-only (`git status`, `ls`, `cat`) |\n| **Queue → promote per-path after observation** | `Edit`, `Write` on source files |\n| **Queue** | `Bash` mutating: `git push`, `npm install`, `rm`, `docker` |\n| **Deny** | Anything touching prod creds, deploy keys, customer DBs |\n\n**Done when:** policy file lands at `_myco_/policy/ai-allowed-tools.md` + quarterly review on calendar + fr-16 server enforcement gates against this file (until fr-16 ships, this is documentation only).\n\n**Depends on:** fr-16 (review queue + trust ladder feature).\n\n**Source:** `_myco_/research/ai-team-collaboration.md` §5.1 — \"Calibrate AI trust per tool, not per session.\"",
       "layer": "Todo",
       "done": false,
       "addedAt": "2026-05-17T14:47:49.246Z",
@@ -970,7 +970,12 @@
       "comments": [],
       "meta": {
         "researchDoc": "_myco_/research/ai-team-collaboration.md",
-        "researchSection": "5 (humans + workflows adapt)"
+        "researchSection": "5 (humans + workflows adapt)",
+        "rewriteRequested": "long",
+        "rewritten": true,
+        "originalText": "**Problem:** Define + document the per-tool AI trust ladder for this team\n\n**Practice change** + light artifact. Source: §5.1 (\"Calibrate AI trust per tool, not per session\").\n\n**What:** New file `_myco_/policy/ai-allowed-tools.md` documenting per-tool tier (allow / queue-for-review / deny) and the rationale. Reviewed quarterly.\n\n**Starting heuristic:**\n- `Read`, `Glob`, `Grep`, `WebFetch` (docs) → allow\n- `Bash` (read-only commands like `git status`, `ls`, `cat`) → allow\n- `Edit`, `Write` on source files → queue at first, promote to allow per-path after observation\n- `Bash` (mutating: `git push`, `npm install`, `rm`, `docker`) → queue\n- Anything touching prod creds, deploy keys, customer DBs → deny\n\n**Depends on:** fr-16 (review queue + trust ladder feature). Without fr-16 the file is documentation only; with fr-16 it becomes the actual policy the server enforces.",
+        "rewrittenBy": "claude",
+        "rewrittenAt": "2026-05-19T05:10:51.714Z"
       }
     },
     {
@@ -1559,7 +1564,9 @@
       "addedAt": "2026-05-19T04:51:50.787Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -1568,5 +1575,5 @@
       }
     }
   ],
-  "updatedAt": "2026-05-19T04:58:07.256Z"
+  "updatedAt": "2026-05-19T05:10:51.714Z"
 }
