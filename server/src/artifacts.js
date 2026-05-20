@@ -464,6 +464,47 @@ function register(app, deps) {
   // dispatched text carries the `[run:<type>#<id>]` marker so
   // attach.handleChatMessage can bind the next turn_result back to
   // this item.
+  // fr-48 unification: every plan-item dispatch flows through the
+  // queue. /artifact/run, the chat-pane ▶ Run button, the quorum
+  // auto-fire, and the /queue slash command all funnel through
+  // _enqueueAndKickIfIdle. The queue is the SINGLE source of truth
+  // for "what claude is working on" — chip strip + status auto-
+  // advance + pause-on-failure all come for free.
+  //
+  // Result: an idle queue + Run click = immediate dispatch (queue
+  // kicks the head). A busy queue + Run click = appended to tail,
+  // auto-dispatched on completion of the current head.
+  function _enqueueAndKickIfIdle(ctx, type, itemId, user, opts = {}) {
+    const item = findItem(ctx.rec, type, itemId);
+    if (!item) return { ok: false, status: 404, error: 'no such item' };
+    let entry;
+    try {
+      entry = runQueue.addToQueue(ctx.rec, itemId, type, user);
+    } catch (err) {
+      return { ok: false, status: 409, error: err.message };
+    }
+    saveStore();
+    broadcastRunQueue(ctx.id, ctx.rec);
+    // Kick if idle (no running entry + not paused). The turn_result
+    // hook in attach.js handles all subsequent advances.
+    const hasRunning = ctx.rec.runQueue.some((e) => e.status === 'running');
+    if (!hasRunning && !ctx.rec.runQueuePaused) {
+      const session = getPtySession(ctx.id);
+      if (session) {
+        try {
+          runQueue.markRunning(ctx.rec, itemId);
+          saveStore();
+          broadcastRunQueue(ctx.id, ctx.rec);
+          const dispatchText = opts.text || buildArtifactRunText(type, item, user);
+          handleChatMessage(ctx.id, session, opts.dispatchUser || user, dispatchText);
+        } catch (err) {
+          console.error(`[runQueue] kick dispatch failed: ${err.message}`);
+        }
+      }
+    }
+    return { ok: true, entry, item, kicked: !hasRunning && !ctx.rec.runQueuePaused };
+  }
+
   app.post('/sessions/:id/artifact/run', (req, res) => {
     const ctx = fileApiPreamble(req, res, 'viewer');
     if (!ctx) return;
@@ -473,24 +514,22 @@ function register(app, deps) {
     if (!itemId) return res.status(400).json({ error: 'itemId required' });
     if (type === 'arch') return res.status(400).json({ error: 'arch is not actionable' });
     _loadArtifactIntoRecFromFile(ctx.rec, type);
-
-    const item = findItem(ctx.rec, type, itemId);
-    if (!item) return res.status(404).json({ error: 'no such item' });
-    const session = getPtySession(ctx.id);
-    if (!session) return res.status(409).json({ error: 'session not running' });
-
-    try {
-      const user = reqUser(req, ctx);
-      handleChatMessage(ctx.id, session, user, buildArtifactRunText(type, item, user));
-    } catch (err) {
-      console.error(`[artifact] run failed: ${err.message}`);
-      return res.status(500).json({ error: 'dispatch failed', detail: err.message });
+    const user = reqUser(req, ctx);
+    if (!isOwnerOrAdmin(ctx.id, user)) {
+      return res.status(403).json({ error: 'dispatch requires owner or admin' });
     }
-    item.done = true;
-    item.ranAt = new Date().toISOString();
-    persistArtifact(ctx.rec, type, ctx.rec.artifacts[type]);
-    broadcastArtifact(ctx.id, type, ctx.rec.artifacts[type]);
-    res.json({ ok: true, item, artifact: ctx.rec.artifacts[type] });
+    const result = _enqueueAndKickIfIdle(ctx, type, itemId, user);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    // Preserve the pre-fr-48 response shape (item + artifact) so any
+    // existing client / curl caller sees the same JSON. The new
+    // `queued`/`kicked` fields are additive.
+    res.json({
+      ok: true,
+      item: result.item,
+      artifact: ctx.rec.artifacts[type],
+      queued: true,
+      kicked: result.kicked,
+    });
   });
 
   // Manual check/uncheck — no dispatch.
@@ -516,23 +555,23 @@ function register(app, deps) {
   // Toggle a vote on a Plan item; auto-dispatch the run if the per-item
   // voter set hits AUTO_EXECUTE_VOTE_THRESHOLD distinct users. Test items
   // only carry votes (no auto-fire); arch items can't be voted on.
+  //
+  // fr-48 unification: auto-fire flows through the queue too. The
+  // quorum text (which names the voters) is passed as opts.text to
+  // _enqueueAndKickIfIdle so the dispatched chat message still
+  // surfaces the social context.
   function autoFireIfQuorum(ctx, type, item) {
     if (item.done) return null;
     if (type !== 'plan') return null;
     if (item.voters.length < AUTO_EXECUTE_VOTE_THRESHOLD) return null;
     const session = getPtySession(ctx.id);
     if (!session) return { err: 'session not running, vote stored but not dispatched' };
-    try {
-      // Quorum dispatch — title names the voters so both chat viewers
-      // and Claude see who drove the auto-fire. Same body+comments
-      // shape as manual run for visual consistency.
-      handleChatMessage(ctx.id, session, 'auto-quorum', buildArtifactQuorumText(type, item));
-    } catch (err) {
-      return { err: `dispatch failed: ${err.message}` };
-    }
-    item.done = true;
-    item.ranAt = new Date().toISOString();
-    return { fired: true };
+    const result = _enqueueAndKickIfIdle(ctx, type, item.id, 'auto-quorum', {
+      text: buildArtifactQuorumText(type, item),
+      dispatchUser: 'auto-quorum',
+    });
+    if (!result.ok) return { err: `dispatch failed: ${result.error}` };
+    return { fired: true, queued: true, kicked: result.kicked };
   }
 
   app.post('/sessions/:id/artifact/vote', (req, res) => {

@@ -2445,6 +2445,13 @@ test_chat_window() {
   # slashcmds.js; client renders pinned chip strip at top of chat pane
   # plus per-item button.
   node_test_result test/fr-48-run-queue.test.js "test/fr-48-run-queue.test.js (22 cases)"
+  # fr-48 follow-up: unified queue dispatch — every plan-item invocation
+  # (▶ Run button, POST /artifact/run, /artifact/vote auto-quorum)
+  # flows through runQueue. _enqueueAndKickIfIdle in artifacts.js is
+  # the shared helper; idle queue + Run click = immediate dispatch
+  # (kick), busy queue = appended to tail. Claude only ever picks
+  # tasks from the queue.
+  node_test_result test/fr-48-unified-dispatch.test.js "test/fr-48-unified-dispatch.test.js (4 cases)"
   # fr-9: file explorer surfaces git change decorators + download
   # button. Tests the server-side listDir gitStatus enrichment
   # (modified/added/untracked/dir-aggregate paths against a real

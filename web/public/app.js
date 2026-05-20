@@ -6498,26 +6498,34 @@ function renderArtifact(type, artifact) {
 // item via plan.runs[]. Claude decides freely whether to use the
 // Task subagent or work inline — the linkage is by turn, not by
 // agent topology.
-function onArtifactItemRun(type, itemId, itemText) {
-  if (!itemId) return;
-  const text = String(itemText || '').replace(/\s+/g, ' ').trim();
-  const preview = text.length > 160 ? text.slice(0, 157) + '…' : text;
-  const tag = `[run:${type}#${itemId}]`;
-  // Compose a clear message claude will recognize. The leading
-  // [run:<type>#<id>] marker is what binds the next turn_result to
-  // this item server-side (see attach.js handleChatMessage).
-  const msg = `${tag} Please work on this plan item:\n\n${preview || '(no description)'}`;
-  // Open the chatpane so the user sees activity; bring focus to the
-  // input to make follow-up typing easy.
+// fr-48 unification: ▶ Implement/Fix/Do button delegates to the
+// queue. Pre-fr-48 this composed a [run:plan#<id>] marker into the
+// chat input and auto-submitted, which directly dispatched. Now we
+// POST /queue/add — when the queue is idle the server kicks the
+// dispatch immediately (same UX as before), when something else is
+// running the new item appends to the queue (visible in the chip
+// strip). Either way claude only ever picks tasks from the queue.
+async function onArtifactItemRun(type, itemId /*, itemText */) {
+  const sid = state.activeId;
+  if (!sid || !itemId) return;
   try { setChatPane(true); } catch {}
-  const inputEl = document.getElementById('chat-input');
-  if (inputEl) {
-    inputEl.value = msg;
-    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-    inputEl.focus();
-    // Auto-submit so the user doesn't have to hit Send manually.
-    const form = document.getElementById('chat-form');
-    if (form) form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  try {
+    const res = await authedFetch(
+      `/sessions/${encodeURIComponent(sid)}/queue/add`,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itemId, type }) }
+    );
+    if (!res || !res.ok) {
+      const errData = res ? await res.json().catch(() => ({})) : {};
+      console.error('[fr-48 unified] queue add (from Run button) failed:', res && res.status, errData.error);
+      return;
+    }
+    // The server-side state-update {kind:'runQueue'} will fan out via
+    // WS; the chip strip re-renders + the persistent strip shows
+    // pending / running status. If the queue was idle, the server
+    // ALSO already invoked handleChatMessage with the [run:plan#<id>]
+    // marker, so the chat pane will start streaming the response.
+  } catch (err) {
+    console.error('[fr-48 unified] onArtifactItemRun threw:', err);
   }
 }
 
