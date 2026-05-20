@@ -616,7 +616,14 @@
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "5d5d6d67b702",
+          "user": "kkrazy",
+          "text": "Verify if fixed and close",
+          "ts": "2026-05-20T20:04:56.839Z"
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "when a td/fr/bug is done, the run button should be disabled. Also the run button should be named according the type, for bug, it can be fix, for fr, it can be implement, for todo, can be sth u suggest",
@@ -1216,19 +1223,31 @@
       "id": "bug-13",
       "text": "**Problem:** Chrome batch messages are only visible to the session owner, not other participants.\n**Expected:** Batch messages should be visible to all users in the session.\n**Actual:** Only the owner sees them.",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-18T02:19:43.766Z",
       "addedBy": "kkrazy",
       "source": "user",
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "rs-95059155525b",
+          "user": "claude",
+          "text": "**Verified fixed — re-closing.**\n\nThe bug-13 fix shipped in **9394e2c** (2026-05-18, \"viewer: bug-13 — full event fan-out to share-link viewers\"). The prior closure at 9d0e93f was reverted at 8cc4c65 with no commit-body explanation — re-verifying from scratch:\n\n**Code wiring (server)** — `server/src/attach.js attachViewerWebSocket` (line 1214):\n- `session.on('agent-event', onAgentEvent)` — viewer subscribes to chrome-batch events\n- `session.on('exit', onExit)` — viewer sees session-ended\n- `_shipAgentReplay(...)` on attach — viewer gets recent chrome batches, not only events going forward\n- `session.off('agent-event', ...)` + `session.off('exit', ...)` in close handler — no listener leak across reconnects\n- Frame shape: `{ t: 'agent-event', event }` — byte-identical to the owner path\n- Catch-up mode (`?afterSeq=N`): `_shipAgentReplay(session, ws, ..., afterSeq)` also fires for viewers\n\n**Single emit point** — `agent-session.js:1128` `this.emit('agent-event', stamped)` broadcasts via EventEmitter to every subscriber (owner + N viewers), no per-listener filtering.\n\n**Client (web/public/app.js)** — agent-event handler at line 1292 calls `_handleAgentFrame(msg)` unconditionally; `_appendAgentEvent` at line 3877-3879 has no `state.readOnly` guard. Verified: `grep state.readOnly` finds 11 callsites, all in queue/voting/comments/send-gate paths — none in the agent-event or chrome-batch render path.\n\n**Regression test** — `test/viewer-agent-events.test.js` (9 cases: 4 EventEmitter-fake behavior + 5 static-grep guards on attach.js). All pass green. The static guards pin all 5 contract points above.\n\n**Commits to attach.js since 9394e2c** (verified none regressed the viewer path): d07742d (bug-19 /qstatus), 80cf0ca (bug-19 denied-text), 72d7117 (fr-48 queue status), af45609 (fr-48 queue), c0596af (bug-21 reaper), 0eb1289 (bug-21 deadlock), c358af2 (bug-17 admin), 3bdc18f (fr-38 strict-mode), 1c7ae4c (bug-14 interrupt frame). All additive; none touched the agent-event/exit/replay block.\n\n**If you're still seeing the symptom on prod after this closure:** prod is pre-9394e2c — the bug-13 fix is sitting in the pending-deploy queue. `./deploy.sh` will resolve it.",
+          "ts": "2026-05-20T20:05:09.586Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "chrome batch messages should be visible to all users in the session, right now it's only visible to owner",
         "rewritten": true
-      }
+      },
+      "doneAt": "2026-05-20T20:05:09.586Z",
+      "doneBy": "claude"
     },
     {
       "id": "fr-26",
@@ -2040,5 +2059,5 @@
       }
     }
   ],
-  "updatedAt": "2026-05-20T19:59:51.570Z"
+  "updatedAt": "2026-05-20T20:05:09.586Z"
 }
