@@ -109,7 +109,7 @@
       "id": "bug-4",
       "text": "keep seeing \"claude09:05 AM\nNo response requested.\", investigate why it's happening on mycobeta",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-14T01:07:50.344Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -122,6 +122,19 @@
           "user": "kkrazy",
           "text": "it's also showing the following: (Claude ran 1 tool call and didn't post a text reply.) from time to time",
           "ts": "2026-05-14T01:09:38.407Z"
+        },
+        {
+          "id": "bug4-verify-2026052006",
+          "user": "claude",
+          "text": "✓ **Verified — both phantom-bubble strings are gone from the codebase.**\n\n**Producer was the pre-Phase-9 transcript-delta typing-indicator path.** It counted assistant tool calls and, when a turn finished without an `assistant_text` block, emitted one of two footer bubbles:\n- `\"No response requested.\"` — turn ended on tool-only output, no text reply expected\n- `\"(Claude ran N tool call(s) and didn't post a text reply.)\"` — turn ended with tool calls but no text\n\n**Removal commits:**\n- `494266a` — *Typing indicator: retire on spinner-stop, not just 30s idle* — dropped the \"ran N tool calls\" footer emission\n- `eecb4a9` — *Phase 9 step 9 (client): scrub dead transcript-renderer + readonly-fallback paths* — completed the cleanup\n\nA comment in `web/public/app.js:3549-3551` documents the deletion:\n```js\n// Phase 9 step 3 retired the transcript-delta path that\n// counted assistant tool calls, so the \"ran N tool calls without\n// reply\" footer is no longer produced here.\n```\n\n**Live mycobeta verification (today, against deployed `app.js?v=2026-05-20T05:58:40Z`):**\n```\n$ curl -sk \"https://mycobeta.labxnow.ai/app.js?v=…\" | grep -c \"No response requested\\|didn't post a text reply\"\n0\n```\n\n**Caveat:** existing chat rows in `rec.chat` from BEFORE the fix shipped (pre-Phase 9) will still display the strings when scrolled into view. New turns don't produce them. If you want to scrub the historical rows too, that would be a separate cleanup task (probably not worth the migration risk — they're just visible in old scroll-back).",
+          "ts": "2026-05-20T06:05:00.000Z",
+          "meta": {
+            "kind": "fix-summary",
+            "verifiedBy": "claude",
+            "fixCommits": ["494266a", "eecb4a9"],
+            "fixShipped": true,
+            "verifiedAgainst": "https://mycobeta.labxnow.ai/app.js?v=2026-05-20T05:58:40Z"
+          }
         }
       ]
     },
