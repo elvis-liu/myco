@@ -6341,10 +6341,24 @@ function renderArtifact(type, artifact) {
     // page load + hashchange). The id chip above triggers the
     // copy-link affordance; this attr is what the scroll/highlight
     // logic looks for.
+    // fr-47: explicit close/open affordance replaces the dual-purpose
+    // checkbox. Pre-fix the checkbox conflated two actions — checking
+    // dispatched to claude (POST /artifact/run), unchecking marked
+    // done=false. Now ▶ Run owns dispatch (queue path) and this
+    // button owns lifecycle: "Close" toggles done=true, "Reopen"
+    // toggles done=false. Same backend (POST /artifact/mark), no
+    // claude dispatch.
+    const closeLabel = it.done ? 'Reopen' : 'Close';
+    const closeTitle = it.done
+      ? 'Reopen this item (clears done state)'
+      : 'Close this item (marks done — no claude dispatch)';
+    const closeBtn = supportsVoting
+      ? `<button class="artifact-item-close" data-type="${escHtml(type)}" data-id="${escHtml(it.id)}" data-done="${it.done ? '1' : '0'}" title="${escHtml(closeTitle)}">${closeLabel}</button>`
+      : '';
     const liId = it.id ? `id="artifact-item-${escHtml(it.id)}"` : '';
     return `<li class="${cls}" ${liId} data-id="${escHtml(it.id)}">
       <div class="artifact-item-row">
-        <input class="artifact-item-checkbox" type="checkbox" ${it.done ? 'checked' : ''} data-type="${escHtml(type)}" data-id="${escHtml(it.id)}" />
+        ${closeBtn}
         ${idChip}
         <div class="artifact-item-text artifact-md">${renderMd(it.text || '')}</div>
       </div>
@@ -6383,8 +6397,9 @@ function renderArtifact(type, artifact) {
   // marked emits them as <pre><code class="language-mermaid">; this
   // pass converts them to .conv-mermaid divs.
   renderMermaidInContainer(body).catch(() => {});
-  body.querySelectorAll('.artifact-item-checkbox').forEach((cb) => {
-    cb.addEventListener('change', () => onArtifactItemToggle(cb));
+  // fr-47: explicit close/open button (replaces the old checkbox).
+  body.querySelectorAll('.artifact-item-close').forEach((btn) => {
+    btn.addEventListener('click', () => onArtifactItemClose(btn));
   });
   body.querySelectorAll('.artifact-item-delete').forEach((btn) => {
     btn.addEventListener('click', () => onArtifactItemDelete(type, btn.dataset.id));
@@ -6693,30 +6708,35 @@ async function onArtifactCommentDelete(type, itemId, commentId) {
   }
 }
 
-async function onArtifactItemToggle(cb) {
-  const type = cb.dataset.type;
-  const id = cb.dataset.id;
+// fr-47: lifecycle close/open — pure done-state toggle, no claude
+// dispatch. The ▶ Run button (post-fr-48 unification) owns the
+// dispatch path through the queue. The button carries data-done with
+// the CURRENT state ("1" = currently done → Reopen click flips to 0;
+// "0" = currently open → Close click flips to 1). The server is the
+// source of truth: we POST and let the next /artifact/mark broadcast
+// re-render the row with the new state + button label.
+async function onArtifactItemClose(btn) {
+  const type = btn.dataset.type;
+  const id = btn.dataset.id;
   const sid = state.activeId;
   if (!type || !id || !sid) return;
-  const li = cb.closest('li');
-  // For 'plan' items, checking the box also dispatches the todo back to
-  // the running Claude session via the canonical chat pipeline (the
-  // dispatched text carries a `[run:<type>#<id>]` marker that binds the
-  // next turn_result back to this item). The server is the source of
-  // truth — we POST and let the response confirm.
-  const action = (type === 'plan' && cb.checked) ? 'run' : 'mark';
+  const currentlyDone = btn.dataset.done === '1';
+  const nextDone = currentlyDone ? 0 : 1;
   try {
     const res = await authedFetch(
-      `/sessions/${encodeURIComponent(sid)}/artifact/${action}?type=${encodeURIComponent(type)}&itemId=${encodeURIComponent(id)}&done=${cb.checked ? '1' : '0'}`,
+      `/sessions/${encodeURIComponent(sid)}/artifact/mark?type=${encodeURIComponent(type)}&itemId=${encodeURIComponent(id)}&done=${nextDone}`,
       { method: 'POST' }
     );
     if (!res || !res.ok) {
-      cb.checked = !cb.checked;
+      const errData = res ? await res.json().catch(() => ({})) : {};
+      console.error('[fr-47] close/reopen failed:', res && res.status, errData.error);
       return;
     }
-    if (li) li.classList.toggle('is-done', cb.checked);
-  } catch {
-    cb.checked = !cb.checked;
+    // state-update {kind:'artifact'} will fan out via WS; the
+    // renderArtifact pass re-renders with the new done state +
+    // flipped button label.
+  } catch (err) {
+    console.error('[fr-47] close/reopen threw:', err);
   }
 }
 

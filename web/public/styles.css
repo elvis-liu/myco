@@ -1780,11 +1780,32 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   align-items: flex-start;
   gap: 8px;
 }
-.artifact-item-checkbox {
-  margin-top: 2px;
-  width: 16px; height: 16px;
+/* fr-47: artifact-item-checkbox removed — explicit Close/Reopen
+ * button (.artifact-item-close below) replaces the conflated
+ * dispatch-or-toggle checkbox. */
+.artifact-item-close {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.3));
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 11px;
   cursor: pointer;
   flex-shrink: 0;
+  font-weight: 500;
+}
+.artifact-item-close:hover {
+  color: var(--accent, #4caf50);
+  border-color: var(--accent, #4caf50);
+}
+.is-done .artifact-item-close {
+  /* Reopen-state visually distinct: a touch warmer to signal
+   * "this item is closed; click to revive". */
+  color: var(--accent-warm, #d97706);
+}
+.is-done .artifact-item-close:hover {
+  color: var(--accent-warm, #d97706);
+  border-color: var(--accent-warm, #d97706);
 }
 .artifact-item-text { flex: 1; word-break: break-word; min-width: 0; }
 /* Markdown rendered inside a plan/test item — paragraphs, lists,

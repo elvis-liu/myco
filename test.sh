@@ -2436,6 +2436,14 @@ test_chat_window() {
   # meta.editedAt stamped on edit; meta.originalText snapshotted on
   # FIRST edit only (so the very-first version stays recoverable).
   node_test_result test/fr-46-edit-plan-items.test.js "test/fr-46-edit-plan-items.test.js (24 cases)"
+  # fr-47: replace the dual-purpose checkbox with explicit Close /
+  # Reopen button. Pre-fix the checkbox conflated lifecycle toggle
+  # (uncheck → mark done=false) with claude dispatch (check on plan
+  # item → POST /artifact/run). Post-fr-48 unification the dispatch
+  # path lives on ▶ Run only; the Close button is pure lifecycle
+  # (POST /artifact/mark with done=1 / done=0). Negative guard that
+  # the close handler does NOT route through /artifact/run.
+  node_test_result test/fr-47-close-open-affordance.test.js "test/fr-47-close-open-affordance.test.js (6 cases)"
   # fr-48: per-session plan-item run-queue. Users add fr/td/bug items
   # via per-item ⊤ Queue button OR /queue slash; sequential auto-
   # dispatch via turn_result hook in attach.js _registerExternalSession.
