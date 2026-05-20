@@ -1891,6 +1891,73 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   margin-left: auto;  /* push delete to the right edge */
 }
 
+/* fr-46: edit affordances. Pencil button on item header + on each
+ * comment; trash button on each comment. All small / muted by default,
+ * a touch brighter on hover to confirm they're interactive. Hidden for
+ * viewers via conditional render in app.js (no need for CSS to hide). */
+.artifact-item-edit,
+.artifact-comment-edit,
+.artifact-comment-delete {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.artifact-item-edit:hover,
+.artifact-comment-edit:hover {
+  color: var(--accent, #4caf50);
+  border-color: var(--border-soft, rgba(128, 128, 128, 0.3));
+}
+.artifact-comment-delete:hover {
+  color: #d32f2f;
+  border-color: var(--border-soft, rgba(128, 128, 128, 0.3));
+}
+.artifact-comment-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.artifact-item-edited,
+.comment-edited {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin: 0 4px;
+}
+/* Inline edit textareas — match the surrounding font so the editor
+ * doesn't visually jar against the markdown preview it replaces. */
+.artifact-item-edit-textarea,
+.artifact-comment-edit-textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.4));
+  border-radius: 4px;
+  background: var(--bg-input, transparent);
+  color: inherit;
+  box-sizing: border-box;
+}
+.artifact-item-edit-actions,
+.artifact-comment-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.artifact-item-edit-actions button,
+.artifact-comment-edit-actions button {
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .artifact-item-delete {
   background: transparent;
   color: var(--muted);

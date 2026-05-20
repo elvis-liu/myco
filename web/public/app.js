@@ -6093,15 +6093,32 @@ function renderArtifact(type, artifact) {
       <button class="artifact-comment-toggle" data-id="${escHtml(it.id)}" title="Show comments">
         💬<span class="comment-count">${comments.length || ''}</span>
       </button>` : '';
+    // fr-46: pencil/trash on each comment, gated on !state.readOnly
+    // (owner+admin only). meta.editedBy/editedAt → small "edited" badge
+    // so the audit trail is visible to all readers.
+    const canEditComments = !state.readOnly;
     const commentsBlock = supportsVoting ? `
       <div class="artifact-comments" data-id="${escHtml(it.id)}" hidden>
         <div class="artifact-comments-list">${
-          comments.map((c) => `
+          comments.map((c) => {
+            const editedBadge = (c.meta && c.meta.editedBy)
+              ? `<span class="comment-edited" title="edited by ${escHtml(c.meta.editedBy)} at ${escHtml(c.meta.editedAt || '')}">· edited</span>`
+              : '';
+            const commentActions = canEditComments
+              ? `<span class="artifact-comment-actions">
+                  <button class="artifact-comment-edit" data-id="${escHtml(it.id)}" data-cid="${escHtml(c.id)}" title="Edit comment" aria-label="Edit comment">✎</button>
+                  <button class="artifact-comment-delete" data-id="${escHtml(it.id)}" data-cid="${escHtml(c.id)}" title="Delete comment" aria-label="Delete comment">×</button>
+                </span>`
+              : '';
+            return `
             <div class="artifact-comment" data-cid="${escHtml(c.id)}">
               <span class="comment-user">${escHtml(c.user || '?')}</span>
               <span class="comment-ts">${escHtml(formatChatTs(c.ts) || '')}</span>
+              ${editedBadge}
+              ${commentActions}
               <div class="comment-body">${renderMd(c.text || '')}</div>
-            </div>`).join('')
+            </div>`;
+          }).join('')
         }</div>
         <form class="artifact-comment-form" data-id="${escHtml(it.id)}">
           <input type="text" class="artifact-comment-input" placeholder="Add a comment…" maxlength="1000" />
@@ -6182,12 +6199,23 @@ function renderArtifact(type, artifact) {
           ? `Needs ${RUN_VOTE_THRESHOLD} upvote${RUN_VOTE_THRESHOLD === 1 ? '' : 's'} to run (currently ${points}). Click 👍 above to vote.`
           : `Blocked by unmet prereq${unmetDeps.length === 1 ? '' : 's'}: ${unmetDeps.join(', ')}. Mark them done first.`;
     const runBtn = `<button class="artifact-item-run" data-id="${escHtml(it.id)}" data-text="${escHtml(String(it.text || '').slice(0, 200))}" ${runEnabled ? '' : 'disabled'} title="${escHtml(runTitle)}" aria-label="${escHtml(runLabel)}">▶ ${escHtml(runLabel)}</button>`;
+    // fr-46: edit pencil for item body text. Gated on !state.readOnly
+    // (owner+admin only — viewers don't see it). meta.editedBy chip
+    // surfaces the audit trail for everyone.
+    const itemEditedBadge = (it.meta && it.meta.editedBy)
+      ? `<span class="artifact-item-edited" title="edited by ${escHtml(it.meta.editedBy)} at ${escHtml(it.meta.editedAt || '')}${it.meta.originalText ? ' · original preserved' : ''}">· edited</span>`
+      : '';
+    const editBtn = (!state.readOnly && supportsVoting)
+      ? `<button class="artifact-item-edit" data-id="${escHtml(it.id)}" title="Edit item body" aria-label="Edit">✎</button>`
+      : '';
     const actionsRow = `<div class="artifact-item-actions">
         ${mergedBadge}
         ${depsChip}
         ${runChip}
+        ${itemEditedBadge}
         ${voteBlock}
         ${runBtn}
+        ${editBtn}
         <button class="artifact-item-delete" data-id="${escHtml(it.id)}" title="Delete this item" aria-label="Delete">×</button>
       </div>`;
     // Plan/test items render their body as markdown so multi-line
@@ -6249,6 +6277,21 @@ function renderArtifact(type, artifact) {
   });
   body.querySelectorAll('.artifact-item-run').forEach((btn) => {
     btn.addEventListener('click', () => onArtifactItemRun(type, btn.dataset.id, btn.dataset.text || ''));
+  });
+  // fr-46: edit affordances. The pencil on item body opens an inline
+  // textarea; pencil on a comment does the same. Trash on a comment
+  // confirms then DELETEs. All three are no-ops for viewers (the
+  // buttons render conditionally on !state.readOnly upstream, but the
+  // bindings are defensive — querySelectorAll just won't find any
+  // matching nodes in that case).
+  body.querySelectorAll('.artifact-item-edit').forEach((btn) => {
+    btn.addEventListener('click', () => onArtifactItemEdit(type, btn.dataset.id));
+  });
+  body.querySelectorAll('.artifact-comment-edit').forEach((btn) => {
+    btn.addEventListener('click', () => onArtifactCommentEdit(type, btn.dataset.id, btn.dataset.cid));
+  });
+  body.querySelectorAll('.artifact-comment-delete').forEach((btn) => {
+    btn.addEventListener('click', () => onArtifactCommentDelete(type, btn.dataset.id, btn.dataset.cid));
   });
   // fr-6: id-chip click copies the deep link (`<origin><pathname>#<id>`)
   // to the clipboard AND updates location.hash in place, so the URL bar
@@ -6389,6 +6432,141 @@ async function onArtifactComment(type, itemId, text) {
     await loadArtifact(type);
   } catch (err) {
     console.error('comment failed', err);
+  }
+}
+
+// fr-46: edit an item's body text. Pencil click → swap the rendered
+// markdown for an inline textarea + Save/Cancel. Save fires PATCH
+// /artifact/item; Cancel triggers loadArtifact() to restore the
+// rendered markdown. Multi-paragraph + markdown survive because the
+// textarea preserves whitespace + the server stores it verbatim.
+async function onArtifactItemEdit(type, itemId) {
+  const sid = state.activeId;
+  if (!sid || !itemId) return;
+  // Locate the item card + read its current text. The card carries
+  // data-id; the body div is .artifact-item-text. We pull the source
+  // text from the cached artifact (not the rendered markdown — markdown
+  // would be lossy on re-render).
+  const cached = (state.artifacts && state.artifacts.byType && state.artifacts.byType[type]) || null;
+  const items = (cached && Array.isArray(cached.items)) ? cached.items : [];
+  const item = items.find((it) => it && it.id === itemId);
+  const currentText = item ? String(item.text || '') : '';
+  const li = document.querySelector(`li[data-id="${CSS.escape(itemId)}"]`);
+  const textDiv = li ? li.querySelector('.artifact-item-text') : null;
+  if (!textDiv) {
+    console.error('[fr-46] item-edit: could not find .artifact-item-text for', itemId);
+    return;
+  }
+  // Swap to edit mode.
+  const editorHtml = `
+    <textarea class="artifact-item-edit-textarea" rows="6">${escHtml(currentText)}</textarea>
+    <div class="artifact-item-edit-actions">
+      <button class="artifact-item-edit-save" type="button">Save</button>
+      <button class="artifact-item-edit-cancel" type="button">Cancel</button>
+    </div>`;
+  textDiv.innerHTML = editorHtml;
+  const textarea = textDiv.querySelector('.artifact-item-edit-textarea');
+  if (textarea) { textarea.focus(); textarea.select(); }
+  const onCancel = () => loadArtifact(type);
+  const onSave = async () => {
+    const newText = textarea ? String(textarea.value || '').trim() : '';
+    if (!newText) return onCancel();
+    if (newText === currentText) return onCancel();
+    try {
+      const res = await authedFetch(
+        `/sessions/${encodeURIComponent(sid)}/artifact/item?type=${encodeURIComponent(type)}&itemId=${encodeURIComponent(itemId)}`,
+        { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: newText }) }
+      );
+      if (!res || !res.ok) {
+        const errData = res ? await res.json().catch(() => ({})) : {};
+        console.error('[fr-46] item-edit save failed:', res && res.status, errData.error);
+        // Re-render to wipe the editor; user can retry.
+        return loadArtifact(type);
+      }
+      await loadArtifact(type);
+    } catch (err) {
+      console.error('[fr-46] item-edit save threw:', err);
+      loadArtifact(type);
+    }
+  };
+  const saveBtn = textDiv.querySelector('.artifact-item-edit-save');
+  const cancelBtn = textDiv.querySelector('.artifact-item-edit-cancel');
+  if (saveBtn) saveBtn.addEventListener('click', onSave);
+  if (cancelBtn) cancelBtn.addEventListener('click', onCancel);
+}
+
+// fr-46: edit a comment's text. Same inline-textarea UX as the item
+// editor above; PATCH /artifact/comment on save.
+async function onArtifactCommentEdit(type, itemId, commentId) {
+  const sid = state.activeId;
+  if (!sid || !itemId || !commentId) return;
+  const cached = (state.artifacts && state.artifacts.byType && state.artifacts.byType[type]) || null;
+  const items = (cached && Array.isArray(cached.items)) ? cached.items : [];
+  const item = items.find((it) => it && it.id === itemId);
+  const comments = (item && Array.isArray(item.comments)) ? item.comments : [];
+  const comment = comments.find((c) => c && c.id === commentId);
+  const currentText = comment ? String(comment.text || '') : '';
+  const commentDiv = document.querySelector(`.artifact-comment[data-cid="${CSS.escape(commentId)}"]`);
+  const bodyDiv = commentDiv ? commentDiv.querySelector('.comment-body') : null;
+  if (!bodyDiv) {
+    console.error('[fr-46] comment-edit: could not find .comment-body for', commentId);
+    return;
+  }
+  bodyDiv.innerHTML = `
+    <textarea class="artifact-comment-edit-textarea" rows="4">${escHtml(currentText)}</textarea>
+    <div class="artifact-comment-edit-actions">
+      <button class="artifact-comment-edit-save" type="button">Save</button>
+      <button class="artifact-comment-edit-cancel" type="button">Cancel</button>
+    </div>`;
+  const textarea = bodyDiv.querySelector('.artifact-comment-edit-textarea');
+  if (textarea) { textarea.focus(); textarea.select(); }
+  const onCancel = () => loadArtifact(type);
+  const onSave = async () => {
+    const newText = textarea ? String(textarea.value || '').trim() : '';
+    if (!newText) return onCancel();
+    if (newText === currentText) return onCancel();
+    try {
+      const res = await authedFetch(
+        `/sessions/${encodeURIComponent(sid)}/artifact/comment?type=${encodeURIComponent(type)}&itemId=${encodeURIComponent(itemId)}&commentId=${encodeURIComponent(commentId)}`,
+        { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: newText }) }
+      );
+      if (!res || !res.ok) {
+        const errData = res ? await res.json().catch(() => ({})) : {};
+        console.error('[fr-46] comment-edit save failed:', res && res.status, errData.error);
+        return loadArtifact(type);
+      }
+      await loadArtifact(type);
+    } catch (err) {
+      console.error('[fr-46] comment-edit save threw:', err);
+      loadArtifact(type);
+    }
+  };
+  const saveBtn = bodyDiv.querySelector('.artifact-comment-edit-save');
+  const cancelBtn = bodyDiv.querySelector('.artifact-comment-edit-cancel');
+  if (saveBtn) saveBtn.addEventListener('click', onSave);
+  if (cancelBtn) cancelBtn.addEventListener('click', onCancel);
+}
+
+// fr-46: delete a comment. Owner/admin can delete any; authors can
+// still delete their own (server-side authority — the client just
+// fires the request and lets the server enforce).
+async function onArtifactCommentDelete(type, itemId, commentId) {
+  const sid = state.activeId;
+  if (!sid || !itemId || !commentId) return;
+  if (!confirm('Delete this comment? This cannot be undone.')) return;
+  try {
+    const res = await authedFetch(
+      `/sessions/${encodeURIComponent(sid)}/artifact/comment?type=${encodeURIComponent(type)}&itemId=${encodeURIComponent(itemId)}&commentId=${encodeURIComponent(commentId)}`,
+      { method: 'DELETE' }
+    );
+    if (!res || !res.ok) {
+      const errData = res ? await res.json().catch(() => ({})) : {};
+      console.error('[fr-46] comment-delete failed:', res && res.status, errData.error);
+      return;
+    }
+    await loadArtifact(type);
+  } catch (err) {
+    console.error('[fr-46] comment-delete threw:', err);
   }
 }
 

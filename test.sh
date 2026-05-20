@@ -2426,6 +2426,16 @@ test_chat_window() {
   # is NOT on the list (negative guard against a careless refactor
   # adding it back).
   node_test_result test/fr-45-sdkopts-lint.test.js "test/fr-45-sdkopts-lint.test.js (13 cases)"
+  # fr-46: enable edit on plan items (body text + comments) — owner+admin
+  # only. Adds PATCH /sessions/:id/artifact/item and PATCH
+  # /sessions/:id/artifact/comment routes in artifacts.js, both gated on
+  # sessionsMod.isOwnerOrAdmin (fr-39 model). Extends DELETE comment to
+  # let owner+admin delete any comment, in addition to author-self-delete.
+  # Client adds pencil affordances on item cards + comment rows (gated
+  # on !state.readOnly so viewers don't see them). meta.editedBy +
+  # meta.editedAt stamped on edit; meta.originalText snapshotted on
+  # FIRST edit only (so the very-first version stays recoverable).
+  node_test_result test/fr-46-edit-plan-items.test.js "test/fr-46-edit-plan-items.test.js (24 cases)"
   # fr-9: file explorer surfaces git change decorators + download
   # button. Tests the server-side listDir gitStatus enrichment
   # (modified/added/untracked/dir-aggregate paths against a real

@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 
 const { extractArtifact } = require('./extractor');
-const { saveStore } = require('./sessions');
+const { saveStore, isOwnerOrAdmin } = require('./sessions');
 
 const ARTIFACT_TYPES = ['plan', 'arch', 'test'];
 
@@ -666,14 +666,86 @@ function register(app, deps) {
     if (!item) return res.status(404).json({ error: 'no such item' });
     ensureVoterAndCommentFields(item);
     const user = reqUser(req, ctx);
-    const isOwner = ctx.rec.user === user;
+    // fr-46: extend auth to allow owner+admin to delete ANY comment (not just
+    // session owner, not just author). Authors can still delete their own
+    // (existing behavior preserved). Admin coverage mirrors fr-39's
+    // delegated-admin model: granting /admin should include comment-deletion
+    // authority over the same plan-item surface.
+    const isAdmin = isOwnerOrAdmin(ctx.id, user);
     const before = item.comments.length;
-    // Authors can delete their own; session owner can delete any.
-    item.comments = item.comments.filter((c) => !(c.id === commentId && (c.user === user || isOwner)));
-    if (item.comments.length === before) return res.status(403).json({ error: 'not your comment' });
+    item.comments = item.comments.filter((c) => !(c.id === commentId && (c.user === user || isAdmin)));
+    if (item.comments.length === before) return res.status(403).json({ error: 'not your comment and not owner/admin' });
     persistArtifact(ctx.rec, type, ctx.rec.artifacts[type]);
     broadcastArtifact(ctx.id, type, ctx.rec.artifacts[type]);
     res.json({ ok: true, item });
+  });
+
+  // fr-46: PATCH item text — edit the body of an existing plan item.
+  // Auth: owner+admin only (matches fr-39 delegated-admin model). On first
+  // edit we snapshot the original text into item.meta.originalText; later
+  // edits don't overwrite that snapshot, so the very-first version stays
+  // recoverable for audit / accidental-rewrite recovery.
+  app.patch('/sessions/:id/artifact/item', (req, res) => {
+    const ctx = fileApiPreamble(req, res, 'viewer');
+    if (!ctx) return;
+    const type = String(req.query.type || '');
+    const itemId = String(req.query.itemId || '');
+    const text = String((req.body && req.body.text) || '').trim();
+    if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
+    if (type === 'arch') return res.status(400).json({ error: 'arch items can\'t be edited via this route' });
+    if (!itemId) return res.status(400).json({ error: 'itemId required' });
+    if (!text) return res.status(400).json({ error: 'text required' });
+    if (text.length > 64 * 1024) return res.status(400).json({ error: `text too long (max ${64 * 1024} chars)` });
+    const user = reqUser(req, ctx);
+    if (!isOwnerOrAdmin(ctx.id, user)) {
+      return res.status(403).json({ error: 'edit requires owner or admin' });
+    }
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
+    const item = findItem(ctx.rec, type, itemId);
+    if (!item) return res.status(404).json({ error: 'no such item' });
+    if (!item.meta) item.meta = {};
+    if (item.meta.originalText === undefined) {
+      item.meta.originalText = item.text;
+    }
+    item.text = text;
+    item.meta.editedBy = user;
+    item.meta.editedAt = new Date().toISOString();
+    persistArtifact(ctx.rec, type, ctx.rec.artifacts[type]);
+    broadcastArtifact(ctx.id, type, ctx.rec.artifacts[type]);
+    res.json({ ok: true, item });
+  });
+
+  // fr-46: PATCH comment text — edit an existing comment.
+  // Auth: owner+admin only. Stamps comment.meta.editedBy/editedAt so the
+  // UI can render a small "edited by X at T" badge.
+  app.patch('/sessions/:id/artifact/comment', (req, res) => {
+    const ctx = fileApiPreamble(req, res, 'viewer');
+    if (!ctx) return;
+    const type = String(req.query.type || '');
+    const itemId = String(req.query.itemId || '');
+    const commentId = String(req.query.commentId || '');
+    const text = String((req.body && req.body.text) || '').trim();
+    if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
+    if (!itemId || !commentId) return res.status(400).json({ error: 'itemId + commentId required' });
+    if (!text) return res.status(400).json({ error: 'text required' });
+    if (text.length > COMMENT_TEXT_MAX) return res.status(400).json({ error: `comment too long (max ${COMMENT_TEXT_MAX} chars)` });
+    const user = reqUser(req, ctx);
+    if (!isOwnerOrAdmin(ctx.id, user)) {
+      return res.status(403).json({ error: 'edit requires owner or admin' });
+    }
+    _loadArtifactIntoRecFromFile(ctx.rec, type);
+    const item = findItem(ctx.rec, type, itemId);
+    if (!item) return res.status(404).json({ error: 'no such item' });
+    ensureVoterAndCommentFields(item);
+    const comment = item.comments.find((c) => c.id === commentId);
+    if (!comment) return res.status(404).json({ error: 'no such comment' });
+    comment.text = text;
+    if (!comment.meta) comment.meta = {};
+    comment.meta.editedBy = user;
+    comment.meta.editedAt = new Date().toISOString();
+    persistArtifact(ctx.rec, type, ctx.rec.artifacts[type]);
+    broadcastArtifact(ctx.id, type, ctx.rec.artifacts[type]);
+    res.json({ ok: true, comment, item });
   });
 }
 
