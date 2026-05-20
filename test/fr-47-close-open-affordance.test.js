@@ -81,6 +81,22 @@ t('app.js click handler does NOT route through /artifact/run', () => {
     'onArtifactItemClose must NOT POST to /artifact/run — that path is the ▶ Run / queue dispatch');
 });
 
+t('app.js: closeBtn declaration comes BEFORE the actionsRow that references it (temporal-dead-zone guard)', () => {
+  // Regression guard from the 2026-05-20 "all plan items disappeared"
+  // incident — moving the button into actionsRow without moving its
+  // const declaration up put `${closeBtn}` in the template literal
+  // BEFORE `const closeBtn = …`. const is not hoisted, so the entire
+  // renderItem function threw ReferenceError + every plan item card
+  // failed to render. Pin the source order so this can't recur.
+  const declIdx = PROD_APP.search(/const\s+closeBtn\s*=/);
+  const useIdx = PROD_APP.search(/\$\{closeBtn\}/);
+  assert.ok(declIdx > -1, 'const closeBtn = … must exist');
+  assert.ok(useIdx > -1, '${closeBtn} reference must exist (inside actionsRow template)');
+  assert.ok(declIdx < useIdx,
+    `closeBtn declaration (idx ${declIdx}) must come BEFORE any \${closeBtn} reference (first use at idx ${useIdx}) — ` +
+    'const has no hoisting; out-of-order use throws ReferenceError and wipes the entire item render.');
+});
+
 t('app.js does NOT keep the old onArtifactItemToggle (no callers after checkbox removal)', () => {
   // The pre-fr-47 onArtifactItemToggle function operated on the
   // checkbox `cb`. With the checkbox gone, the function has no

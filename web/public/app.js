@@ -6322,6 +6322,23 @@ function renderArtifact(type, artifact) {
     // more semantic than a generic "Queue" verb. The queue chip strip
     // at the top of the chat pane remains the always-visible queue
     // status surface.
+    // fr-47: explicit close/open affordance replaces the dual-purpose
+    // checkbox. Pre-fix the checkbox conflated two actions — checking
+    // dispatched to claude (POST /artifact/run), unchecking marked
+    // done=false. Now ▶ Run owns dispatch (queue path) and this
+    // button owns lifecycle: "Close" toggles done=true, "Reopen"
+    // toggles done=false. Same backend (POST /artifact/mark), no
+    // claude dispatch.
+    // (Declared BEFORE the actions-row template literal references
+    // it — `const` has no hoisting, out-of-order use throws
+    // ReferenceError and wipes the entire renderItem render.)
+    const closeLabel = it.done ? 'Reopen' : 'Close';
+    const closeTitle = it.done
+      ? 'Reopen this item (clears done state)'
+      : 'Close this item (marks done — no claude dispatch)';
+    const closeBtn = supportsVoting
+      ? `<button class="artifact-item-close" data-type="${escHtml(type)}" data-id="${escHtml(it.id)}" data-done="${it.done ? '1' : '0'}" title="${escHtml(closeTitle)}">${closeLabel}</button>`
+      : '';
     const actionsRow = `<div class="artifact-item-actions">
         ${mergedBadge}
         ${depsChip}
@@ -6342,20 +6359,6 @@ function renderArtifact(type, artifact) {
     // page load + hashchange). The id chip above triggers the
     // copy-link affordance; this attr is what the scroll/highlight
     // logic looks for.
-    // fr-47: explicit close/open affordance replaces the dual-purpose
-    // checkbox. Pre-fix the checkbox conflated two actions — checking
-    // dispatched to claude (POST /artifact/run), unchecking marked
-    // done=false. Now ▶ Run owns dispatch (queue path) and this
-    // button owns lifecycle: "Close" toggles done=true, "Reopen"
-    // toggles done=false. Same backend (POST /artifact/mark), no
-    // claude dispatch.
-    const closeLabel = it.done ? 'Reopen' : 'Close';
-    const closeTitle = it.done
-      ? 'Reopen this item (clears done state)'
-      : 'Close this item (marks done — no claude dispatch)';
-    const closeBtn = supportsVoting
-      ? `<button class="artifact-item-close" data-type="${escHtml(type)}" data-id="${escHtml(it.id)}" data-done="${it.done ? '1' : '0'}" title="${escHtml(closeTitle)}">${closeLabel}</button>`
-      : '';
     const liId = it.id ? `id="artifact-item-${escHtml(it.id)}"` : '';
     return `<li class="${cls}" ${liId} data-id="${escHtml(it.id)}">
       <div class="artifact-item-row">
