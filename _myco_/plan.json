@@ -615,7 +615,7 @@
       "id": "bug-8",
       "text": "**Problem:** Completed td/fr/bug items still show an active \"Run\" button, and the generic label doesn't reflect the item's type.\n**Expected:** Once an item is done, the action button is disabled. Label varies by type: bug → \"Fix\", fr → \"Implement\", todo → suggested verb (e.g. \"Do\" or \"Start\").\n**Actual:** Button stays enabled after completion and is labeled \"Run\" regardless of type.",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-16T13:48:55.576Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -628,13 +628,24 @@
           "user": "kkrazy",
           "text": "Verify if fixed and close",
           "ts": "2026-05-20T20:04:56.839Z"
+        },
+        {
+          "id": "rs-77b9286aa799",
+          "user": "claude",
+          "text": "**Verified fixed — re-closing.**\n\nFix shipped in **6882608** (\"plan: bug-8 — disable Run on completed items + layer-aware verb\"). Prior closure (likely d924e63's batch close) got clobbered — same MCP stale-snapshot pattern as bug-11/bug-13/bug-15.\n\n**Code wiring (`web/public/app.js`)** — three coordinated pieces:\n1. `_runButtonLabel(layer)` — maps Bug → \"Fix\", Feature → \"Implement\", Todo → \"Do\", unknown → \"Run\"\n2. `runEnabled` gate now includes `!it.done` alongside the existing vote-gate + dep-gate\n3. Run-button template renders `_runButtonLabel(it.layer)` instead of hardcoded \"▶ Run\"; tooltip on done items explains why disabled\n\n**Regression test** — `test/plan-item-run-button.test.js`, 13 cases:\n- 3 done:true layer variants (Bug → \"Fix\" disabled, Feature → \"Implement\" disabled, Todo → \"Do\" disabled)\n- 3 done:false layer variants (all enabled with correct verb)\n- 2 negative gates (no votes / unmet deps still disable)\n- 1 unknown-layer fallback to \"Run\"\n- 1 tooltip-on-done check\n- 3 static-grep guards on the 3 code pieces above\n\n**All 13 pass green.** No commit since 6882608 touched the run-button label/gate region.\n\n**If still visible on prod:** prod is pre-6882608. Pending-deploy queue. `./deploy.sh` resolves.",
+          "ts": "2026-05-20T23:27:08.379Z",
+          "meta": {
+            "kind": "run-summary"
+          }
         }
       ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "when a td/fr/bug is done, the run button should be disabled. Also the run button should be named according the type, for bug, it can be fix, for fr, it can be implement, for todo, can be sth u suggest",
         "rewritten": true
-      }
+      },
+      "doneAt": "2026-05-20T23:27:08.379Z",
+      "doneBy": "claude"
     },
     {
       "id": "fr-8",
@@ -2142,5 +2153,5 @@
       ]
     }
   ],
-  "updatedAt": "2026-05-20T23:25:05.481Z"
+  "updatedAt": "2026-05-20T23:27:08.379Z"
 }
