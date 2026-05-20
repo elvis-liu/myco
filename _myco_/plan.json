@@ -873,6 +873,12 @@
             "kind": "run-summary",
             "runStartedAt": "2026-05-17T16:18:46.770Z"
           }
+        },
+        {
+          "id": "14685d6be8d7",
+          "user": "kkrazy",
+          "text": "Verify if fixed and close",
+          "ts": "2026-05-20T19:59:32.822Z"
         }
       ],
       "meta": {
@@ -1144,7 +1150,9 @@
       "addedAt": "2026-05-17T16:39:55.804Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -1312,19 +1320,32 @@
       "id": "bug-15",
       "text": "**Problem:** myco gets stuck whenever WebFetch is used on production (reported by @kkrazy 2026-05-18).\n\n**Repro status:** Does NOT reproduce on this server. Subagent test fired `WebFetch(\"https://example.com\")` → returned in ~3 s with ~30 byte body, clean SDK round-trip through `_canUseTool` → `_handlePermissionRequest` → `agent-event`. Historical events.jsonl across 3 prior session archives shows WebFetch listed in `system_init.tools` but ZERO actual `tool_use` events ever fired — so no past hangs in the local archives either.\n\n**Static-analysis findings:** No WebFetch-specific code path. It uses the same `_canUseTool` flow as every other tool (Bash/Read/Edit/Grep). Permission menu emits via `_emit({type:'permission_request'...})` + `emit('menu',...)`, fanned to all attached WSes. SDK options passed: `permissionMode:'default'`, no `allowedTools`/`disallowedTools`, no WebFetch-specific settings.\n\n**Likely root causes** (ranked by probability):\n1. Permission menu doesn't render on reporter's client (CSS / device-specific) → callback promise never resolves → indefinite hang from the outside\n2. Specific URL is slow/unreachable from prod server (no per-call timeout on `canUseTool`)\n3. Different SDK version / settings on prod vs this server\n4. Huge tool_result content jams the client browser (chrome batch with multi-MB body)\n\n**Need from reporter to advance:**\n- Which URL was being fetched\n- Which server (myco.labxnow.ai / mycobeta.labxnow.ai / other)\n- Was the permission menu visible in the chat pane at the time of the hang?\n- Browser console errors\n- If reproducible, attach output of `./collect-logs.sh --skip-mycobeta` grepped for `WebFetch|permission_request|agent-hook`\n\n**Possible fixes once root cause confirmed:**\n- `[diag-webfetch]` instrumentation (low-risk, ~30 lines, no behavior change) to capture next repro\n- 30s timeout on `canUseTool` promises with auto-deny + log\n- Cap `tool_result.content` at 64 KB in the wire frame (full content still in events.jsonl)",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-18T16:31:08.834Z",
       "addedBy": "claude",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [
         {
           "id": "468c9c88a299",
           "user": "kkrazy",
           "text": "please verify if this is still aproblem",
           "ts": "2026-05-20T09:55:19.702Z"
+        },
+        {
+          "id": "rs-91c4b116505a",
+          "user": "claude",
+          "text": "**Closed as resolved via bug-21 fix chain.**\n\nVerified against this session's `events.jsonl` (45 WebFetch-related events across 37 unique `tool_use` ids). Only one actual orphan permission_request exists across the entire history — the bug-21 incident at seq 3103/3104/3107/3108 (tool_use `sUN8qq3Dno` at 05:57:17). Every other WebFetch round-trip completed cleanly. The remaining \"orphans\" in the initial count are subagent-internal `tool_use` events that legitimately don't fire a parent-level `tool_result`.\n\nThe bug-21 fix chain (shipped, awaiting deploy) addresses the WebFetch hang root cause directly:\n\n- **0eb1289** `bug-21`: parallel `canUseTool` no longer overwrites the menu slot (`pendingMenus` Map replaces single-slot `pendingMenu`). This was the actual symptom — two near-simultaneous permission_requests stomped each other, leaving one promise hanging indefinitely.\n- **4ed02cd** `bug-14 round 2`: `abortController` typo fix — Stop now actually aborts a mid-flight WebFetch instead of letting it stream to completion.\n- **72d7117** `bug-21 round 2`: `iteration_aborted` / `fatal` events terminate queue entries (so a stuck WebFetch can be cancelled out of the run-queue cleanly).\n- **b243cc1** `fr-48`: dispatch marker prefix — `_activeRunItem` actually binds, so queue auto-advance fires on terminal events.\n\nProactive defenses listed in the original report (30 s `canUseTool` timeout, 64 KB `tool_result` cap, `[diag-webfetch]` instrumentation) are NOT shipped in this closure — they're documented as belt-and-braces for the unobserved root causes (#2, #3, #4 in the report). If WebFetch hangs recur post-deploy of the bug-21 fix chain, re-open with a fresh repro and we'll file those as a follow-up fr.",
+          "ts": "2026-05-20T19:59:51.570Z",
+          "meta": {
+            "kind": "run-summary"
+          }
         }
-      ]
+      ],
+      "doneAt": "2026-05-20T19:59:51.570Z",
+      "doneBy": "claude"
     },
     {
       "id": "fr-27",
@@ -1541,7 +1562,7 @@
       "id": "bug-17",
       "text": "**Problem:** Granting admin via `/admin` doesn't actually elevate the user — labxnow was made admin but still can't send messages to claude (admin/owner-only).\n**Expected:** After `/admin <user>` succeeds, that user gains admin permissions and can send messages to claude.\n**Actual:** Bot confirms \"is now an admin on this session\", but labxnow still sees the read-only viewer notice (\"claude-routing is owner-only\") and can't message claude.\n**Context:** Repro log — `/admin claude` → \"✓ is now an admin on this session. Inherits everything except delete-session + grant/revoke admin\"; labxnow then blocked with \"(read-only viewer — claude-routing is owner-only…)\".",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-19T01:45:45.818Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -2019,5 +2040,5 @@
       }
     }
   ],
-  "updatedAt": "2026-05-20T10:00:28.018Z"
+  "updatedAt": "2026-05-20T19:59:51.570Z"
 }
