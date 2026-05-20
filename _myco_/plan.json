@@ -863,7 +863,7 @@
       "id": "bug-11",
       "text": "**Problem:** Collapsed Chrome batch rows display only the last sub-item's byte size instead of the aggregate.\n**Expected:** `× 5 ✓ result · N bytes` where N is the sum of bytes across all included sub-items.\n**Actual:** Shows `4 bytes` (the last sub-item's size) even though 5 results are batched.\n**Context:** Example batch row `12:10:23 ▸ × 5 ✓ result · 4 bytes` collapsing sub-items each reporting `4 bytes`.",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-17T04:24:48.661Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -892,6 +892,15 @@
           "user": "kkrazy",
           "text": "Verify if fixed and close",
           "ts": "2026-05-20T19:59:32.822Z"
+        },
+        {
+          "id": "rs-f084fc802215",
+          "user": "claude",
+          "text": "**Verified fixed — re-closing.**\n\nThe fix shipped in **1fee18c** (\"chat: bug-11 — collapsed chrome batch shows AGGREGATE tool_result bytes\"). The prior closure at d924e63 (\"re-close 6 done items\") was reverted/clobbered (same MCP stale-snapshot pattern that hit bug-13 and bug-15). Re-verifying from scratch:\n\n**Code wiring (`web/public/app.js`)** — three coordinated edits:\n1. `_createChromeBatch` + `_appendToChromeBatch` accumulate `dataset.toolResultBytes` on every `tool_result` event\n2. `_chromeBatchHeadLabel` reads from the dataset accumulator (not from the latest event's `content.length`)\n3. `_mergeIdenticalChromeBatches` combines the `toolResultBytes` field when absorbing one batch into another; merge signature is bytes-free so different totals can still merge\n\n**Regression test** — `test/chrome-batch-bytes-aggregate.test.js`, 10 cases:\n- 5 reproducers (the original \"× 5 / 4 bytes each → 20 not 4\" + the user's \"× 9 / 921 bytes → 8289\" follow-up + mixed sizes + error-sticky + non-result events don't corrupt the aggregator)\n- 2 merge-path tests (absorb combines totals; bytes-free signature)\n- 3 static-grep guards pinning the 3 code edits above\n\n**All 10 pass green.** No commit since 1fee18c has touched the chrome-batch byte aggregation region (verified with `git log 1fee18c..HEAD -- web/public/app.js` filtered for chrome-batch/bytes/aggregate keywords — none matched).\n\n**If still visible on prod:** prod is pre-1fee18c. The fix is in the pending-deploy queue along with ~19 other commits. `./deploy.sh` resolves.",
+          "ts": "2026-05-20T23:25:05.481Z",
+          "meta": {
+            "kind": "run-summary"
+          }
         }
       ],
       "meta": {
@@ -907,7 +916,9 @@
           "summary": "408.1s · 26→27798 tok",
           "result": "**bug-11 shipped** — pushed to `origin/main` as `1fee18c`.\n\n## What landed\n\n| File | Change |\n|---|---|\n| `web/public/app.js` | 4 edits: aggregator helper, batch head label, bytes-free sig, merge byte combination |\n| `test/chrome-batch-bytes-aggregate.test.js` | New — 10 cases (red-flipped first per Best Practices §5) |\n| `test.sh` | Wired the new test into the suite |\n\n## The fix in one diagram\n\n```mermaid\ngraph LR\n    EV1[tool_result<br/>10 bytes]\n    EV2[tool_result<br/>20 bytes]\n    EV3[tool_result<br/>30 bytes]\n\n    subgraph \"Before — bug\"\n        SUM_B[\"head: ✓ result · 30 bytes<br/>(only last event)\"]\n    end\n\n    subgraph \"After — fix\"\n        ACC[\"dataset.toolResultBytes<br/>accumulator\"]\n        SUM_A[\"head: ✓ result · 60 bytes<br/>(aggregate)\"]\n    end\n\n    EV1 --> SUM_B\n    EV2 --> SUM_B\n    EV3 --> SUM_B\n\n    EV1 --> ACC\n    EV2 --> ACC\n    EV3 --> ACC\n    ACC --> SUM_A\n```\n\n## Test results\n\n```\ntest/chrome-batch-bytes-aggregate.test.js  10 passed, 0 failed\ntest/chrome-batch-merge.test.js             9 passed, 0 failed  (regression check — no break)\n```\n\nThe reproducer test \"× 5 tool_results of 4 bytes each → head shows 20, not 4\" goes green. The user-comment reproducer \"× 9 tool_results of 921 bytes → head shows 8289\" also goes green. A bytes-free merge signature keeps bug-10's merge-eligibility behavior unchanged even as the visible label now varies with aggregate totals.\n\nHeads-up: pending task #2 (post-SDK arch refresh) still open."
         }
-      ]
+      ],
+      "doneAt": "2026-05-20T23:25:05.481Z",
+      "doneBy": "claude"
     },
     {
       "id": "fr-15",
@@ -2131,5 +2142,5 @@
       ]
     }
   ],
-  "updatedAt": "2026-05-20T21:23:26.138Z"
+  "updatedAt": "2026-05-20T23:25:05.481Z"
 }
