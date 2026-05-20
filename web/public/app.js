@@ -5418,6 +5418,16 @@ function _flushOutboundChat() {
 function sendChatMessage(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return false;
+  // bug-19 follow-up: refuse to send if read-only viewer + text
+  // wouldn\'t pass the server\'s guest whitelist. The Send button is
+  // also disabled (visual), but Enter-key submit (submitChat) +
+  // programmatic ws.send paths bypass the disabled attr, so the
+  // canonical gate lives HERE in sendChatMessage. Returning false
+  // keeps the input populated so the user can edit + retry.
+  if (state.readOnly && !_isGuestAllowedText(trimmed)) {
+    console.log('[bug-19] refused to send (read-only viewer, text would be denied):', trimmed.slice(0, 60));
+    return false;
+  }
   const ws = state.ws;
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     // Queue + return true so the input clears and the user moves on. The

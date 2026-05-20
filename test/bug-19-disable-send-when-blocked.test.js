@@ -72,6 +72,31 @@ t('app.js Send-disable check runs on chat-input event (live as user types)', () 
     'chat-input must have an "input" event listener — that\'s how the disable state stays live');
 });
 
+t('app.js sendChatMessage REFUSES to send when state.readOnly + text would be denied', () => {
+  // The disabled-button gate prevents clicks, but Enter-key submit
+  // (submitChat) and programmatic ws.send paths bypass the disabled
+  // attr. The canonical gate must live in sendChatMessage itself
+  // so EVERY entry point honors it. User-reported regression:
+  // "send button is not disabled, i can still send".
+  //
+  // Locate the sendChatMessage function body and verify it
+  // short-circuits on state.readOnly + !_isGuestAllowedText.
+  const start = PROD_APP.search(/function\s+sendChatMessage\s*\(/);
+  assert.ok(start > -1, 'sendChatMessage function must exist');
+  const rest = PROD_APP.slice(start);
+  const next = rest.slice(1).search(/\n(async\s+)?function\s+[A-Za-z_]/);
+  const body = next === -1 ? rest : rest.slice(0, next + 1);
+  // Must reference state.readOnly AND the guest predicate in the
+  // body. Order doesn\'t matter as long as both are present and
+  // the function can return false on the deny path.
+  assert.ok(/state\.readOnly/.test(body),
+    'sendChatMessage must check state.readOnly');
+  assert.ok(/_isGuestAllowedText|isGuestAllowedText/.test(body),
+    'sendChatMessage must call the guest-allowed predicate');
+  assert.ok(/return\s+false/.test(body),
+    'sendChatMessage must return false on the deny path so the input retains the text');
+});
+
 t('app.js leaves Send enabled for non-guests (state.readOnly false → no block)', () => {
   // Negative guard: the disable logic must be gated on state.readOnly.
   // Owners + admins must always be able to send. Search for the
