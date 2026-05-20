@@ -131,7 +131,10 @@
           "meta": {
             "kind": "fix-summary",
             "verifiedBy": "claude",
-            "fixCommits": ["494266a", "eecb4a9"],
+            "fixCommits": [
+              "494266a",
+              "eecb4a9"
+            ],
             "fixShipped": true,
             "verifiedAgainst": "https://mycobeta.labxnow.ai/app.js?v=2026-05-20T05:58:40Z"
           }
@@ -1840,17 +1843,32 @@
       "id": "fr-47",
       "text": "**Problem:** Plan items lack a close/open affordance, and the existing checkbox conflates completion with state toggling.\n**Expected:** Plan items support an explicit close/open action; the checkbox is removed.\n**Actual:** Items can only be checked/unchecked via the checkbox, with no close/open control.",
       "layer": "Feature",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-20T00:51:05.899Z",
       "addedBy": "kkrazy",
       "source": "user",
       "voters": [],
-      "comments": [],
+      "comments": [
+        {
+          "id": "455a69d026f4",
+          "user": "claude",
+          "text": "✅ **Shipped** in commit `c0100c3` — explicit Close/Reopen button replaces the dual-purpose checkbox.\n\n## What changed\n\nPre-fix the `.artifact-item-checkbox` did TWO semantically distinct things based on direction:\n- **Check** a plan item → `action='run'` → POST `/artifact/run` → dispatched to claude\n- **Uncheck** → `action='mark'` → POST `/artifact/mark` → set `done=false`\n\nAfter fr-48 unified dispatch through the queue (▶ Run button now POSTs `/queue/add`), the check-to-run path was redundant — and the dual-purpose affordance was confusing: same widget, two meanings.\n\n## Replacement\n\n| State | Button | Action |\n|---|---|---|\n| `!it.done` | **Close** | POST `/artifact/mark?done=1` — pure lifecycle toggle, no claude dispatch |\n| `it.done` | **Reopen** | POST `/artifact/mark?done=0` — clears done state |\n\nThe button carries `data-done` reflecting CURRENT state; click flips to the opposite. State-update fans out via WS → `renderArtifact` re-renders with the new label.\n\n## Visual treatment\n- Same chip style as ✎ Edit / × Delete buttons (transparent, 11px, accent on hover)\n- `.is-done .artifact-item-close` gets a warm orange tint to distinguish Reopen at a glance\n\n## Removed\n- `onArtifactItemToggle` function (no callers since checkbox is gone — BP §1)\n- `.artifact-item-checkbox` CSS rule\n\n## Test coverage (`test/fr-47-close-open-affordance.test.js`, 6 cases)\n\n1. `artifact-item-checkbox` no longer in source\n2. `artifact-item-close` button rendered\n3. Literal strings \"Close\" + \"Reopen\" both present\n4. `onArtifactItemClose` POSTs to `/artifact/mark`\n5. **Negative guard:** `onArtifactItemClose` does NOT POST to `/artifact/run` (prevents re-introducing the conflated path)\n6. `onArtifactItemToggle` removed (no dead code)\n\nVerified: **175/175** across fr-47 + 14 adjacent suites (fr-46, all 5 fr-48 variants, plan-item-run-button, plan-run-comment, state-update, admin, strict-mode, chat-routing, stop-button, bug-21).\n\n## Net architecture after fr-47 + fr-48\n\n| Action | Affordance | Route |\n|---|---|---|\n| **Run item now** (dispatch to claude) | ▶ Implement / ▶ Fix / ▶ Do button | POST /queue/add (enqueue + kick if idle) |\n| **Close item** (mark done, no dispatch) | Close button | POST /artifact/mark?done=1 |\n| **Reopen item** (clear done) | Reopen button | POST /artifact/mark?done=0 |\n| **Edit body** | ✎ pencil → inline textarea | PATCH /artifact/item |\n| **Delete item** | × | DELETE /artifact/item |\n\nSingle-purpose affordances throughout.",
+          "ts": "2026-05-20T09:03:58.273Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-20T09:03:58.273Z",
+            "commit": "c0100c3",
+            "testFile": "test/fr-47-close-open-affordance.test.js"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "enable close/open on plan items and remove the checkbox",
         "rewritten": true
-      }
+      },
+      "doneAt": "2026-05-20T09:03:58.273Z",
+      "doneBy": "claude"
     },
     {
       "id": "fr-48",
@@ -1898,5 +1916,5 @@
       "doneBy": "claude"
     }
   ],
-  "updatedAt": "2026-05-20T02:16:50.694Z"
+  "updatedAt": "2026-05-20T09:03:58.273Z"
 }
