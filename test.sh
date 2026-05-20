@@ -2456,6 +2456,13 @@ test_chat_window() {
   # FIRST, then the denial reply. The user can recover what they typed
   # from chat history; other attached clients see what was tried.
   node_test_result test/bug-19-readonly-preserves-user-text.test.js "test/bug-19-readonly-preserves-user-text.test.js (5 cases)"
+  # bug-19 follow-up: client-side Send-button disable. When state.readOnly
+  # is true AND the typed text wouldn't pass the server's guest whitelist
+  # (no @mention, no allowed slash), the Send button gets disabled +
+  # the composer-blocked CSS class flips on — proactive feedback BEFORE
+  # round-trip. Predicate _isGuestAllowedText mirrors GUEST_ALLOWED_CMDS
+  # in attach.js handleChatMessage exactly; the test pins both ends.
+  node_test_result test/bug-19-disable-send-when-blocked.test.js "test/bug-19-disable-send-when-blocked.test.js (5 cases)"
   # fr-48: per-session plan-item run-queue. Users add fr/td/bug items
   # via per-item ⊤ Queue button OR /queue slash; sequential auto-
   # dispatch via turn_result hook in attach.js _registerExternalSession.

@@ -2684,6 +2684,18 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   color: #ffb0b0;
   border-color: rgba(255, 130, 130, .55);
 }
+/* bug-19: composer-blocked styling — read-only viewer typed a
+ * message that would be denied (no @mention, no allowed slash).
+ * The Send button is also disabled via the disabled attr; this
+ * class adds a subtle visual hint on the form itself so the user
+ * sees "this won't go through" before they reach for Send. */
+#chat-form.composer.composer-blocked {
+  border-color: rgba(220, 80, 80, 0.45);
+}
+#chat-form.composer.composer-blocked #chat-send {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 #chat-form.composer.composer-running .composer-btn-stop {
   display: inline-flex;
 }

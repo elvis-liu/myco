@@ -5460,10 +5460,14 @@ function applyReadOnly(owner) {
   state.readOnly = true;
   state.sessionOwner = owner || null;
   const banner = document.getElementById('readonly-banner');
-  if (!banner) return;
-  banner.hidden = false;
-  const ownerEl = banner.querySelector('.ro-owner');
-  if (ownerEl) ownerEl.textContent = owner ? '@' + owner : '';
+  if (banner) {
+    banner.hidden = false;
+    const ownerEl = banner.querySelector('.ro-owner');
+    if (ownerEl) ownerEl.textContent = owner ? '@' + owner : '';
+  }
+  // bug-19: re-evaluate Send-button disable state — readOnly just
+  // flipped on, so the existing typed text (if any) may now be denied.
+  _syncGuestSendStateIfBound();
 }
 
 function clearReadOnly() {
@@ -5475,6 +5479,20 @@ function clearReadOnly() {
     const ownerEl = banner.querySelector('.ro-owner');
     if (ownerEl) ownerEl.textContent = '';
   }
+  // bug-19: re-evaluate Send-button disable state — readOnly cleared,
+  // any previously-disabled Send should re-enable.
+  _syncGuestSendStateIfBound();
+}
+
+// bug-19: external trigger for the chat-form's Send-button disable
+// sync. The closure inside bindChatUi captures `sendBtn` + `form` +
+// `input` + the predicate. We dispatch a synthetic 'input' event to
+// invoke the closure without exposing it on the global. Idempotent +
+// safe to call before bindChatUi runs (no-op until the input exists).
+function _syncGuestSendStateIfBound() {
+  const input = document.getElementById('chat-input');
+  if (!input) return;
+  try { input.dispatchEvent(new Event('input', { bubbles: false })); } catch {}
 }
 
 function bindReadOnlyBanner() {
@@ -5501,6 +5519,34 @@ function hideMycoWaiting() {
   if (_mycoWaitingTimer) { clearTimeout(_mycoWaitingTimer); _mycoWaitingTimer = null; }
 }
 
+// bug-19 follow-up: client-side predicate mirroring the server's
+// read-only guest whitelist in attach.js handleChatMessage. When the
+// session is read-only, only messages matching this predicate make
+// it past the server — anything else round-trips to a denial reply.
+// We disable the Send button when this predicate fails so the user
+// gets immediate feedback BEFORE submission. List MUST stay in sync
+// with the GUEST_ALLOWED_CMDS in attach.js — test/bug-19-disable-
+// send-when-blocked.test.js pins both ends.
+const _GUEST_ALLOWED_CMDS = new Set([
+  '/td', '/fr', '/bug',                  // plan-item adds
+  '/help', '/me', '/whoami',
+  '/task', '/tasks', '/skip', '/cancel', // task-list controls
+  '/allowlist',                           // read-only view of allow/deny lists
+]);
+function _isGuestAllowedText(text) {
+  const s = String(text || '').trim();
+  if (!s) return true;                    // empty input — Send is gated separately
+  // @mention anywhere in the text (same shape attach.js
+  // _detectMentionTarget uses).
+  if (/(^|\s)@[A-Za-z0-9_-]+\b/.test(s)) return true;
+  // Whitelisted slash command (first token).
+  if (s.startsWith('/')) {
+    const cmd = s.split(/\s+/)[0].toLowerCase();
+    if (_GUEST_ALLOWED_CMDS.has(cmd)) return true;
+  }
+  return false;
+}
+
 function bindChatUi() {
   const form = document.getElementById('chat-form');
   const input = document.getElementById('chat-input');
@@ -5516,6 +5562,28 @@ function bindChatUi() {
   }
   input.addEventListener('input', autoResize);
   autoResize();
+
+  // bug-19 follow-up: live Send-button disable for read-only viewers.
+  // Reads state.readOnly + the typed text every input event; when the
+  // text wouldn't pass the server's guest whitelist, flip Send to
+  // disabled + add a CSS hook (.composer-blocked) for styling. Owners
+  // and admins (state.readOnly === false) are never blocked.
+  const sendBtn = document.getElementById('chat-send');
+  function _syncGuestSendState() {
+    if (!sendBtn) return;
+    const text = input.value || '';
+    if (state.readOnly && text.trim() && !_isGuestAllowedText(text)) {
+      sendBtn.disabled = true;
+      sendBtn.title = 'As a read-only viewer you can only @mention users or use /td, /fr, /bug, /help, /me, /whoami, /task, /skip, /cancel, /allowlist. Anything else is denied.';
+      form.classList.add('composer-blocked');
+    } else {
+      sendBtn.disabled = false;
+      sendBtn.title = 'Send (Enter)';
+      form.classList.remove('composer-blocked');
+    }
+  }
+  input.addEventListener('input', _syncGuestSendState);
+  _syncGuestSendState();
 
   function submitChat() {
     if (sendChatMessage(input.value)) {
