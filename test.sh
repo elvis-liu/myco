@@ -2452,6 +2452,12 @@ test_chat_window() {
   # (kick), busy queue = appended to tail. Claude only ever picks
   # tasks from the queue.
   node_test_result test/fr-48-unified-dispatch.test.js "test/fr-48-unified-dispatch.test.js (4 cases)"
+  # fr-48 bugfix: queue slash commands (/queue /qcancel /qclear
+  # /qresume) must broadcast state-update via the live session passed
+  # in ctx.session — not via a lazy attach.getSession() lookup which
+  # silently no-op'd under require-cycle conditions and left the chip
+  # strip stale after /qcancel (user-reported regression).
+  node_test_result test/fr-48-qslash-broadcast.test.js "test/fr-48-qslash-broadcast.test.js (6 cases)"
   # fr-9: file explorer surfaces git change decorators + download
   # button. Tests the server-side listDir gitStatus enrichment
   # (modified/added/untracked/dir-aggregate paths against a real

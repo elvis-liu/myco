@@ -1218,12 +1218,16 @@ function handleQueue(ctx) {
     }
   }
   sessionsMod.saveStore();
-  // Broadcast + kick the queue if this added a first pending entry
-  // and nothing is running. We mirror the /queue/add HTTP path's
-  // kick logic — see artifacts.js for the canonical implementation.
-  const session = attachMod.getSession ? attachMod.getSession(ctx.sessionId) : null;
+  // Broadcast via ctx.session (passed in by the dispatcher in
+  // attach.js handleChatMessage). Pre-fix used the attach module's
+  // session-lookup helper which silently no-op'd under certain
+  // require-cycle conditions — the user-reported "chip strip
+  // doesn't update after /qcancel" bug.
+  const session = ctx.session;
   if (session && typeof session.emit === 'function') {
     session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+    // Kick the queue if this added a first pending entry and nothing
+    // is running. Mirrors the /queue/add HTTP path's kick logic.
     const hasRunning = rec.runQueue.some((e) => e.status === 'running');
     if (!hasRunning && !rec.runQueuePaused) {
       const next = runQueue.peekNextPending(rec);
@@ -1285,9 +1289,14 @@ function handleQCancel(ctx) {
   }
   if (!removed) { ctx.reply(`(no queued entry for \`${id}\`)`); return; }
   sessionsMod.saveStore();
-  const attachMod = require('./attach');
-  const session = attachMod.getSession ? attachMod.getSession(ctx.sessionId) : null;
-  if (session) session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+  // Broadcast via ctx.session — the live session the dispatcher
+  // passed in. Pre-fix this re-discovered via the attach module's
+  // session-lookup helper which silently no-op'd in some
+  // require-cycle conditions, causing the user-reported "chip strip
+  // doesn't update after /qcancel" bug.
+  if (ctx.session && typeof ctx.session.emit === 'function') {
+    ctx.session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+  }
   ctx.reply(`✓ Cancelled \`${id}\` in the run-queue.`);
 }
 
@@ -1298,9 +1307,9 @@ function handleQClear(ctx) {
   if (!rec) { ctx.reply('(/qclear: session not found)'); return; }
   const removed = runQueue.clearQueue(rec);
   sessionsMod.saveStore();
-  const attachMod = require('./attach');
-  const session = attachMod.getSession ? attachMod.getSession(ctx.sessionId) : null;
-  if (session) session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+  if (ctx.session && typeof ctx.session.emit === 'function') {
+    ctx.session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+  }
   ctx.reply(`✓ Cleared ${removed} pending entr${removed === 1 ? 'y' : 'ies'} from the run-queue. Running + finished history preserved.`);
 }
 
@@ -1313,8 +1322,10 @@ function handleQResume(ctx) {
   if (!rec) { ctx.reply('(/qresume: session not found)'); return; }
   runQueue.resumeQueue(rec);
   sessionsMod.saveStore();
-  const session = attachMod.getSession ? attachMod.getSession(ctx.sessionId) : null;
-  if (session) session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+  const session = ctx.session;
+  if (session && typeof session.emit === 'function') {
+    session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+  }
   const next = runQueue.peekNextPending(rec);
   if (!next) { ctx.reply('✓ Queue unpaused — no pending entries to dispatch.'); return; }
   const planArtifact = rec.artifacts && rec.artifacts.plan;
