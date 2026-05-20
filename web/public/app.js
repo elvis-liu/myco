@@ -6329,6 +6329,7 @@ function renderArtifact(type, artifact) {
         ${itemEditedBadge}
         ${voteBlock}
         ${runBtn}
+        ${closeBtn}
         ${editBtn}
         <button class="artifact-item-delete" data-id="${escHtml(it.id)}" title="Delete this item" aria-label="Delete">×</button>
       </div>`;
@@ -6358,7 +6359,6 @@ function renderArtifact(type, artifact) {
     const liId = it.id ? `id="artifact-item-${escHtml(it.id)}"` : '';
     return `<li class="${cls}" ${liId} data-id="${escHtml(it.id)}">
       <div class="artifact-item-row">
-        ${closeBtn}
         ${idChip}
         <div class="artifact-item-text artifact-md">${renderMd(it.text || '')}</div>
       </div>
