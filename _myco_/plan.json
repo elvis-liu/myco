@@ -1462,7 +1462,9 @@
       "addedAt": "2026-05-19T00:47:27.166Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -1568,7 +1570,9 @@
       "addedAt": "2026-05-19T03:37:35.279Z",
       "addedBy": "ryan-blues",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -1600,7 +1604,9 @@
       "addedAt": "2026-05-19T04:45:21.938Z",
       "addedBy": "ryan-blues",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -1773,7 +1779,67 @@
       "text": "**Problem:** SDK options are passed as JS object keys (`sdkOpts.canUseTool`, `sdkOpts.hooks`, etc.). A typo in any field name is silently ignored by the SDK — no warning, no runtime error, just a feature that doesn't work. This is exactly how bug-14 round 2 sat undetected for ~3 weeks: we passed `abortSignal: controller.signal` when the documented field is `abortController: controller`. The SDK silently dropped the unknown field and Stop became a no-op until the user reported it. Same risk exists for every other field: `permissionMode`, `settings`, `settingSources`, `mcpServers`, `additionalDirectories`, `agents`, `includePartialMessages`, etc. ~15 fields total, any silent typo is a future bug-14.\n\n**Expected:** Add a validator that explicitly checks each `sdkOpts` key against the SDK's documented `Options` type. Either:\n(a) Hardcoded allowlist of known SDK option names (~15 strings), checked at the top of `_ensureIteration`. Unknown key → `console.error('[sdkOpts] unknown option: X — likely typo')` + (in dev mode) throw.\n(b) OR a startup-time assertion that loads `@anthropic-ai/claude-agent-sdk/sdk.d.ts` once, extracts the Options keys at boot, validates `sdkOpts` against that set on every `query()` call. Heavier but auto-tracks SDK version bumps.\n\n**Done when:**\n- One of the two validator shapes lands in `agent-session.js` _before_ the `query()` call.\n- Validator allowlist matches the actual `Options` type from the SDK version pinned in `package.json`.\n- Regression test `test/fr-45-sdkopts-lint.test.js` verifies: known-good options pass; `abortSignal` (the bug-14 typo) fails loudly; missing required options pass (the validator only flags UNKNOWN keys, not missing ones); validator survives SDK minor-version bumps (option set is reloadable).\n- Bonus: bug-14 regression test stays green (the `abortController:` static guard already exists, this is belt-and-suspenders).\n\n**Pri/Eff:** P1 / M (~1 day).\n\n**Source:** SDK best-practices research §3 — the bug-14 round 2 lesson. Without this, the next silent-typo bug will look exactly like the last one: passing tests, no errors, broken behavior in production until a user notices.",
       "doneAt": "2026-05-19T11:46:20.615Z",
       "doneBy": "claude"
+    },
+    {
+      "id": "fr-46",
+      "text": "enable edit on plan items",
+      "layer": "Feature",
+      "done": true,
+      "addedAt": "2026-05-20T00:50:10.639Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "d560f2321a67",
+          "user": "claude",
+          "text": "✅ **Shipped** in commit `43957ce` — inline edit for item body text + comment edit/delete, owner+admin only.\n\n## Server (`server/src/artifacts.js`)\n\n| Route | Auth | What it does |\n|---|---|---|\n| `PATCH /sessions/:id/artifact/item?type=plan&itemId=…` | `isOwnerOrAdmin` | Updates `item.text`. Stamps `meta.editedBy` + `meta.editedAt`. Preserves `meta.originalText` on **first edit only** (later edits don't overwrite the snapshot — fat-finger rewrites stay recoverable). |\n| `PATCH /sessions/:id/artifact/comment?type=plan&itemId=…&commentId=…` | `isOwnerOrAdmin` | Updates `comment.text`. Stamps `comment.meta.editedBy` + `editedAt`. |\n| `DELETE /sessions/:id/artifact/comment` (extended) | author **OR** `isOwnerOrAdmin` | Author-self-delete preserved. NEW: owner+admin can delete any comment. |\n\nAll three persist + broadcast via existing `persistArtifact` + `broadcastArtifact` helpers — connected clients see edits in-flight without a refresh.\n\n## Client (`web/public/app.js` + `styles.css`)\n\n- **Item card actions row** — pencil button (✎) next to ▶ Run and × Delete. Visible only when `!state.readOnly` (owner+admin). Click → swap the rendered markdown body for an inline `<textarea>` + Save/Cancel. Save fires PATCH; Cancel reloads to restore the markdown preview.\n- **Comment row** — two new buttons per comment (pencil + trash). Same `!state.readOnly` gate. Pencil → inline textarea (mirrors item editor). Trash → `confirm()` → DELETE.\n- **Audit chips** — `meta.editedBy`/`editedAt` surface as small italic \"· edited\" chips next to user/timestamp so the audit trail is visible to ALL readers (not just editors). Hover title shows editor + ISO timestamp; for items with preserved `originalText`, mentions that the original is recoverable.\n\n## Test coverage (`test/fr-46-edit-plan-items.test.js`, 24 cases)\n\n- **16 in-test behavior tests** against inlined `patchItem`/`patchComment`/`deleteComment` helpers mirroring prod handlers: owner edits, admin edits, viewer 403s, `meta.editedBy` stamping, `originalText` preserved on FIRST edit only (not overwritten by later edits), empty-text rejection, unknown-id 404, author-self-delete preserved, NEW owner-delete-any, NEW admin-delete-any, random-viewer-403.\n- **8 static-grep guards** anchoring the fix onto prod source: both PATCH routes declared; both gate on `isOwnerOrAdmin`; DELETE comment now uses `isOwnerOrAdmin`; item-edit stamps `editedBy` + `originalText`; `app.js` fires PATCH from new save handlers; `app.js` gates affordances on `!state.readOnly`.\n\n## Verification\n\nRegression sweep: **258/258 tests pass** across fr-46 + 17 adjacent suites (all fr-43/44/45, all bug-21 patterns, bug-17, admin/strict/chat/persist/replay/plan-*).\n\n## Followups (not in this commit)\n\n- **Visual indicator that an item has `originalText`** — currently exposed only via hover title on the \"· edited\" chip. Could add a \"↶ revert\" affordance that one-click restores from `meta.originalText`. Worth a small fr if anyone trips over the recoverable-but-hidden state.\n- **Edit history beyond just first version** — current snapshot is single-revision. If users want full audit / git-style diff history, would need an array. Not in scope for fr-46.\n- **Keyboard shortcuts in edit mode** — Ctrl+Enter to save, Esc to cancel. ~10 lines of UX polish. Worth a tiny fr if useful.",
+          "ts": "2026-05-20T01:12:12.600Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-20T01:12:12.600Z",
+            "commit": "43957ce",
+            "testFile": "test/fr-46-edit-plan-items.test.js"
+          }
+        }
+      ],
+      "doneAt": "2026-05-20T01:12:12.600Z",
+      "doneBy": "claude"
+    },
+    {
+      "id": "fr-47",
+      "text": "**Problem:** Plan items lack a close/open affordance, and the existing checkbox conflates completion with state toggling.\n**Expected:** Plan items support an explicit close/open action; the checkbox is removed.\n**Actual:** Items can only be checked/unchecked via the checkbox, with no close/open control.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-20T00:51:05.899Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "enable close/open on plan items and remove the checkbox",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "fr-48",
+      "text": "**Problem:** No way to queue multiple fr/td/bug items for myco to work through sequentially; users must hand-feed them one at a time.\n**Expected:** Users can add fr/td/bug items to a queue and myco picks them up one by one; the chat pane shows the queue with per-task status.\n**Actual:** Only single-item execution is supported and the chat pane has no queue/status view.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-20T01:02:57.088Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "allow adding fr/td/bug to a queue and myco will continue to work on them one by one. The chat pane should enhanced to show the queue with task status",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-19T11:46:20.615Z"
+  "updatedAt": "2026-05-20T01:12:12.600Z"
 }
