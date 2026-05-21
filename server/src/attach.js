@@ -1221,6 +1221,22 @@ function _sendAttachSnapshot(session, ws) {
       ws.send(JSON.stringify({ t: 'state-update', kind: 'tool-progress', open }));
     }
   } catch {}
+  // bug-27: ship this session's queue state on attach so the chip
+  // strip populates immediately + can't be a stale leak from whichever
+  // session the client previously had open. The client also clears
+  // state.runQueue on session-switch (belt-and-braces), but pushing
+  // here means the strip is correct on the FIRST frame, not after
+  // the first queue mutation.
+  try {
+    const sessionId = session.sessionId;
+    const rec = sessionsMod.getSessionRecord(sessionId);
+    if (rec) {
+      const state = runQueue.getQueueState(rec);
+      ws.send(JSON.stringify({ t: 'state-update', kind: 'runQueue', state }));
+    }
+  } catch (err) {
+    console.error(`[attach-snapshot] runQueue init failed: ${err.message}`);
+  }
 }
 
 // Read-only share-link attach. Streams chat history + transcript +

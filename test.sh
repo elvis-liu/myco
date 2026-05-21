@@ -2614,6 +2614,11 @@ test_chat_window() {
   # longer yank them back to the bottom. Pane open + session switch
   # bypass the guard via { force: true }.
   node_test_result test/bug-26-chat-auto-scroll-suppress.test.js "test/bug-26-chat-auto-scroll-suppress.test.js (13 cases)"
+  # bug-27: queue chip strip scoped per-session. Client clears
+  # state.runQueue + re-renders on session switch; server ships the
+  # new session's queue state via _sendAttachSnapshot so the strip
+  # populates immediately (not after the first queue mutation).
+  node_test_result test/bug-27-queue-session-scope.test.js "test/bug-27-queue-session-scope.test.js (7 cases)"
   # Sidebar user-manual link: icon button beside the "+" New-session
   # button opens an in-app modal that fetches /USER_MANUAL.md (served
   # by an explicit route since the file lives at the project root)

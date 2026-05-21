@@ -2457,20 +2457,32 @@
       "id": "bug-27",
       "text": "**Problem:** Switching sessions leaks the queue UI into other sessions.\n**Expected:** Each session's queue stays scoped to that session.\n**Actual:** After switching sessions, the queue from the previous session shows up on other sessions.",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-21T23:09:07.607Z",
       "addedBy": "kkrazy",
       "source": "user",
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "rs-75c3a2ded33b",
+          "user": "claude",
+          "text": "**Fixed.** Queue chip strip now scoped per-session.\n\n### Root cause\n\n`state.runQueue` is a single global. It was only mutated by incoming `state-update` WS frames (server-side broadcast). `_resetUiForNewSession` cleared a dozen UI states but never touched runQueue — so the previous session's chips sat in the DOM until the new session's first queue mutation. AND `_sendAttachSnapshot` shipped artifacts + claude-status + mode + tool-progress on attach, but NOT runQueue — so an idle queue on the new session would never repopulate after a switch.\n\n### Two-sided fix (belt-and-braces)\n\n**1. Client** (`web/public/app.js` `_resetUiForNewSession`):\n\n```js\nstate.runQueue = null;\ntry { _renderRunQueueStrip(); } catch {}\n```\n\nThe strip's null/empty guard hides + clears `innerHTML` on `!q || !Array.isArray(q.entries) || !q.entries.length` — so the chips disappear immediately on switch.\n\n**2. Server** (`server/src/attach.js` `_sendAttachSnapshot`):\n\n```js\ntry {\n  const state = runQueue.getQueueState(rec);\n  ws.send(JSON.stringify({ t: 'state-update', kind: 'runQueue', state }));\n} catch (err) { console.error(...); }\n```\n\nShips the new session's queue state on attach — parallel to the existing `artifacts-init` push. Wrapped in try/catch so a getQueueState throw can't abort the rest of the snapshot.\n\n### Why both sides\n\n- Client-only fix would leave the strip BLANK after switching back to a session with an active queue, until the next mutation. Bad UX for idle queues.\n- Server-only fix would still show stale data briefly between session switch and the WS frame arriving (typically <100 ms but real on slow networks).\n- Both together: strip is correct on the FIRST frame, every switch.\n\n### Test\n\n`test/bug-27-queue-session-scope.test.js` — **7 cases**:\n- 2 client guards (`_resetUiForNewSession` clears runQueue + re-renders strip)\n- 4 server guards (`_sendAttachSnapshot` ships kind:runQueue, uses getQueueState, try/catch wrapped, import present)\n- 1 renderer-contract guard (`_renderRunQueueStrip` handles null/empty gracefully — pins the precondition the client-side clear relies on)\n\nWired into test.sh. Subagent verified all 64 individual test files pass; no regressions in attach-flow neighbors (bug-12, bug-19-*, fr-48-*, plan-cache-session-isolation, viewer-agent-events).",
+          "ts": "2026-05-21T23:40:46.930Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "when switching session, the queue show up on other sessions",
         "rewritten": true
-      }
+      },
+      "doneAt": "2026-05-21T23:40:46.930Z",
+      "doneBy": "claude"
     }
   ],
-  "updatedAt": "2026-05-21T23:22:25.633Z"
+  "updatedAt": "2026-05-21T23:40:46.930Z"
 }

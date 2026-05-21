@@ -1115,6 +1115,12 @@ function _resetUiForNewSession(id) {
   state._lastPermQueueLen = 0;
   state._agentChatPaneArmed = false;         // re-arm auto-open for the next agent frame
   state.chatUserScrolledUp = false;          // bug-26: fresh session starts at the bottom
+  // bug-27: clear the previous session's queue state so the chip
+  // strip doesn't leak across sessions. The server ships the new
+  // session's queue via _sendAttachSnapshot on attach; until that
+  // frame lands, the strip stays hidden (empty entries → hidden).
+  state.runQueue = null;
+  try { _renderRunQueueStrip(); } catch {}
   // Hide the modal if it was open for the previous session.
   const modal = document.getElementById('perm-modal');
   if (modal) modal.hidden = true;
