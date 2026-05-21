@@ -138,7 +138,7 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
 
 #sidebar h1 { font-size: 1rem; font-weight: 600; color: var(--accent); letter-spacing: .05em; flex: 1; }
 
-#btn-spawn, #btn-collapse {
+#btn-spawn, #btn-collapse, #btn-manual {
   background: var(--border);
   color: var(--text);
   border: none;
@@ -150,9 +150,127 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   align-items: center;
   justify-content: center;
   transition: transform .08s, background .15s;
+  cursor: pointer;
 }
 #btn-spawn { background: var(--accent); color: #000; font-size: 1.2rem; font-weight: 600; }
-#btn-spawn:active, #btn-collapse:active { transform: scale(.92); }
+#btn-spawn:active, #btn-collapse:active, #btn-manual:active { transform: scale(.92); }
+#btn-manual:hover { background: rgba(255, 255, 255, .08); }
+#btn-manual .sidebar-icon-svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* User-manual modal: full-screen-ish reader, scrollable body, github-
+   dark markdown styling matches the file viewer's prose look. */
+#manual-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, .65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+#manual-dialog {
+  background: #161b22;
+  color: var(--text);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  width: min(820px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, .6);
+  overflow: hidden;
+}
+#manual-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+  flex-shrink: 0;
+}
+#manual-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--accent);
+  flex: 1;
+}
+#manual-edit {
+  font-size: .82rem;
+  color: #8ab8ff;
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid rgba(138, 184, 255, .25);
+  border-radius: 6px;
+}
+#manual-edit:hover { background: rgba(138, 184, 255, .08); }
+#manual-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.6rem;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+#manual-close:hover { background: rgba(255, 255, 255, .08); color: var(--text); }
+#manual-body {
+  padding: 18px 24px 28px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  font-size: .92rem;
+  line-height: 1.55;
+}
+#manual-body h1, #manual-body h2, #manual-body h3 {
+  margin-top: 1.4em;
+  margin-bottom: .5em;
+  color: var(--text);
+}
+#manual-body h1:first-child, #manual-body h2:first-child { margin-top: 0; }
+#manual-body code {
+  background: rgba(255, 255, 255, .08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: .88em;
+}
+#manual-body pre {
+  background: #0d1117;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+#manual-body pre code { background: transparent; padding: 0; }
+#manual-body table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+}
+#manual-body th, #manual-body td {
+  border: 1px solid rgba(255, 255, 255, .12);
+  padding: 6px 10px;
+  text-align: left;
+}
+#manual-body th { background: rgba(255, 255, 255, .04); }
+#manual-body a { color: #8ab8ff; }
+
+@media (max-width: 900px) {
+  #manual-modal { padding: 0; }
+  #manual-dialog {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+  }
+}
 
 /* Lucide-style inline SVG icons in the chrome cluster (btn-files,
    btn-plan, btn-arch, btn-test, btn-chat). Centered inside the 32px

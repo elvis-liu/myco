@@ -2577,6 +2577,12 @@ test_chat_window() {
   # chrome batch with tool_use + hook_allow. Added to
   # AGENT_DEFAULT_EXPANDED so the bubble shows expanded.
   node_test_result test/bug-23-tool-result-bubble.test.js "test/bug-23-tool-result-bubble.test.js (8 cases)"
+  # Sidebar user-manual link: icon button beside the "+" New-session
+  # button opens an in-app modal that fetches /USER_MANUAL.md (served
+  # by an explicit route since the file lives at the project root)
+  # and renders it via the existing renderMd → marked.parse path.
+  # Esc + click-outside dismiss; content cached on first open.
+  node_test_result test/sidebar-manual-link.test.js "test/sidebar-manual-link.test.js (15 cases)"
   # fr-9: file explorer surfaces git change decorators + download
   # button. Tests the server-side listDir gitStatus enrichment
   # (modified/added/untracked/dir-aggregate paths against a real

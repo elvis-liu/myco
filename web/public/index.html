@@ -31,6 +31,12 @@
         <h1>&lt;/myco&gt;</h1>
         <button id="btn-collapse" title="Collapse">‹</button>
         <button id="btn-spawn" title="New session">+</button>
+        <!-- User-manual link. Opens an in-app modal that fetches
+             /USER_MANUAL.md and renders it via marked. lucide-style
+             book-open icon matches the chrome icons' visual language. -->
+        <button id="btn-manual" title="User manual" aria-label="User manual">
+          <svg class="sidebar-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+        </button>
       </header>
       <ul id="session-list"></ul>
       <!-- Mobile-only slogan — sits below the session cards in the
@@ -333,6 +339,19 @@
           ✕ Cancel
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- User-manual modal. Sidebar's book-open icon fetches
+       /USER_MANUAL.md and renders it via marked into the body. -->
+  <div id="manual-modal" hidden>
+    <div id="manual-dialog">
+      <header id="manual-header">
+        <h2>User manual</h2>
+        <a id="manual-edit" href="https://github.com/kkrazy/myco/blob/main/USER_MANUAL.md" target="_blank" rel="noopener" title="Open on GitHub">↗ GitHub</a>
+        <button id="manual-close" title="Close (Esc)" aria-label="Close">×</button>
+      </header>
+      <div id="manual-body" class="markdown-body">Loading…</div>
     </div>
   </div>
 

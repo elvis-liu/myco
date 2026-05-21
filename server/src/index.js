@@ -103,6 +103,20 @@ app.get(['/', '/index.html'], (req, res) => {
   res.send(indexHtml());
 });
 
+// Serve the user manual from the project root. Lives outside
+// web/public (it's a top-level doc shipped with the repo), so it
+// needs an explicit route — the static-mount below only sees files
+// under PUBLIC_DIR. The sidebar's "open user manual" icon button
+// fetches this URL and renders it via marked inside an in-app modal.
+app.get('/USER_MANUAL.md', (req, res) => {
+  const manualPath = path.join(__dirname, '..', '..', 'USER_MANUAL.md');
+  res.set('Content-Type', 'text/markdown; charset=utf-8');
+  res.set('Cache-Control', 'no-store');
+  res.sendFile(manualPath, (err) => {
+    if (err && !res.headersSent) res.status(404).send('USER_MANUAL.md not found');
+  });
+});
+
 app.use(express.static(PUBLIC_DIR, { etag: false, lastModified: false, maxAge: 0 }));
 
 // SDK Phase 9 step 2: xterm.js and its addons (fit/webgl/canvas) are

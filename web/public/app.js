@@ -730,6 +730,17 @@ async function init() {
   document.getElementById('spawn-ok').addEventListener('click', doSpawn);
   document.getElementById('btn-expand').addEventListener('click', () => setSidebar(false));
   document.getElementById('btn-collapse').addEventListener('click', () => setSidebar(true));
+  // User-manual modal: open + close + Esc-to-close + click-outside-to-close.
+  // Manual content is lazy-fetched on first open and cached in memory.
+  document.getElementById('btn-manual').addEventListener('click', openManualModal);
+  document.getElementById('manual-close').addEventListener('click', closeManualModal);
+  document.getElementById('manual-modal').addEventListener('click', (e) => {
+    // Close when clicking the dim overlay (not the dialog contents).
+    if (e.target.id === 'manual-modal') closeManualModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !document.getElementById('manual-modal').hidden) closeManualModal();
+  });
   document.getElementById('spawn-cwd').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); doSpawn(); }
     else if (e.key === 'Escape') { e.preventDefault(); closeSpawnModal(); }
@@ -1506,6 +1517,40 @@ function _stripNonAsciiOnInput(ev) {
 
 function closeSpawnModal() {
   document.getElementById('spawn-modal').hidden = true;
+}
+
+// ── user-manual modal ─────────────────────────────────────────────────
+// Fetched lazily on first open + cached in memory so subsequent opens
+// are instant. The manual lives at /USER_MANUAL.md (served by an
+// explicit server route since it lives in the project root, not
+// web/public/). Rendered via the existing renderMd → marked.parse.
+let _manualHtmlCache = null;
+async function openManualModal() {
+  const modal = document.getElementById('manual-modal');
+  const body = document.getElementById('manual-body');
+  if (!modal || !body) return;
+  modal.hidden = false;
+  if (_manualHtmlCache) {
+    body.innerHTML = _manualHtmlCache;
+    body.scrollTop = 0;
+    return;
+  }
+  body.textContent = 'Loading…';
+  try {
+    const res = await fetch('/USER_MANUAL.md', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const md = await res.text();
+    _manualHtmlCache = renderMd(md);
+    body.innerHTML = _manualHtmlCache;
+    body.scrollTop = 0;
+  } catch (err) {
+    body.innerHTML = '<p style="color:#f6b48a">Could not load the user manual: '
+      + escHtml(err && err.message || String(err)) + '</p>';
+  }
+}
+function closeManualModal() {
+  const modal = document.getElementById('manual-modal');
+  if (modal) modal.hidden = true;
 }
 
 async function doSpawn() {
