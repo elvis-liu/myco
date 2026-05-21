@@ -2249,7 +2249,37 @@
       },
       "doneAt": "2026-05-21T06:42:08.318Z",
       "doneBy": "claude"
+    },
+    {
+      "id": "fr-54",
+      "text": "**Problem:** No `/git` command exists to run git subcommands (clone, config, login, fetch, …) directly from within the tool.\n**Expected:** `/git <args>` passes through to the underlying `git` CLI and returns its output as-is.\n**Actual:** Users must shell out manually; git operations aren't available as a first-class slash command.",
+      "layer": "Feature",
+      "done": true,
+      "addedAt": "2026-05-21T18:13:48.020Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "rs-5a6f2691f3de",
+          "user": "claude",
+          "text": "**Shipped.** `/git <args>` runs git in the session workspace and returns its output as-is.\n\n### Spec\n\n- **Auth**: owner + admin only (matches `/queue` / `/admin` precedent). Guests get a denial reply.\n- **Passthrough**: no allowlist, no subcommand filtering. `/git status`, `/git log --oneline -10`, `/git clone https://…`, `/git fetch origin`, `/git push` — all work the same as `git <args>` in a shell.\n- **Cwd**: the session's `absCwd` (the workspace dir under `/wks/<user>/<id>/`).\n- **Safety**: `execFile` (not `exec`) so args go through argv, not shell — no injection. `GIT_TERMINAL_PROMPT=0` so git NEVER blocks on a credential prompt (it'll fail fast instead).\n- **Caps**: 60s timeout · 1 MB stdout · 16 KB stderr.\n- **Output**: markdown code-fenced block with `$ git <args>` header, stdout, stderr (if any), and an exit-code footer (`(exit 0)` / `(exit code N)` / `⚠ git timed out after 60s`).\n\n### Arg parsing\n\nTiny shlex-style splitter (`_parseShellArgs`): whitespace-split, honors double + single quotes, supports `\\\\` and `\\\"` escapes inside double quotes. Examples:\n\n- `/git commit -m \"fix: bug X\"` → `['commit', '-m', 'fix: bug X']`\n- `/git log --format=\"%h %s\" -n 3` → `['log', '--format=%h %s', '-n', '3']`\n\nPower users wanting full shell semantics can wrap with `sh -c` themselves.\n\n### Auth for private repos\n\nV1 doesn't auto-inject PATs into URLs. Use one of:\n- `/setpat <token>` first (saves a per-repo PAT for /feature, /bug — does NOT yet flow into /git clone URLs)\n- Embed PAT in URL: `/git clone https://x-access-token:<PAT>@github.com/owner/repo.git`\n- Pre-configure git credential helper at the container level\n\nA follow-up could auto-rewrite `git clone https://github.com/owner/repo` to include the stored PAT if the host matches a known token. Filed as future enhancement, not in scope.\n\n### `git config --global` caveat\n\nMutates the container's shared `$HOME`, affecting all sessions. NOT blocked (consenting adults), but the usage text flags it. Use `git config` (no `--global`) for project-scoped config.\n\n### Test\n\n`test/fr-54-git-passthrough.test.js` — **17 cases**:\n- 7 arg-splitter cases (simple split, whitespace collapse, double-quoted phrase, single-quoted phrase, backslash escape, empty input, mixed quoted/unquoted)\n- 2 registration guards (COMMANDS entry + handleGit function exists)\n- 6 handler-guard static-greps (isOwnerOrAdmin gate, cwd=rec.absCwd, execFile, timeout/maxBuffer/GIT_TERMINAL_PROMPT, usage on empty args, exit-code in reply)\n- 2 end-to-end async cases (real tempdir git repo: `git status` returns clean output; `git log` in non-repo dir surfaces stderr)\n\nWired into `test.sh`. Per CLAUDE.md pre-commit §1: full sweep — 58/58 individual test files green; `./test.sh` itself bails only on the known-environmental BusyBox `grep -P` issue (unrelated).",
+          "ts": "2026-05-21T18:26:29.698Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "add a git support of /git which supports clone/config/login/fetch... basically running git cmd as is",
+        "rewritten": true
+      },
+      "doneAt": "2026-05-21T18:26:29.698Z",
+      "doneBy": "claude"
     }
   ],
-  "updatedAt": "2026-05-21T06:42:08.318Z"
+  "updatedAt": "2026-05-21T18:26:29.698Z"
 }

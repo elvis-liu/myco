@@ -2561,6 +2561,13 @@ test_chat_window() {
   # both attach.js GUEST_ALLOWED_CMDS and app.js _GUEST_ALLOWED_CMDS
   # so the Send button stays enabled for read-only viewers).
   node_test_result test/fr-49-whatsnext.test.js "test/fr-49-whatsnext.test.js (24 cases)"
+  # fr-54: /git <args> pass-through to the git CLI in the session
+  # workspace. Owner+admin only. Full passthrough (no allowlist, no
+  # PAT auto-injection). execFile (not exec) to avoid shell-injection;
+  # 60s timeout, 1MB stdout cap, GIT_TERMINAL_PROMPT=0 so creds never
+  # block. Includes a shlex-style arg splitter unit test + end-to-end
+  # smoke against a real tempdir git repo.
+  node_test_result test/fr-54-git-passthrough.test.js "test/fr-54-git-passthrough.test.js (17 cases)"
   # td-30: Plan view header + chrome icon tooltip must be the single
   # word "Plan" (was "Plan — todos extracted from session" which both
   # crowded the chrome and misled users — the view shows todos AND

@@ -178,6 +178,15 @@ const COMMANDS = [
     usage: '/whatsnext · /next · /next force',
     handler: handleWhatsNext,
   },
+  // fr-54: pass-through to the underlying `git` CLI. Owner+admin only.
+  // Runs in the session's workspace; no allowlist, no PAT injection
+  // (use /setpat or PAT-in-URL for private repos).
+  {
+    names: ['git'],
+    summary: 'Run a git subcommand in the session workspace. Output is returned as-is. Owner+admin only.',
+    usage: '/git status · /git log --oneline -10 · /git clone https://… · /git fetch origin',
+    handler: handleGit,
+  },
   {
     names: ['help'],
     summary: 'List available chat commands',
@@ -1450,6 +1459,114 @@ async function handleWhatsNext(ctx) {
   ctx.reply([header, ...rows].join('\n') + footer);
 }
 
+// fr-54: shell-style arg splitter for /git. Splits on whitespace,
+// honors double + single-quoted phrases, supports backslash-escapes
+// inside double quotes (\", \\). Returns an array of argv tokens.
+// Intentionally minimal — `git` arguments rarely need shell features
+// beyond quoting a path or commit message; if a power user needs full
+// shell semantics they can wrap with `sh -c` themselves.
+function _parseShellArgs(str) {
+  const out = [];
+  const s = String(str || '');
+  let cur = '';
+  let inDouble = false;
+  let inSingle = false;
+  let escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) {
+      cur += ch;
+      escape = false;
+      continue;
+    }
+    if (inDouble) {
+      if (ch === '\\') { escape = true; continue; }
+      if (ch === '"') { inDouble = false; continue; }
+      cur += ch;
+      continue;
+    }
+    if (inSingle) {
+      if (ch === "'") { inSingle = false; continue; }
+      cur += ch;
+      continue;
+    }
+    if (ch === '"') { inDouble = true; continue; }
+    if (ch === "'") { inSingle = true; continue; }
+    if (/\s/.test(ch)) {
+      if (cur.length > 0) { out.push(cur); cur = ''; }
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.length > 0) out.push(cur);
+  return out;
+}
+
+// fr-54: /git <args> — pass-through to the git CLI in the session's
+// workspace. Owner+admin only. Full passthrough — no allowlist of
+// subcommands, no PAT auto-injection. Use /setpat or embed the PAT
+// in the URL (https://x-access-token:<PAT>@github.com/...) for
+// private-repo clone/fetch/push.
+//
+// Caps: 60s timeout, 1 MB stdout, 16 KB stderr. Output rendered as a
+// markdown code-fenced block with stdout, then stderr (if any), then
+// an exit-code footer.
+//
+// Note: `git config --global` mutates the container's shared $HOME,
+// affecting all sessions. We don't block it (consenting adults) but
+// the help text flags this.
+function handleGit(ctx) {
+  if (!sessionsMod.isOwnerOrAdmin(ctx.sessionId, ctx.user)) {
+    const rec = sessionsMod.getSessionRecord(ctx.sessionId);
+    const ownerLabel = rec ? `@${rec.user}` : '(unknown)';
+    ctx.reply(`(/git is owner+admin only. Session owner is ${ownerLabel}.)`);
+    return;
+  }
+  const argsRaw = String((ctx && ctx.args) || '').trim();
+  if (!argsRaw) {
+    ctx.reply('Usage: `/git <subcommand> [args...]` — runs `git <args>` in the session workspace. Example: `/git status`, `/git log --oneline -10`, `/git clone https://github.com/owner/repo`. Use `/setpat <token>` first (or embed a PAT in the URL) for private-repo clone/fetch/push. NOTE: `git config --global` affects all sessions sharing this container.');
+    return;
+  }
+  const rec = sessionsMod.getSessionRecord(ctx.sessionId);
+  if (!rec || !rec.absCwd) {
+    ctx.reply('(/git: session has no workspace)');
+    return;
+  }
+  let argv;
+  try {
+    argv = _parseShellArgs(argsRaw);
+  } catch (err) {
+    ctx.reply(`⚠ /git: arg parse failed: ${err.message}`);
+    return;
+  }
+  if (!argv.length) {
+    ctx.reply('Usage: `/git <subcommand> [args...]`');
+    return;
+  }
+  const { execFile } = require('child_process');
+  execFile('git', argv, {
+    cwd: rec.absCwd,
+    timeout: 60000,
+    maxBuffer: 1024 * 1024,      // 1 MB stdout cap
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },  // never block on creds prompt
+  }, (err, stdout, stderr) => {
+    const out = String(stdout || '').slice(0, 64 * 1024);
+    const erro = String(stderr || '').slice(0, 16 * 1024);
+    const lines = [`$ git ${argsRaw}`];
+    if (out.trim()) lines.push('```\n' + out.replace(/\n+$/, '') + '\n```');
+    if (erro.trim()) lines.push('**stderr:**\n```\n' + erro.replace(/\n+$/, '') + '\n```');
+    if (err) {
+      if (err.killed) lines.push('⚠ git timed out after 60s');
+      else if (err.code === 'ENOENT') lines.push('⚠ git not found on PATH');
+      else if (typeof err.code === 'number') lines.push(`(exit code ${err.code})`);
+      else lines.push(`⚠ ${err.message}`);
+    } else {
+      lines.push('(exit 0)');
+    }
+    ctx.reply(lines.join('\n'));
+  });
+}
+
 function handleHelp(ctx) {
   const lines = ['Available chat commands:'];
   for (const c of COMMANDS) {
@@ -1485,4 +1602,7 @@ module.exports = {
   dedupePlanItems,
   // Exposed for testing the project-context loader.
   _loadProjectContext,
+  // fr-54: exposed for unit-testing the shell-style arg splitter
+  // /git uses (quoted phrases, escapes, etc.).
+  _parseShellArgs,
 };
