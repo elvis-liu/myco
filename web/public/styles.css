@@ -2156,6 +2156,23 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .runqueue-chip-success { opacity: 0.6; }
 .runqueue-chip-failed  { background: rgba(211, 47, 47, 0.15); border-color: rgba(211, 47, 47, 0.5); }
 .runqueue-chip-cancelled { opacity: 0.5; text-decoration: line-through; }
+/* bug-24: overflow chip surfaces dropped entries when the strip caps
+   finished/pending. Visually distinct (muted, dashed, no hover) so it
+   doesn't read as a clickable entry. Hover tooltip points users at
+   /qstatus for the full list. */
+.runqueue-overflow {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px dashed var(--border-soft, rgba(128, 128, 128, 0.4));
+  color: var(--muted);
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  cursor: help;
+  opacity: 0.7;
+}
 .runqueue-paused {
   color: #d32f2f;
   font-weight: bold;

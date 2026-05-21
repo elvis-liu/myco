@@ -2604,6 +2604,11 @@ test_chat_window() {
   # _appendAgentEvent short-circuits them at the top with a
   # console.warn (events.jsonl still records for diagnostics).
   node_test_result test/bug-25-unknown-event-suppress.test.js "test/bug-25-unknown-event-suppress.test.js (7 cases)"
+  # bug-24: runqueue chip strip caps finished (last 2) + running (all)
+  # + pending (first 3) so busy sessions don't grow an unbounded strip.
+  # Dropped counts surface as "+N earlier" / "+N more" overflow chips;
+  # /qstatus still shows the full list (no data loss).
+  node_test_result test/bug-24-runqueue-strip-cap.test.js "test/bug-24-runqueue-strip-cap.test.js (12 cases)"
   # Sidebar user-manual link: icon button beside the "+" New-session
   # button opens an in-app modal that fetches /USER_MANUAL.md (served
   # by an explicit route since the file lives at the project root)

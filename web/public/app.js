@@ -5166,7 +5166,17 @@ function _applyStateUpdate(msg) {
 // the item id + status glyph; click → scroll to item in Plan tab.
 // Cancel × on pending entries; the strip itself is read-only for
 // viewers (the buttons just won't render).
+//
+// bug-24: cap chips so the strip doesn't grow unbounded in busy
+// sessions. Shows the LAST N_FINISHED finished + all running + the
+// FIRST N_PENDING pending; anything dropped surfaces as a "+N more"
+// chip (clickable hint that /qstatus shows the full list). Reading
+// order matches the queue's chronology: finished → running → pending.
 function _renderRunQueueStrip() {
+  const RUNQUEUE_MAX_FINISHED_CHIPS = 2;
+  const RUNQUEUE_MAX_PENDING_CHIPS = 3;
+  const FINISHED_STATUSES = new Set(['success', 'failed', 'cancelled']);
+
   const q = state.runQueue || null;
   const host = document.getElementById('runqueue-strip')
     || (() => {
@@ -5185,21 +5195,55 @@ function _renderRunQueueStrip() {
   }
   host.hidden = false;
   const pausedBadge = q.paused ? '<span class="runqueue-paused">⏸ paused</span>' : '';
-  const chips = q.entries.map((e) => {
+
+  // Partition by status so we can cap finished + pending independently
+  // while keeping every running entry visible. Preserves the queue's
+  // chronological order within each partition (entries arrive ordered).
+  const finished = q.entries.filter((e) => FINISHED_STATUSES.has(e.status));
+  const running = q.entries.filter((e) => e.status === 'running');
+  const pending = q.entries.filter((e) => e.status === 'pending');
+  const other = q.entries.filter((e) =>
+    !FINISHED_STATUSES.has(e.status) && e.status !== 'running' && e.status !== 'pending');
+
+  // Keep the MOST RECENT n finished (tail of the list) + the FIRST n
+  // pending (head of the list). Drop counts are surfaced as overflow
+  // chips so users know nothing's lost — just hidden.
+  const finishedShown = finished.slice(-RUNQUEUE_MAX_FINISHED_CHIPS);
+  const finishedDropped = finished.length - finishedShown.length;
+  const pendingShown = pending.slice(0, RUNQUEUE_MAX_PENDING_CHIPS);
+  const pendingDropped = pending.length - pendingShown.length;
+
+  const renderChip = (e) => {
     const glyph = ({ pending: '⏸', running: '⚙', success: '✓', failed: '⚠', cancelled: '✗' })[e.status] || '?';
     const cancelable = !state.readOnly && e.status === 'pending';
     const cancelBtn = cancelable
       ? ` <button class="runqueue-cancel" data-id="${escHtml(e.itemId)}" title="Remove ${escHtml(e.itemId)} from queue" aria-label="Cancel">×</button>`
       : '';
     return `<span class="runqueue-chip runqueue-chip-${escHtml(e.status)}" data-id="${escHtml(e.itemId)}" title="${escHtml(e.status)} · added by @${escHtml(e.addedBy || '?')}">${glyph} ${escHtml(e.itemId)}${cancelBtn}</span>`;
-  }).join('');
+  };
+  const renderOverflow = (n, side) => {
+    if (n <= 0) return '';
+    const label = side === 'finished' ? `+${n} earlier` : `+${n} more`;
+    const title = `${n} ${side === 'finished' ? 'finished' : 'pending'} entr${n === 1 ? 'y' : 'ies'} hidden — run /qstatus for the full queue`;
+    return `<span class="runqueue-overflow" title="${escHtml(title)}">${escHtml(label)}</span>`;
+  };
+
+  const chipsHtml = [
+    renderOverflow(finishedDropped, 'finished'),
+    ...finishedShown.map(renderChip),
+    ...running.map(renderChip),
+    ...other.map(renderChip),
+    ...pendingShown.map(renderChip),
+    renderOverflow(pendingDropped, 'pending'),
+  ].filter(Boolean).join('');
+
   const resumeBtn = (!state.readOnly && q.paused)
     ? ' <button class="runqueue-resume" title="Unpause queue + dispatch next pending">▶ Resume</button>'
     : '';
   const clearBtn = (!state.readOnly && q.counts && q.counts.pending > 0)
     ? ' <button class="runqueue-clear" title="Drop all pending entries">Clear pending</button>'
     : '';
-  host.innerHTML = `<span class="runqueue-label">Queue:</span> ${chips} ${pausedBadge} ${resumeBtn} ${clearBtn}`;
+  host.innerHTML = `<span class="runqueue-label">Queue:</span> ${chipsHtml} ${pausedBadge} ${resumeBtn} ${clearBtn}`;
   host.querySelectorAll('.runqueue-chip').forEach((chip) => {
     chip.addEventListener('click', (ev) => {
       // Clicks on the × button don't navigate.

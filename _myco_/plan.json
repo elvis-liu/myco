@@ -2343,17 +2343,38 @@
       "id": "bug-24",
       "text": "**Problem:** Queue display above the chat pane is cluttered because it shows every task.\n**Expected:** Show only some finished and some pending tasks.\n**Actual:** Shows all tasks.",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-21T19:12:20.016Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
-      "comments": [],
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "rs-c155d57f1827",
+          "user": "claude",
+          "text": "**Fixed.** Queue chip strip now caps at **2 finished + all running + 3 pending** with overflow indicators.\n\n### Behavior\n\nReading order matches queue chronology: finished → running → pending. For a busy queue (e.g. 5 finished + 1 running + 8 pending) the strip now shows:\n\n`Queue: [+3 earlier] [✓ f-3] [✓ f-4] [⚙ r-0] [⏸ p-0] [⏸ p-1] [⏸ p-2] [+5 more]`\n\n8 visual elements (6 real chips + 2 overflow) instead of the 14 chips it would have rendered before. `/qstatus` still surfaces the full list — nothing's lost, just hidden from the live strip.\n\n### Implementation\n\n`web/public/app.js `_renderRunQueueStrip``:\n- Two constants at the top: `RUNQUEUE_MAX_FINISHED_CHIPS = 2` · `RUNQUEUE_MAX_PENDING_CHIPS = 3`\n- Partition entries by status (`success/failed/cancelled` = finished, `running`, `pending`)\n- `finishedShown = finished.slice(-MAX_FINISHED)` — TAIL (most recent finishes matter)\n- `pendingShown = pending.slice(0, MAX_PENDING)` — HEAD (next-up matters)\n- Running entries always all-shown (usually 0 or 1)\n- Drop counts → `+N earlier` / `+N more` overflow chips with tooltip pointing at `/qstatus`\n\n`web/public/styles.css `.runqueue-overflow``: dashed border + muted color + `cursor: help` so the overflow chip reads as informational, not clickable.\n\n### Test\n\n`test/bug-24-runqueue-strip-cap.test.js` — **12 cases**:\n- 3 cap-constant guards (finished=2, pending=3, FINISHED_STATUSES set)\n- 6 partition-logic guards (partition by status, tail/head slicing, drop counts, overflow render, reading order)\n- 1 CSS guard (.runqueue-overflow visually distinct)\n- 2 simulation cases (busy: 5+1+8 → 2+1+3 + 2 overflow; small: 1+1+1 → no overflow)\n\nWired into test.sh. Subagent verified all 127 cases across the chip-strip-adjacent surface (bug-21, bug-25, fr-48 family, plan-*) stay green.",
+          "ts": "2026-05-21T22:45:31.777Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "the queue display above the chat pane should show only some finished and some pending task. It shows all now which clutters the display",
         "rewritten": true
-      }
+      },
+      "runs": [
+        {
+          "status": "running",
+          "ts": "2026-05-21T22:40:31.923Z",
+          "summary": null
+        }
+      ],
+      "doneAt": "2026-05-21T22:45:31.777Z",
+      "doneBy": "claude"
     },
     {
       "id": "bug-25",
@@ -2384,7 +2405,39 @@
       },
       "doneAt": "2026-05-21T20:13:17.079Z",
       "doneBy": "claude"
+    },
+    {
+      "id": "fr-56",
+      "text": "**Problem:** No way to narrow plan items by type or quickly find one by name in the view.\n**Expected:** A filter by type control at the top of the view, plus a fuzz search for plan items.\n**Actual:** View shows all plan items with no type filter or search affordance.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-21T22:42:21.446Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "add filter by type for plan item at the top of the view with a fuzz search",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "bug-26",
+      "text": "**Problem:** Auto-scroll-to-latest interrupts the user when they've manually scrolled up to read earlier messages.\n**Expected:** If the user has manually scrolled up, suppress auto-scroll-to-latest so they can keep reading.\n**Actual:** New messages force a scroll to the bottom regardless of the user's scroll position.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-21T22:44:13.696Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "dont scroll to the latest message if user already manually scroll up so that user can continue to read what they are reading",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-21T20:13:17.079Z"
+  "updatedAt": "2026-05-21T22:45:31.777Z"
 }
