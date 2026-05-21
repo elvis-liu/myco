@@ -2570,6 +2570,13 @@ test_chat_window() {
   # Soon badge until OAuth is wired up. Click + keyboard activation
   # neutralized so it can't try to navigate to /auth/github/start.
   node_test_result test/login-github-soon-badge.test.js "test/login-github-soon-badge.test.js (6 cases)"
+  # bug-23: tool_result events now render as their own claude-style
+  # message bubble (border-left + tinted background, mirrors the
+  # assistant_text bubble shape with a cooler blue-grey tint).
+  # Pulled out of AGENT_CHROME_TYPES so it stops folding into the
+  # chrome batch with tool_use + hook_allow. Added to
+  # AGENT_DEFAULT_EXPANDED so the bubble shows expanded.
+  node_test_result test/bug-23-tool-result-bubble.test.js "test/bug-23-tool-result-bubble.test.js (8 cases)"
   # fr-9: file explorer surfaces git change decorators + download
   # button. Tests the server-side listDir gitStatus enrichment
   # (modified/added/untracked/dir-aggregate paths against a real

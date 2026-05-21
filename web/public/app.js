@@ -3944,7 +3944,13 @@ function _agentToolIcon(name) {
 // chatter, system init, rate-limit telemetry, turn-start) is collapsed
 // behind a chevron, recoverable in one click. Single source of truth:
 // AGENT_DEFAULT_EXPANDED.
-const AGENT_DEFAULT_EXPANDED = new Set(['assistant_text', 'fatal']);
+// bug-23: tool_result joins the default-expanded set because it now
+// renders as its own claude-style message bubble (see CSS rule
+// .agent-card.agent-card-tool_result). A collapsed result bubble
+// would be pointless — the whole point of pulling it out of the
+// chrome batch was to show the payload inline as part of "what
+// claude saw."
+const AGENT_DEFAULT_EXPANDED = new Set(['assistant_text', 'fatal', 'tool_result']);
 
 // Chrome events — low-information rows that aren't the "result" the user
 // came for. The whole point of a chrome run is to get out of the way so
@@ -3967,7 +3973,13 @@ const AGENT_CHROME_TYPES = new Set([
   'permission_resolved',
   'rate_limit',
   'unknown_event',
-  'tool_result',
+  // bug-23: tool_result REMOVED from chrome — it now renders as a
+  // claude-style message bubble (its own top-level card) rather
+  // than folding into the chrome batch with tool_use + hook_allow.
+  // The user wanted "the result to show in the message bubble"
+  // since the result is what claude actually saw from the tool;
+  // the chrome batch still groups the call + hook + meta so the
+  // surrounding noise stays compact.
   // turn_result folds in too — its `result` text payload is usually
   // a duplicate of claude's last assistant_text block (the SDK
   // appends the same content as the "final answer"). The cost +

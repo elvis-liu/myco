@@ -4727,6 +4727,49 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   border-left: none;
   padding: 0;
 }
+/* bug-23: tool_result now renders as a claude-style message bubble
+   instead of folding into the chrome batch. Same shape as the
+   assistant_text bubble — left border, padding, subtle background —
+   but tinted slightly cooler (blue-grey) so it's recognizable as
+   "what claude saw" rather than "what claude said". The body shows
+   the raw result inline (auto-expanded via AGENT_DEFAULT_EXPANDED). */
+.agent-card.agent-card-tool_result {
+  margin: 10px 0 !important;
+  padding: 10px 14px;
+  background: rgba(120, 160, 200, .06);
+  border-radius: 8px;
+  border-left: 3px solid rgba(120, 160, 200, .55);
+}
+.agent-card.agent-card-tool_result .agent-card-head {
+  margin-bottom: 4px;
+  opacity: 1;
+}
+.agent-card.agent-card-tool_result .agent-card-result {
+  background: rgba(120, 160, 200, .14);
+  color: rgba(180, 210, 240, 1);
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+.agent-card.agent-card-tool_result .agent-card-result.agent-card-error {
+  background: rgba(220, 120, 110, .18);
+  color: rgba(240, 170, 160, 1);
+}
+.agent-card.agent-card-tool_result .agent-tool-result-preview {
+  background: transparent;
+  border-left: none;
+  padding: 0;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .agent-card.agent-card-tool_result {
+    margin: 12px 0 !important;
+    padding: 12px 14px;
+  }
+}
+
 @media (max-width: 900px) {
   .agent-card.agent-card-assistant_text {
     margin: 16px 0 !important;
