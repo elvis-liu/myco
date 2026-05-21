@@ -2541,6 +2541,17 @@ test_chat_window() {
   # the existing files.js writeFile mtime gate still rejects stale
   # writes with ERR_MTIME_CONFLICT → HTTP 409.
   node_test_result test/fr-50-file-editor.test.js "test/fr-50-file-editor.test.js (17 cases)"
+  # fr-50 hotfix: the ✎ Edit button stayed hidden because
+  # openFileInViewer called renderViewerHeader BEFORE v.content was
+  # populated (state.files.viewing.content starts as the '' placeholder),
+  # so the gate `editable = !viewerMode && v && v.content && !v.binary`
+  # evaluated false and stamped hidden=true on #files-edit. Fix: re-call
+  # renderViewerHeader(body.path) after the content lands so the gate
+  # re-evaluates. Pre-existing latent bug that was masked because the
+  # textarea-based editor was never actually reachable — kicking in
+  # fr-50's CodeMirror swap exposed it. User-reported via console
+  # diagnostic showing all gate conditions satisfied yet hidden=true.
+  node_test_result test/fr-50-edit-button-visible.test.js "test/fr-50-edit-button-visible.test.js (5 cases)"
   # fr-49: /whatsnext + /next priority list. Heuristic scoring
   # (voters/comments/layer-bias/recency/run-failure) picks a top-20
   # shortlist; LLM rerank (best-effort, falls back to heuristic on

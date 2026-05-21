@@ -7457,6 +7457,17 @@ async function openFileInViewer(relPath) {
   state.files.viewing.content = body.content;
   state.files.viewing.size = body.size;
 
+  // fr-50 hotfix: re-render the header now that v.content is populated.
+  // The earlier showFileViewerPane → renderViewerHeader call ran while
+  // v.content was still the '' placeholder, so the Edit-button gate
+  // (editable = !viewerMode && v && v.content && !v.binary) evaluated
+  // to false and stamped hidden=true on #files-edit. Without this
+  // re-render the ✎ Edit button stayed hidden forever — which is why
+  // fr-50 was filed as "no editing surface exists" even though the
+  // pre-fr-50 textarea editor was already wired. Same fix unblocks
+  // the new CodeMirror 6 editor.
+  renderViewerHeader(body.path);
+
   renderFileViewerWithCards(body.content, body.path, []);
   // Async: load any persisted Claude thread for this file, then re-render.
   loadFileChat(body.path).then((cards) => {
