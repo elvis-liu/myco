@@ -42,11 +42,21 @@ export http_proxy="${http_proxy:-http://p_atlas:proxy%40123@172.18.100.92:8080}"
 export https_proxy="${https_proxy:-http://p_atlas:proxy%40123@172.18.100.92:8080}"
 export no_proxy="${no_proxy:-127.0.0.1,.huawei.com,localhost,local,.local}"
 export GIT_SSL_NO_VERIFY="${GIT_SSL_NO_VERIFY:-1}"
+# Node.js: trust self-signed proxy certificates (required for corporate proxies)
+export NODE_TLS_REJECT_UNAUTHORIZED="${NODE_TLS_REJECT_UNAUTHORIZED:-0}"
+# global-agent: explicit proxy URL (needed for bootstrap to pick it up)
+export GLOBAL_AGENT_HTTP_PROXY="${GLOBAL_AGENT_HTTP_PROXY:-${http_proxy}}"
 
 # Configure git to use proxy
 git config --global http.proxy "${http_proxy}" 2>/dev/null || true
 git config --global https.proxy "${https_proxy}" 2>/dev/null || true
 git config --global http.sslverify false 2>/dev/null || true
+
+# Rewrite SSH URLs to HTTPS so they go through the HTTP proxy
+# git@github.com:owner/repo.git → https://github.com/owner/repo.git
+git config --global url."https://github.com/".insteadOf "git@github.com:" 2>/dev/null || true
+git config --global url."https://gitlab.com/".insteadOf "git@gitlab.com:" 2>/dev/null || true
+git config --global url."https://gitee.com/".insteadOf "git@gitee.com:" 2>/dev/null || true
 
 # Start Caddy in background
 caddy run --config /etc/caddy/Caddyfile &
