@@ -4325,7 +4325,13 @@ function _appendAgentEvent(ev) {
     // (which may be a fresh batch if a non-chrome event broke the
     // previous one).
     if (ev.type === 'turn_result') _attachTurnOutcomeChip(batch, ev);
-    pane.scrollTop = pane.scrollHeight;
+    // bug-32: route through scrollChatToLatest() so the bug-26
+    // chatUserScrolledUp guard fires. Pre-fix this direct
+    // pane.scrollTop=pane.scrollHeight write bypassed bug-26 entirely,
+    // yanking the user back to bottom on every agent chrome event
+    // (canUseTool / hook_allow / unknown_event / turn_result …) even
+    // when they had explicitly scrolled up to read history.
+    scrollChatToLatest();
     _enforceChatHistoryCap();
     return;
   }
@@ -4377,7 +4383,10 @@ function _appendAgentEvent(ev) {
       }
       // (No head-summary refresh: assistant_text head is just "<ts>
       // claude" now, the body underneath is the live preview.)
-      pane.scrollTop = pane.scrollHeight;
+      // bug-32: route through scrollChatToLatest() so the bug-26 guard
+      // fires. Pre-fix every streamed assistant_text token (sometimes
+      // many per second) yanked a history-reading user to the bottom.
+      scrollChatToLatest();
       return;
     }
   }
@@ -4483,7 +4492,11 @@ function _appendAgentEvent(ev) {
   // timestamps drift).
   if (typeof ev.seq === 'number') card.dataset.seq = String(ev.seq);
   pane.appendChild(card);
-  pane.scrollTop = pane.scrollHeight;
+  // bug-32: route through scrollChatToLatest() so the bug-26 guard
+  // fires. This is the MAIN agent-event append path — every tool
+  // call card, system_init, hook_deny, etc. lands here. Pre-fix it
+  // bypassed the guard and yanked history-readers back to bottom.
+  scrollChatToLatest();
   _enforceChatHistoryCap();
 }
 

@@ -2661,6 +2661,17 @@ test_chat_window() {
   # longer yank them back to the bottom. Pane open + session switch
   # bypass the guard via { force: true }.
   node_test_result test/bug-26-chat-auto-scroll-suppress.test.js "test/bug-26-chat-auto-scroll-suppress.test.js (13 cases)"
+  # bug-32: bug-26 follow-up. _appendAgentEvent had THREE direct
+  # `pane.scrollTop = pane.scrollHeight` writes that bypassed bug-26's
+  # chatUserScrolledUp guard — chrome events (canUseTool, hook_allow,
+  # turn_result, etc.) and streamed assistant_text tokens yanked
+  # history-reading users back to the bottom many times per second.
+  # Fix: route all three sites through scrollChatToLatest(). Static
+  # guards on the absence of pane.scrollTop=pane.scrollHeight in code
+  # (allowing `el.scrollTop` for the unrelated log panel), the call
+  # count inside _appendAgentEvent, and a behavior simulation of the
+  # guard predicate across 50 streaming ticks.
+  node_test_result test/bug-32-agent-event-respects-scroll.test.js "test/bug-32-agent-event-respects-scroll.test.js (9 cases)"
   # bug-27: queue chip strip scoped per-session. Client clears
   # state.runQueue + re-renders on session switch; server ships the
   # new session's queue state via _sendAttachSnapshot so the strip

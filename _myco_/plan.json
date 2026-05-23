@@ -2755,12 +2755,24 @@
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "rs-983e62658ff2",
+          "user": "claude",
+          "text": "**Fix shipped (bug-26 follow-up — three uncovered paths).**\n\n### Root cause\nbug-26 added the `chatUserScrolledUp` guard to `scrollChatToLatest()` so chat-message auto-scroll respected the user's reading position. But it missed THREE direct `pane.scrollTop = pane.scrollHeight` writes inside `_appendAgentEvent` (the AGENT-event append path):\n\n| Line | Path | Fires on |\n|---|---|---|\n| 4328 | chrome-batch path | Every chrome event (`canUseTool`, `hook_allow`, `hook_deny`, `system_init`, `turn_result`, etc.) |\n| 4380 | assistant_text-merge path | Every streamed assistant_text token (many per second during a live turn) |\n| 4486 | default append path | Every other agent event (tool calls, system messages, …) |\n\nThese three sites bypassed the bug-26 guard entirely — `pane` resolves to `#chat-messages` (the same DOM the guard protects), but the direct `scrollTop=scrollHeight` write doesn't consult `state.chatUserScrolledUp`. So even though the user's chat-bubble scroll-pin was respected, every agent-event arrival yanked them back to bottom. During a streaming assistant_text turn, reading history was effectively impossible.\n\n### Fix\nReplaced each of the three direct writes with `scrollChatToLatest()` — same DOM target, but now honors the bug-26 guard. No new helpers, no new state, no UX changes when the user IS at the bottom (the guard auto-no-ops then).\n\n### Test\n`test/bug-32-agent-event-respects-scroll.test.js` — 9 cases:\n- Static guards: no `pane.scrollTop = pane.scrollHeight` writes remain in code (comment-stripped scan, allows `el.scrollTop` for the unrelated log panel)\n- Static: `scrollChatToLatest` still has exactly 2 `list.scrollTop = list.scrollHeight` writes (sync + rAF pair)\n- Static: `_appendAgentEvent` body calls `scrollChatToLatest` ≥3 times (one per replaced site)\n- Static: `scrollChatToLatest` still respects the `!force && state.chatUserScrolledUp` guard (bug-26 contract preserved)\n- Behavior simulation: 4 cases on a fake-state predicate — user-scrolled-up suppresses, user-at-bottom proceeds, force=true bypasses, 50-tick streaming-token loop all suppressed\n\n9/9 ✓ direct. **Red-flipped against pre-fix code (3/9 failed via git stash)** — the three new strict guards trip without the fix.\n\nbug-26's existing 13 cases still 13/13 ✓ — the chat-message path contract wasn't touched.\n\nFull `./test/test.sh` aborts on host BusyBox `grep -P` (pre-existing env limit per CLAUDE.md §Pre-Commit-1, same as every commit since td-31).\n\n### Takes effect on browser reload after next `./scripts/deploy.sh` push\nPure `web/public/app.js` change — no server rebuild required for correctness.\n\nStatus: closed.",
+          "ts": "2026-05-23T04:41:22.792Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
       "meta": {
         "originalText": "scro",
         "editedBy": "kkrazy",
         "editedAt": "2026-05-23T03:58:23.713Z"
-      }
+      },
+      "status": "closed",
+      "closedAt": "2026-05-23T04:41:22.792Z"
     },
     {
       "id": "bug-33",
@@ -2815,5 +2827,5 @@
       }
     }
   ],
-  "updatedAt": "2026-05-23T04:26:57.290Z"
+  "updatedAt": "2026-05-23T04:41:22.792Z"
 }
