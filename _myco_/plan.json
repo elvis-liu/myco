@@ -2813,6 +2813,15 @@
           "meta": {
             "kind": "run-summary"
           }
+        },
+        {
+          "id": "rs-a302e89c2b83",
+          "user": "claude",
+          "text": "**Third pass — mobile fix.**\n\n### What the second pass missed\nHardcoded the top padding as `safe-area + 50px`. On desktop that's chrome-bottom(42px) + 8px buffer ✓. But `--chrome-btn-size` bumps from 32px → **40px** inside the `@media (max-width: 900px)` rule (line ~1170 of styles.css), so the chrome bottom on mobile is at `safe-area + 50px` — the breadcrumb's padding-top landed EXACTLY there. Zero buffer. Mobile still looked cluttered.\n\n### Third-pass fix\nUse the `--chrome-btn-size` variable directly so the padding auto-adapts:\n\n```css\n.files-view-header-nav {\n  padding: calc(env(safe-area-inset-top, 0px)\n                + 10px                       /* chrome-top */\n                + var(--chrome-btn-size)     /* button height */\n                + 18px                       /* buffer */\n                ) 12px 8px 12px;\n}\n```\n\n| Viewport | chrome-btn-size | padding-top |\n|---|---|---|\n| Desktop | 32px | 60px (18px buffer below chrome) |\n| Mobile  | 40px | 68px (18px buffer below chrome) |\n| iPhone-notch | + safe-area | same buffer (notch shifts everything together) |\n\n### Test update\n`test/bug-33-file-viewer-breadcrumb-row.test.js` guard now requires the calc() to reference BOTH `env(safe-area-inset-top)` AND `var(--chrome-btn-size)` so the layout adapts on every viewport size. Defensive negative guards rule out re-introduction of the dead first-pass (`8px 92px`) AND the dead second-pass (`+50px` hardcoded) values.\n\n9/9 ✓ direct. Red-flipped against second-pass CSS — 1/9 fails when the new guard sees the old hardcoded `+50px`, confirming the regression catch. Adjacent fr-50 tests stay green.\n\nFull `./test/test.sh` aborts on host BusyBox `grep -P` (pre-existing env limit).\n\n### Takes effect on browser reload after next `./scripts/deploy.sh` push\nPure CSS change.\n\nStatus: closed (third time). Sorry for the back-and-forth — should have grepped the mobile breakpoint before picking the hardcoded number.",
+          "ts": "2026-05-23T05:21:03.039Z",
+          "meta": {
+            "kind": "run-summary"
+          }
         }
       ],
       "meta": {
@@ -2821,7 +2830,7 @@
         "rewritten": true
       },
       "status": "closed",
-      "closedAt": "2026-05-23T05:05:58.473Z"
+      "closedAt": "2026-05-23T05:21:03.039Z"
     },
     {
       "id": "bug-34",
@@ -2870,5 +2879,5 @@
       }
     }
   ],
-  "updatedAt": "2026-05-23T05:05:58.473Z"
+  "updatedAt": "2026-05-23T05:21:03.039Z"
 }

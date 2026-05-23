@@ -3540,18 +3540,25 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   overflow: hidden;
 }
 .files-view-header-nav {
-  /* bug-33 (second pass): the floating chrome cluster has FIVE
-     `position: fixed; top: 10px` buttons (Plan / Arch / Test /
-     Files / Chat) totaling ~210px wide. The first pass kept a 92px
-     right-padding — enough to clear only the 2 rightmost (Files +
-     Chat); the 3 additional buttons (Plan/Arch/Test) still overlapped
-     the breadcrumb. Per the user's "Breadcrumb sits on its own
-     dedicated row, separate from the icons", push the nav row BELOW
-     the chrome cluster entirely instead of squeezing it sideways.
-     Top padding = safe-area inset (notch) + 50px (chrome top 10 +
-     32px button + 8px buffer below the chrome row). No right padding
-     needed — breadcrumb gets the full pane width on its own row. */
-  padding: calc(env(safe-area-inset-top, 0px) + 50px) 12px 8px 12px;
+  /* bug-33 (third pass — mobile fix): the floating chrome cluster
+     has FIVE `position: fixed; top: 10px` buttons (Plan / Arch /
+     Test / Files / Chat). On desktop --chrome-btn-size=32px so the
+     chrome bottom edge is at safe-area + 42px. On MOBILE the
+     variable bumps to 40px (line ~1170) so the chrome bottom is
+     at safe-area + 50px — the second-pass hardcoded `+50px` landed
+     exactly on the chrome bottom with zero buffer, so the
+     breadcrumb still touched the icons on mobile. Use the variable
+     so the buffer auto-adapts across viewport sizes:
+
+       padding-top = safe-area-top + chrome-top(10px) + chrome-btn-size + buffer(18px)
+
+     Desktop: 0 + 10 + 32 + 18 =  60px  → 18px buffer below chrome
+     Mobile:  0 + 10 + 40 + 18 =  68px  → 18px buffer below chrome
+     iPhone:  notch + 60/68     → same 18px buffer (notch shifts everything)
+
+     No right padding — breadcrumb gets full pane width on its
+     dedicated row. */
+  padding: calc(env(safe-area-inset-top, 0px) + 10px + var(--chrome-btn-size) + 18px) 12px 8px 12px;
   min-height: var(--pane-header-h);
 }
 .files-view-header-actions {
