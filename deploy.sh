@@ -120,11 +120,11 @@ parse_args() {
 
 run_tests() {
   if [ "$SKIP_TESTS" = "1" ]; then
-    echo "(skipping ./test.sh — --skip-tests)"
+    echo "(skipping ./test/test.sh — --skip-tests)"
     return 0
   fi
-  step "Pre-flight: ./test.sh"
-  ./test.sh
+  step "Pre-flight: ./test/test.sh"
+  ./test/test.sh
   ok "tests passed"
 }
 

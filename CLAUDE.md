@@ -2,7 +2,7 @@
 
 ## Working in this repo
 
-1. **Always prefer existing scripts over ad-hoc commands.** Before composing a one-off shell sequence, look for a script that already does the job (`./test.sh`, `./test-browser.sh`, `./deploy.sh`, `./install-tls.sh`, etc.). If one exists, run it. If one almost exists, extend it rather than copy-pasting its logic into a new chat-only command. This keeps behaviour reproducible and the CI/dev paths in sync.
+1. **Always prefer existing scripts over ad-hoc commands.** Before composing a one-off shell sequence, look for a script that already does the job (`./test/test.sh`, `./test/test-browser.sh`, `./deploy.sh`, `./install-tls.sh`, etc.). If one exists, run it. If one almost exists, extend it rather than copy-pasting its logic into a new chat-only command. This keeps behaviour reproducible and the CI/dev paths in sync.
 
 2. **Delegate long-running tasks to a subagent.** Deploys, Docker builds, multi-step SSH sequences, and large refactors that span many files belong in a subagent (via the Agent tool), not the main conversation loop. Brief the subagent fully — paths, the relevant commit SHA, constraints, what *not* to touch — and ask for a short report back. Quick one-shot edits, single greps, and small reads stay in the main loop.
 
@@ -58,9 +58,9 @@
 
 ## Pre-Commit
 
-1. **ALWAYS run the FULL `./test.sh` before committing — not cherry-picked adjacent tests.** Running 5–10 "obviously affected" suites individually is NOT a substitute. The full script catches static-check drift (e.g. an old `test.sh` block pinning a shape your refactor changed) that per-file `node test/foo.test.js` runs will MISS. Fix every failure (or confirm it's purely environmental, like missing `docker` on the agent sandbox) before proceeding. If `./test.sh` aborts early on the host (busybox grep, missing python3, etc.), fix the host OR the script first — don't skip the suite.
+1. **ALWAYS run the FULL `./test/test.sh` before committing — not cherry-picked adjacent tests.** Running 5–10 "obviously affected" suites individually is NOT a substitute. The full script catches static-check drift (e.g. an old `test.sh` block pinning a shape your refactor changed) that per-file `node test/foo.test.js` runs will MISS. Fix every failure (or confirm it's purely environmental, like missing `docker` on the agent sandbox) before proceeding. If `./test/test.sh` aborts early on the host (busybox grep, missing python3, etc.), fix the host OR the script first — don't skip the suite.
 
-2. **Every new feature must come with a test.** When you add a behaviour to `server/`, `web/public/`, the Dockerfile, or any deploy/runtime path, also add a check to `./test.sh` that would have caught the bug if the feature regressed. Static-only behaviour can usually be a `grep` or a `node -e` check; runtime behaviour belongs in the persistence/server-smoke section that runs the real container. Aim for the smallest test that fails meaningfully if the feature breaks. Bug fixes also count as features — write the regression test before (or alongside) the fix so it red-green-flips.
+2. **Every new feature must come with a test.** When you add a behaviour to `server/`, `web/public/`, the Dockerfile, or any deploy/runtime path, also add a check to `./test/test.sh` that would have caught the bug if the feature regressed. Static-only behaviour can usually be a `grep` or a `node -e` check; runtime behaviour belongs in the persistence/server-smoke section that runs the real container. Aim for the smallest test that fails meaningfully if the feature breaks. Bug fixes also count as features — write the regression test before (or alongside) the fix so it red-green-flips.
 
 ## Deployment
 
@@ -88,7 +88,7 @@
    - Minted myco session tokens live in `$STATE_DIR/auth-sessions.json` (mode 0600, 30-day sliding TTL).
    - The OAuth access token for each user is mirrored into `$STATE_DIR/git-tokens.json` (mode 0600) at the user-level `github` slot. Per-repo PATs (set via `/setpat <token>` from a session) live in the same file under `<provider>/<owner>/<repo>` keys and override the user-level fallback. Used by `/feature`/`/bug` slash commands — they auto-detect provider (github vs. gitee) from the session's `git remote get-url origin` and pick the right PAT. Gitee has no OAuth flow yet — Gitee repos require an explicit `/setpat` from the session.
 
-5. **Override knobs:** `MYCO_DEPLOY_HOST`, `MYCO_STATE_DIR`, `MYCO_IMAGE_TAG`, `MYCO_CONTAINER`. `--skip-tests` skips `./test.sh`, `--dry-run` reports the plan without shipping or swapping.
+5. **Override knobs:** `MYCO_DEPLOY_HOST`, `MYCO_STATE_DIR`, `MYCO_IMAGE_TAG`, `MYCO_CONTAINER`. `--skip-tests` skips `./test/test.sh`, `--dry-run` reports the plan without shipping or swapping.
 
 ## Troubleshooting
 
@@ -106,7 +106,7 @@
 
 1. **Break functionality into small functions with one clear responsibility.** Aim for fewer than ~80 lines per function. If a function is doing setup + work + teardown, or covers more than one concept, split it. Name each function for what it does (`build_image`, `seed_caddyfile`, `test_persist_after_restart`) — the call site should read like prose. Top-level orchestration belongs in a `main()` (or equivalent) that just sequences the named steps. This keeps diffs reviewable and makes scripts/code easy to extend without rewriting the world.
 
-2. **SDK-driven sessions only — no PTY/TUI surface.** Phase 9 retired the PTY driver (`pty.js`, `menu-interceptor.js`, `pty-patterns.js` all deleted). All sessions run as `AgentSession` instances driven by `@anthropic-ai/claude-agent-sdk`. Permission menus, tool calls, and status come through structured SDK events (`canUseTool`, `assistant`/`tool_use`/`tool_result`/`result` message types) — never by regex-matching claude's rendered text. If you find yourself wanting to parse claude's terminal output, you're solving the problem the wrong way; the SDK has a structured event for whatever you're after. The deletion is guarded by static checks in `./test.sh` (the PTY files must stay deleted).
+2. **SDK-driven sessions only — no PTY/TUI surface.** Phase 9 retired the PTY driver (`pty.js`, `menu-interceptor.js`, `pty-patterns.js` all deleted). All sessions run as `AgentSession` instances driven by `@anthropic-ai/claude-agent-sdk`. Permission menus, tool calls, and status come through structured SDK events (`canUseTool`, `assistant`/`tool_use`/`tool_result`/`result` message types) — never by regex-matching claude's rendered text. If you find yourself wanting to parse claude's terminal output, you're solving the problem the wrong way; the SDK has a structured event for whatever you're after. The deletion is guarded by static checks in `./test/test.sh` (the PTY files must stay deleted).
 
 ## Design Guidelines
 
@@ -201,7 +201,7 @@ flowchart TB
 
 4. **First-time commands.** No sample → run inline if it looks cheap (`grep`, `ls`, `node -e`, single-file reads). For anything that looks long-running (`./*.sh`, `docker …`, `npm install`, multi-step pipelines), pre-emptively delegate even on the first run; the user can correct later if the heuristic was wrong.
 
-5. **Why this matters.** Long-running shells block the main agent's responsiveness — the user can't ask a follow-up question or course-correct until the Bash returns. Subagents run in parallel and report back via notification, so the main loop stays interactive. The historical sampling is what lets the agent learn project-specific norms (e.g., `./test.sh` here regularly runs ~45 s — known-slow, auto-delegate).
+5. **Why this matters.** Long-running shells block the main agent's responsiveness — the user can't ask a follow-up question or course-correct until the Bash returns. Subagents run in parallel and report back via notification, so the main loop stays interactive. The historical sampling is what lets the agent learn project-specific norms (e.g., `./test/test.sh` here regularly runs ~45 s — known-slow, auto-delegate).
 <!-- myco-best-practices-start -->
 # Best Practices
 
@@ -267,7 +267,7 @@ in place** rather than copy-paste a chat-only variant.
 
 Common scripts to check for:
 
-- `./test.sh`, `./run-tests.sh`, `make test`, `pytest`, `cargo test`
+- `./test/test.sh`, `./run-tests.sh`, `make test`, `pytest`, `cargo test`
 - `./build.sh`, `make`, `npm run build`, `cargo build`
 - `./deploy.sh`, `./release.sh`, `make deploy`
 
@@ -340,7 +340,7 @@ not a separate task the user has to ask for.
    assertion, server-route smoke) — better a partial guard than no
    guard at all.
 3. Implement the fix until the test goes green.
-4. Wire the test into the project's runner (`./test.sh`,
+4. Wire the test into the project's runner (`./test/test.sh`,
    `pytest`, `cargo test`, …) so it runs on every future change.
 5. Note the regression in the commit message: "fix: <bug>. test:
    `test/<name>` would have caught it."
@@ -413,7 +413,7 @@ removes the foot-gun.
 - `cd foo` in one Bash call, then `ls` in the next — the second call
   may run from `/`, `/root`, or wherever the harness reset cwd to.
 - Relying on shell exports / aliases across invocations.
-- Relative paths without anchoring: `./test.sh` in a "set-and-forget"
+- Relative paths without anchoring: `./test/test.sh` in a "set-and-forget"
   context can run any test.sh that happens to live in the current dir.
 - Assuming `~` expands to the human user's home — in containerized
   agent runs, `~` is typically `/root` or `/home/agent`, not the

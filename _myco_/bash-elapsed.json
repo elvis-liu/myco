@@ -3,7 +3,7 @@
   "purpose": "Per-CLAUDE.md `Bash command timing` policy. Rolling history of elapsed times for shell commands the agent runs in this project, plus a learned list of known-slow patterns. The agent consults this before invoking Bash; if a command matches a known-slow pattern (or recent samples exceed SLOW_BASH_THRESHOLD_MS), it auto-delegates to a subagent via the Agent tool instead of blocking the main conversation loop.",
   "samples": [
     {
-      "cmd": "./test.sh",
+      "cmd": "./test/test.sh",
       "elapsedMs": 45000,
       "ts": "2026-05-17T00:00:00Z",
       "note": "Approximate — based on observed mycobeta deploy-time test runs across this session"
@@ -33,13 +33,13 @@
       "note": "Single-shot inspection probes — fast"
     },
     {
-      "cmd": "./test.sh",
+      "cmd": "./test/test.sh",
       "elapsedMs": 106872,
       "ts": "2026-05-17T04:35:00Z",
       "note": "Measured serial run before parallelization — 87 s of node tests + ~20 s static/static-feature + ~10 s server smoke"
     },
     {
-      "cmd": "./test.sh",
+      "cmd": "./test/test.sh",
       "elapsedMs": 85029,
       "ts": "2026-05-17T04:40:00Z",
       "note": "Post node_test_prelaunch parallelization — long pole now agent-session.test.js (~65 s SDK round-trip) running concurrently with everything else"
@@ -70,9 +70,9 @@
   ],
   "knownSlowPatterns": [
     {
-      "pattern": "^\\./test\\.sh\\b",
+      "pattern": "^\\./(test/)?test\\.sh\\b",
       "p95Ms": 50000,
-      "reason": "Full pre-commit suite. Always delegate when invoked outside a deploy.sh context."
+      "reason": "Full pre-commit suite (path is ./test/test.sh post-td-32; legacy ./test.sh kept in regex so older bash-elapsed.json samples still match). Always delegate when invoked outside a deploy.sh context."
     },
     {
       "pattern": "^\\./deploy\\.sh\\b",

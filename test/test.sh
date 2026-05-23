@@ -2,6 +2,18 @@
 # Smoke test for myco — run before every commit.
 set -euo pipefail
 
+# Anchor every command in this script to the repo root, regardless of
+# where the caller invoked us from. Lets `./test/test.sh`, `test/test.sh`,
+# `bash /abs/path/test/test.sh`, or `cd test && ./test.sh` all behave the
+# same. Without this line, the many `grep -q ... web/public/app.js`-style
+# relative-path checks below would resolve against the caller's CWD.
+# The double-cd-then-pwd pattern is needed because plain
+# `cd "$(dirname "$0")/.."` resolves lexically — when $0 is a relative
+# path like `./test/test.sh` it appends `/..` to the relative dir and
+# `cd`'s into the result, which can land short if the invoking shell's
+# cwd isn't where you think it is.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/.."
+
 # ─── shared state ────────────────────────────────────────────────────────────
 PASS=0
 FAIL=0
@@ -2626,6 +2638,13 @@ test_chat_window() {
   # and .dockerignore stays at the build-context root (Docker CLI only
   # honors it there).
   node_test_result test/td-31-docker-folder.test.js "test/td-31-docker-folder.test.js (8 cases)"
+  # td-32: test.sh + test-browser.sh moved into test/ alongside the
+  # .test.js files they run. Pins the new locations, the absence of
+  # the root-level originals, the cwd-anchor `cd "$(dirname "$0")/.."`
+  # in both scripts (so relative-path checks resolve from repo root),
+  # deploy.sh's updated invocation, and the CLAUDE.md pre-commit rule's
+  # updated path.
+  node_test_result test/td-32-test-scripts-folder.test.js "test/td-32-test-scripts-folder.test.js (8 cases)"
   # Sidebar user-manual link: icon button beside the "+" New-session
   # button opens an in-app modal that fetches /USER_MANUAL.md (served
   # by an explicit route since the file lives at the project root)
@@ -3533,7 +3552,11 @@ print_summary() {
 # ─── main ────────────────────────────────────────────────────────────────────
 
 main() {
-  cd "$(dirname "$0")"
+  # cwd is already anchored to the repo root at script-top (the
+  # BASH_SOURCE-based cd just under `set -euo pipefail`). The legacy
+  # `cd "$(dirname "$0")"` here was a no-op when test.sh lived at the
+  # repo root; after the td-32 move into test/, it would land us in
+  # test/ and undo the anchor, so it was removed.
   run_static_checks
   run_feature_checks
   run_server_smoke

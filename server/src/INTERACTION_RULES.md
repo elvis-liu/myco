@@ -10,7 +10,7 @@ When you add a new rule (e.g. claude code 2.2.x changes a dialog shape):
    the exact TUI output that motivated it.
 2. Add the rule entry to this file (number, title, why, enforcement).
 3. Add a test under `test/` that fails if the rule is broken.
-4. Add a static `grep` sentinel in `test.sh` so the wiring can't silently
+4. Add a static `grep` sentinel in `test/test.sh` so the wiring can't silently
    regress.
 
 Rules are numbered for stable cross-reference from commit messages and

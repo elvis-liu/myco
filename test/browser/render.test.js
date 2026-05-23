@@ -1,5 +1,5 @@
 // Browser render tests — exercises the real client-side stack via Playwright.
-// Run via ./test-browser.sh (do not invoke directly).
+// Run via ./test/test-browser.sh (do not invoke directly).
 
 const { chromium } = require('playwright');
 

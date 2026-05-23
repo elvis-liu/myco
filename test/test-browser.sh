@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Browser-level rendering tests (Playwright). Slower than ./test.sh — run before push.
+# Browser-level rendering tests (Playwright). Slower than ./test/test.sh — run before push.
 set -euo pipefail
 
-cd "$(dirname "$0")"
+# Anchor to repo root. After the td-32 move into test/, the script's
+# parent dir is test/ — paths like `node server/src/index.js` and
+# `node test/browser/render.test.js` below need to resolve from repo
+# root. The double-cd-then-pwd pattern is robust against $0 being
+# a relative path like `./test/test-browser.sh` vs absolute.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/.."
 
 # 1. Ensure Playwright is installed
 if ! node -e "require.resolve('playwright')" 2>/dev/null; then

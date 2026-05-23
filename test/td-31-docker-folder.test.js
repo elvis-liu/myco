@@ -76,12 +76,13 @@ t('.dockerignore stays at repo root (Docker convention)', () => {
     '.dockerignore must remain at the repo root (build-context root) — Docker CLI does not honor it elsewhere');
 });
 
-t('test.sh greps docker/Dockerfile (not root Dockerfile)', () => {
-  const ts = fs.readFileSync(path.join(ROOT, 'test.sh'), 'utf8');
-  // The status-bar test asserts /build.txt is written by the Dockerfile.
-  // After td-31, that grep must target docker/Dockerfile.
+t('test/test.sh greps docker/Dockerfile (not root Dockerfile)', () => {
+  // test.sh lives at test/test.sh post-td-32; the status-bar test inside
+  // it asserts /build.txt is written by the Dockerfile. After td-31,
+  // that grep must target docker/Dockerfile.
+  const ts = fs.readFileSync(path.join(ROOT, 'test', 'test.sh'), 'utf8');
   assert.ok(/grep -q '\/build\\\.txt' docker\/Dockerfile/.test(ts),
-    'test.sh must grep docker/Dockerfile for the /build.txt write (post-td-31 path)');
+    'test/test.sh must grep docker/Dockerfile for the /build.txt write (post-td-31 path)');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
