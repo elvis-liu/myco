@@ -1065,6 +1065,29 @@ async function deleteSessionWithConfirm(s) {
       const tw = document.getElementById('terminal-wrap');
       if (tw) tw.hidden = true;
       document.getElementById('no-session').hidden = false;
+      // bug-29: mirror the session-switch cleanup that
+      // _resetUiForNewSession does — without these wipes the deleted
+      // session's Plan / Arch / Test panes stay populated until the
+      // user clicks a different session. Same class of bug as bug-27
+      // (queue chip strip leaking across sessions) but on the DELETE
+      // flow rather than the SWITCH flow. We intentionally do NOT
+      // call _resetUiForNewSession itself because that helper sets a
+      // new activeId + persists it to localStorage; deletion has no
+      // successor session to install. Keep the subset that matters.
+      state.artifacts = { sessionId: null, byType: {} };
+      state.runQueue = null;
+      try { _renderRunQueueStrip(); } catch {}
+      state.artifactView = { active: null, prev: 'terminal' };
+      for (const t of ARTIFACT_TYPES) {
+        const wrap = document.getElementById(t + '-wrap');
+        if (wrap) wrap.hidden = true;
+        document.getElementById('btn-' + t)?.classList.remove('active');
+      }
+      state.turnTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, lastTurnInputTokens: 0 };
+      try { _renderTokenMeter(); } catch {}
+      clearChat();
+      clearArtifactBodies();
+      updateChatButton();
     }
     document.querySelectorAll('.session-item.show-delete')
       .forEach(el => el.classList.remove('show-delete'));

@@ -2612,12 +2612,24 @@
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "rs-f5dfe5c841b0",
+          "user": "claude",
+          "text": "**Fix shipped.**\n\n### Root cause (same class as bug-27)\n`deleteSessionWithConfirm` had a partial cleanup — it closed the WS, disposed xterm, cleared `state.activeId` + localStorage, hid `#terminal-wrap` + showed `#no-session`, called `refreshSessions()` — but did NOT touch:\n- `state.artifacts` (the in-memory cache for Plan/Arch/Test/Files)\n- The artifact wraps (`#plan-wrap`, `#arch-wrap`, etc. stayed visible)\n- `state.runQueue` + the chip strip\n- `state.turnTotals` + the token-meter chip\n- `clearChat()` / `clearArtifactBodies()` / `updateChatButton()`\n\nSo the deleted session's Plan view (and queue strip, and token meter, and chat bubbles) stayed in the DOM until the user clicked a DIFFERENT session — at which point `_resetUiForNewSession` ran and did the cleanup properly.\n\nIdentical pattern to bug-27, which fixed the queue-chip-strip leak on session SWITCH. This fixes the same class on session DELETE.\n\n### Fix\nInlined the relevant subset of `_resetUiForNewSession` in `deleteSessionWithConfirm`'s active-session branch:\n\n```js\nif (state.activeId === s.id) {\n  // ...existing WS / xterm / activeId cleanup...\n\n  // bug-29: mirror _resetUiForNewSession's wipe of per-session state.\n  state.artifacts = { sessionId: null, byType: {} };\n  state.runQueue = null;\n  try { _renderRunQueueStrip(); } catch {}\n  state.artifactView = { active: null, prev: 'terminal' };\n  for (const t of ARTIFACT_TYPES) {\n    const wrap = document.getElementById(t + '-wrap');\n    if (wrap) wrap.hidden = true;\n    document.getElementById('btn-' + t)?.classList.remove('active');\n  }\n  state.turnTotals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: 0, lastTurnInputTokens: 0 };\n  try { _renderTokenMeter(); } catch {}\n  clearChat();\n  clearArtifactBodies();\n  updateChatButton();\n}\n```\n\nDeliberately NOT calling `_resetUiForNewSession` itself because that helper installs a NEW `activeId` + persists it to localStorage — deletion has no successor session to install.\n\n### Test\n`test/bug-29-delete-clears-plan.test.js` — 9 cases:\n- Static guards on each cleanup line (state.artifacts, state.runQueue + _renderRunQueueStrip, ARTIFACT_TYPES loop hiding wraps, state.artifactView reset, state.turnTotals reset, clearChat + clearArtifactBodies + updateChatButton)\n- Negative guard: all cleanup MUST appear inside the `if (state.activeId === s.id)` branch so deleting a NON-active session doesn't wipe your currently-attached view\n- Simulated state-effect assertion on a fake state object\n\n9/9 ✓ direct. **Red-flipped against pre-fix code (7/9 failed with stash applied)** — confirms the test catches the regression.\n\nFull `./test/test.sh` aborts on host BusyBox `grep -P` (pre-existing env limit per CLAUDE.md §Pre-Commit-1, same as td-31..td-34 + fr-51 + fr-56 commits).\n\n### Takes effect on browser reload after next `./scripts/deploy.sh` push\nPure `web/public/app.js` change — no server-side rebuild required for correctness, just to ship the new asset bytes.\n\nStatus: closed.",
+          "ts": "2026-05-23T04:26:57.290Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "delete a session wouldn't refresh plan view until we click on a session, it should leave the chat pane cleared and the plan view cleared",
         "rewritten": true
-      }
+      },
+      "status": "closed",
+      "closedAt": "2026-05-23T04:26:57.290Z"
     },
     {
       "id": "bug-30",
@@ -2803,5 +2815,5 @@
       }
     }
   ],
-  "updatedAt": "2026-05-23T04:14:06.100Z"
+  "updatedAt": "2026-05-23T04:26:57.290Z"
 }

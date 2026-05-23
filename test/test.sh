@@ -2666,6 +2666,14 @@ test_chat_window() {
   # new session's queue state via _sendAttachSnapshot so the strip
   # populates immediately (not after the first queue mutation).
   node_test_result test/bug-27-queue-session-scope.test.js "test/bug-27-queue-session-scope.test.js (7 cases)"
+  # bug-29: deleting the active session must wipe the Plan/Arch/Test
+  # panes + artifact cache + run-queue chip strip + token meter — not
+  # just close the WS + clear activeId. Same class of bug as bug-27
+  # (state leaking across sessions) but on the DELETE flow instead of
+  # the SWITCH flow. Static guards on the deleteSessionWithConfirm
+  # cleanup block (gated on state.activeId === s.id) + a simulated
+  # state-effect assertion.
+  node_test_result test/bug-29-delete-clears-plan.test.js "test/bug-29-delete-clears-plan.test.js (9 cases)"
   # td-31: Docker files consolidated under docker/ folder. Pins the
   # move (Dockerfile + docker-entrypoint.sh under docker/, none at
   # root), the Dockerfile's internal COPY uses the new build-context-
