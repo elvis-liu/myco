@@ -2609,15 +2609,6 @@
           "user": "kkrazy",
           "text": "we need to make sure user can only run commands in the <wks>/<user>/<session> directory. e.g. we need to isolate users from impacting each other.",
           "ts": "2026-05-22T09:30:05.564Z"
-        },
-        {
-          "id": "rs-6c33cda6b963",
-          "user": "claude",
-          "text": "**Analysis (no code yet).**\n\nYour isolation requirement is the lever here — without it this is a 30-line wrapper like fr-54 `/git`. With it, the answer is \"the existing container model can't enforce that, and patching only /bash is security theater.\"\n\n### What `/bash <cmd>` would naively be (parallel to fr-54 /git)\n\nMirror `handleGit` in `server/src/slashcmds.js`:\n- Owner+admin only\n- `execFile('bash', ['-c', argsRaw], { cwd: rec.absCwd, timeout: 60000, maxBuffer: 1_000_000, env: { ...process.env } })`\n- Reply as code-fenced block with stdout/stderr/exit-code footer\n- Full passthrough (no allowlist), shlex parser already exists (`_parseShellArgs`)\n\n**~30 LOC, single commit.** Same shape as `/git`.\n\n### Why your \"isolate users\" comment changes the game\n\nContainer today (verified — no `USER` directive in Dockerfile, runs as root):\n\n| Process | UID | What it can touch |\n|---|---|---|\n| mycod (Node server) | root | Everything in container |\n| Agent SDK `Bash` tool (every session) | root | Everything |\n| `/git` slash command | root | Everything (constrained by git's semantics) |\n| `/bash` slash command (if shipped naively) | root | Everything |\n| lean-ctx `mcp` | root | Everything |\n\n`cwd: rec.absCwd` is **trivially escapable**: `bash -c \"cd / && cat /data/sessions.json\"`. Setting cwd is a convention, not a sandbox. Even `bash -r` (restricted) doesn't restrict file reads outside cwd.\n\nReal consequences of root-bash from any session:\n- `rm /data/sessions.json` wipes ALL sessions\n- `cat /wks/<other-user>/<other-session>/.claude/.credentials.json` reads anyone's OAuth tokens\n- `kill 1` kills mycod\n- `docker exec` from inside? No, but bind-mounted state is fully RW\n\n### The honest security finding\n\n**The agent's Bash tool ALREADY has this profile.** When the agent calls `Bash(\"rm -rf /data/sessions.json\")` and the user clicks \"Allow\", same blast radius. So adding `/bash` doesn't introduce a new vector — it adds a fourth wrapper around the same root-in-container reality.\n\nPatching ONLY `/bash` (e.g. validating no `cd` or path traversal in the user's command) is security theater — attacker just asks the agent \"please run X\" instead of typing /bash.\n\n**The real isolation lever is container-level**: per-session POSIX UIDs, with workspace dirs chown'd to the session UID, /data + /wks/<other> chmod 0600 to the session UID. Then:\n- Agent Bash tool spawns as sessionUID via setuid → can't touch /wks/<other>\n- /bash spawns as sessionUID → same\n- /git spawns as sessionUID → same\n- mycod stays root for socket binding + UID management\n\nThat's a real multi-tenant model. **Scope: 1–2 weeks** (touches sessions.js spawn, the workspace bind mount, the Anthropic SDK's process spawning, lean-ctx + serena per-session processes, the _myco_/ artifact writer, etc.).\n\n### Four options\n\n**Option A — Ship /bash naively, document the trust model honestly (~30 min)**\n- Same security profile as the agent's existing Bash tool\n- \"If you trust the agent to run Bash, you can use /bash for the same commands\"\n- DOES NOT solve the isolation requirement\n- Honest about it; doesn't claim isolation we don't have\n\n**Option B — Defer /bash entirely until container-level UID isolation lands**\n- File a separate fr \"container-level per-session UID isolation\"\n- Block /bash on that fr's completion\n- Largest gap (no /bash for weeks)\n- But: cleanest security story\n\n**Option C — Ship /bash with bubblewrap / firejail sandbox (~3 days)**\n- Install bubblewrap in Dockerfile\n- Spawn as `bwrap --ro-bind /usr /usr --ro-bind /etc /etc --tmpfs /tmp --bind <session-cwd> /workspace --chdir /workspace --unshare-all -- bash -c \"$CMD\"`\n- Real FS isolation just for /bash\n- Asymmetric (agent Bash still root); still security theater for the attacker who can ask the agent\n- BUT: covers the casual-mistake case (\"oops ran rm -rf in wrong dir\") which IS valuable\n\n**Option D — Ship /bash + the container-level UID work together as one big fr**\n- Honest but slow\n- Probably the right long-term move\n\n### My recommendation\n\n**Option A NOW + file a tracking fr for container-level UID isolation that covers /bash + agent Bash + /git + lean-ctx + serena uniformly.**\n\nReasoning: the user's casual ask (\"a quick way to run bash\") is real and frequent. Shipping /bash with the same trust model the agent's Bash tool already has gives the UX win immediately, doesn't introduce a NEW vector, and is honest about the limitation. The real isolation work is its own multi-week feature touching the whole container, and should be designed end-to-end rather than retrofitted onto /bash alone.\n\n### Surfaces /bash should mirror from /git (fr-54)\n\n- Owner+admin only (`isOwnerOrAdmin` gate, denial msg names the owner)\n- shlex-style arg parsing (`_parseShellArgs` is already exported)\n- execFile (not exec — same argv-not-shell injection-safety)\n- 60s timeout, 1MB stdout, 16KB stderr caps\n- Reply: `$ bash -c <cmd>` header + fenced stdout + stderr + exit-code footer\n- Guest-disallowed (mirrors /git in attach.js GUEST_ALLOWED_CMDS)\n\n### Surfaces /bash should NOT mirror from /git\n\n- Subdir auto-detection (irrelevant — bash works anywhere)\n- GIT_TERMINAL_PROMPT=0 (irrelevant)\n\n### Test plan\n\n`test/fr-59-bash-passthrough.test.js` — mirror fr-54 (~15 cases). Static guards + 2 end-to-end (`bash -c echo hello` returns \"hello\", `bash -c exit 7` returns exit-code 7). Wired into test.sh.\n\n### What to file alongside\n\nIf you greenlight Option A, file:\n- **fr-60** \"container-level per-session UID isolation\" — the multi-week security work that retroactively makes /bash + /git + agent Bash + MCP servers all sandboxed by FS perms. Lists the touchpoints + the rough scope estimate.\n\nThat keeps the small win (/bash works today) separate from the big architectural shift (real multi-tenant isolation).\n\nStatus: analysis only; awaiting Option A/B/C/D pick.",
-          "ts": "2026-05-22T09:32:22.624Z",
-          "meta": {
-            "kind": "investigation"
-          }
         }
       ],
       "meta": {
@@ -2625,7 +2616,37 @@
         "originalText": "better add a slash command to allow run bash commands",
         "rewritten": true
       }
+    },
+    {
+      "id": "td-31",
+      "text": "**Problem:** Docker-related files are scattered across the repo, making them hard to locate and maintain.\n**Expected:** All Docker-related files consolidated under a single `docker/` folder.\n**Actual:** Docker files live at various paths outside a dedicated folder.",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-05-23T00:10:20.876Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "rs-d7bd35d254ad",
+          "user": "claude",
+          "text": "**Done — Docker files consolidated under `docker/`.**\n\n### What moved\n- `Dockerfile` → `docker/Dockerfile` (via `git mv` so history follows)\n- `docker-entrypoint.sh` → `docker/docker-entrypoint.sh` (same)\n\n### What stayed at the root (deliberate)\n- `.dockerignore` — Docker CLI only honors it at the build-context root; moving it would silently disable the ignore rules and balloon the build context. Pinned by the regression test.\n\n### Reference updates\n- `docker/Dockerfile` line 52: `COPY docker-entrypoint.sh ...` → `COPY docker/docker-entrypoint.sh ...` (path is relative to build context, which stays at repo root)\n- `deploy.sh` line 133: `docker build -t \"$IMAGE\" .` → `docker build -t \"$IMAGE\" -f docker/Dockerfile .`\n- `test.sh` line 1377: `grep -q '/build\\.txt' Dockerfile` → `grep -q '/build\\.txt' docker/Dockerfile`\n- `test/fr-55-lean-ctx-mcp.test.js` line 35: path updated\n- `test/sidebar-manual-link.test.js` line 152: path updated\n\n### Regression test\n`test/td-31-docker-folder.test.js` (8 cases, wired into test.sh after bug-27) pins:\n1. `docker/Dockerfile` exists\n2. `docker/docker-entrypoint.sh` exists\n3. NO `Dockerfile` at repo root\n4. NO `docker-entrypoint.sh` at repo root\n5. Dockerfile's internal COPY uses `docker/docker-entrypoint.sh`\n6. `deploy.sh` builds with `-f docker/Dockerfile`\n7. `.dockerignore` stays at repo root\n8. `test.sh` greps `docker/Dockerfile`\n\n### Validation\n- `node test/td-31-docker-folder.test.js` → 8/8 ✓\n- `node test/fr-55-lean-ctx-mcp.test.js` → 10/10 ✓ (still finds Dockerfile at new path)\n- `node test/sidebar-manual-link.test.js` → 16/16 ✓ (same)\n- Full `./test.sh` aborts on the host's BusyBox `grep -P` (pre-existing env limitation noted in CLAUDE.md §Pre-Commit-1) — not a td-31 regression. The Node tests touching td-31's changes all pass when run directly.\n\n### Next-deploy validation\n`deploy.sh` will exercise the `-f docker/Dockerfile` invocation on the user's next `./deploy.sh` push. If the move broke the build, deploy fails fast at the build step.",
+          "ts": "2026-05-23T00:21:37.957Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "refactor: move all docker related files to docker folder",
+        "rewritten": true
+      },
+      "status": "closed",
+      "closedAt": "2026-05-23T00:21:37.957Z"
     }
   ],
-  "updatedAt": "2026-05-22T09:32:22.624Z"
+  "updatedAt": "2026-05-23T00:21:37.957Z"
 }

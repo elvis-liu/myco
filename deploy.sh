@@ -130,7 +130,7 @@ run_tests() {
 
 build_image() {
   step "Building $IMAGE"
-  docker build -t "$IMAGE" . >/dev/null
+  docker build -t "$IMAGE" -f docker/Dockerfile . >/dev/null
   LOCAL_ID=$(docker images "$IMAGE" --format '{{.ID}}')
   ok "built $IMAGE ($LOCAL_ID)"
 }

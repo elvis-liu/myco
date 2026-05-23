@@ -32,7 +32,7 @@ function t(name, fn) {
 }
 
 const DOCKERFILE = fs.readFileSync(
-  path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+  path.join(__dirname, '..', 'docker', 'Dockerfile'), 'utf8');
 const AGENT_SESSION = fs.readFileSync(
   path.join(__dirname, '..', 'server', 'src', 'agent-session.js'), 'utf8');
 const BP_TEMPLATE = fs.readFileSync(

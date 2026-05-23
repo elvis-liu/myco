@@ -1374,7 +1374,7 @@ test_status_bar_user_and_build_stamps() {
   grep -q 'function showBuildStamp' web/public/app.js && pass "showBuildStamp() defined" || fail "showBuildStamp() defined"
   grep -q 'function showUserStamp' web/public/app.js && pass "showUserStamp() defined" || fail "showUserStamp() defined"
   grep -q "fetch('/build.txt'" web/public/app.js && pass "build.txt fetched on load" || fail "build.txt fetched on load"
-  grep -q '/build\.txt' Dockerfile && pass "Dockerfile writes build.txt" || fail "Dockerfile writes build.txt"
+  grep -q '/build\.txt' docker/Dockerfile && pass "Dockerfile writes build.txt" || fail "Dockerfile writes build.txt"
 }
 
 test_mermaid_html_init() {
@@ -2619,6 +2619,13 @@ test_chat_window() {
   # new session's queue state via _sendAttachSnapshot so the strip
   # populates immediately (not after the first queue mutation).
   node_test_result test/bug-27-queue-session-scope.test.js "test/bug-27-queue-session-scope.test.js (7 cases)"
+  # td-31: Docker files consolidated under docker/ folder. Pins the
+  # move (Dockerfile + docker-entrypoint.sh under docker/, none at
+  # root), the Dockerfile's internal COPY uses the new build-context-
+  # relative path, deploy.sh's `docker build` uses -f docker/Dockerfile,
+  # and .dockerignore stays at the build-context root (Docker CLI only
+  # honors it there).
+  node_test_result test/td-31-docker-folder.test.js "test/td-31-docker-folder.test.js (8 cases)"
   # Sidebar user-manual link: icon button beside the "+" New-session
   # button opens an in-app modal that fetches /USER_MANUAL.md (served
   # by an explicit route since the file lives at the project root)

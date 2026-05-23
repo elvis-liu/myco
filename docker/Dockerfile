@@ -49,7 +49,7 @@ RUN mkdir -p /app/web/public/fonts && \
     cp /usr/share/fonts/truetype/JetBrainsMonoNerdFont-Regular.ttf /app/web/public/fonts/ && \
     cp /usr/share/fonts/truetype/JetBrainsMonoNerdFont-Bold.ttf /app/web/public/fonts/ 2>/dev/null; true
 
-COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY docker/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
 # Build timestamp — UI fetches /build.txt and shows it in the status bar.
