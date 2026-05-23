@@ -34,6 +34,8 @@ const SLASHCMDS = fs.readFileSync(
   path.join(__dirname, '..', 'server', 'src', 'slashcmds.js'), 'utf8');
 const ATTACH = fs.readFileSync(
   path.join(__dirname, '..', 'server', 'src', 'attach.js'), 'utf8');
+const AGENT_SESSION = fs.readFileSync(
+  path.join(__dirname, '..', 'server', 'src', 'agent-session.js'), 'utf8');
 
 console.log('── fr-51: run-queue must advance after /qcancel + on turn_result fallback ──');
 
@@ -187,6 +189,62 @@ t('behavior: markFinished + peekNextPending together advance the queue', () => {
   const next = runQueue.peekNextPending(rec);
   assert.ok(next, 'next pending is exposed');
   assert.strictEqual(next.itemId, 'next-C', 'queue advance reaches next-C');
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Mode (3) — agent-session.js retry loop emits iteration_aborted on
+// the two no-terminal-event escape paths (THIRD-PASS fr-51 fix).
+// ──────────────────────────────────────────────────────────────────────
+//
+// Symptom this guard catches:
+//   - kill() flips alive=false while a stream message is in flight; the
+//     for-await loop breaks BEFORE AbortError throws → catch is bypassed
+//     → no terminal event → queue's running entry stuck forever.
+//   - SDK closes the stream cleanly without ever emitting a `result`
+//     message → no turn_result → same outcome.
+//
+// Both new emits route through the existing attach.js terminal-event
+// listener, which already covers `iteration_aborted`.
+
+t('static guard: agent-session.js emits iteration_aborted when killed mid-stream', () => {
+  // We pin the specific reason string `kill_mid_stream` so the
+  // [runQueue-diag] tracer can identify this path post-deploy.
+  assert.ok(/kill_mid_stream/.test(AGENT_SESSION),
+    'agent-session.js must emit `iteration_aborted` with reason=`kill_mid_stream` when the for-await loop breaks via !this.alive — pre-fix this path emitted no terminal event and stranded the queue (fr-51 third pass)');
+  // The flag MUST be set inside the for-await break path. We check
+  // that the flag-set + the eventual emit both exist; the regex below
+  // pairs them loosely.
+  assert.ok(/killedMidStream\s*=\s*true/.test(AGENT_SESSION),
+    'agent-session.js must set a `killedMidStream` flag (or equivalent) inside the for-await break path so the post-loop emit can fire on this path');
+});
+
+t('static guard: agent-session.js emits iteration_aborted on clean stream close without result', () => {
+  // Reason string pinned so the diag tracer can tell the two new
+  // escape paths apart.
+  assert.ok(/stream_closed_no_result/.test(AGENT_SESSION),
+    'agent-session.js must emit `iteration_aborted` with reason=`stream_closed_no_result` when the for-await ends naturally but no `result` message was emitted — pre-fix this path also stranded the queue (fr-51 third pass)');
+  // The `emittedTerminal` tracker MUST set on `m.type === \'result\'`
+  // — that\'s the only signal we have that a turn_result will emit.
+  assert.ok(/emittedTerminal\s*=\s*true/.test(AGENT_SESSION),
+    'agent-session.js must set an `emittedTerminal` flag (or equivalent) when _handleEvent processes a result message, so the post-loop check knows whether to synthesize iteration_aborted');
+});
+
+t('static guard: both new fr-51 emits route through _emit (not a side channel)', () => {
+  // The attach.js listener subscribes to `agent-event` which is what
+  // _emit publishes. If the third-pass fix wrote to a different
+  // channel, the listener would never see it. Anchor: both reason
+  // strings must appear in a window containing _emit({ type: ...
+  // iteration_aborted ...).
+  const killWindow = AGENT_SESSION.slice(
+    Math.max(0, AGENT_SESSION.indexOf('kill_mid_stream') - 400),
+    AGENT_SESSION.indexOf('kill_mid_stream') + 100);
+  assert.ok(/_emit\s*\(\s*\{[^}]*iteration_aborted/.test(killWindow),
+    '`kill_mid_stream` emit must be a `this._emit({ type: \'iteration_aborted\', ... })` call so the attach.js listener picks it up');
+  const closeWindow = AGENT_SESSION.slice(
+    Math.max(0, AGENT_SESSION.indexOf('stream_closed_no_result') - 400),
+    AGENT_SESSION.indexOf('stream_closed_no_result') + 100);
+  assert.ok(/_emit\s*\(\s*\{[^}]*iteration_aborted/.test(closeWindow),
+    '`stream_closed_no_result` emit must be a `this._emit({ type: \'iteration_aborted\', ... })` call so the attach.js listener picks it up');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

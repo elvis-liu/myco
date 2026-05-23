@@ -2553,7 +2553,15 @@ test_chat_window() {
   #      running entry as the source of truth. [runQueue-diag] log
   #      fires on every fallback so the underlying _activeRunItem
   #      staleness can be root-caused in follow-up.
-  node_test_result test/fr-51-queue-advance.test.js "test/fr-51-queue-advance.test.js (9 cases)"
+  #  (3) THIRD-PASS fr-51 (this commit): agent-session.js retry loop had
+  #      two no-terminal-event escape paths — (a) `if (!this.alive) break`
+  #      when kill() flipped alive while a stream message was in flight,
+  #      bypassing AbortError; and (b) clean stream close without ever
+  #      sending a `result` message. Both stranded the queue's running
+  #      entry. Fix: emit iteration_aborted with stable `reason` strings
+  #      (`kill_mid_stream` / `stream_closed_no_result`) on both paths so
+  #      the listener can advance the queue.
+  node_test_result test/fr-51-queue-advance.test.js "test/fr-51-queue-advance.test.js (12 cases)"
   # bug-12: re-entering a session via the back icon (#btn-expand)
   # used to leave the chat pane hidden on mobile — setSidebar(false)
   # on back-icon-tap cascades into setChatPane(false), and openSession's

@@ -1297,8 +1297,20 @@
       "addedAt": "2026-05-18T04:44:01.376Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
-      "comments": [],
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "rs-6ef4b076fc8d",
+          "user": "claude",
+          "text": "**Investigation (no code yet).**\n\n### What I found in the current code + state\n\n| Layer | Reality |\n|---|---|\n| `/data/auth-sessions.json` (per-token user record) | Stores `login`, `githubId`, `avatarUrl`, `expiresAt`. **`name` is `null` for ALL existing sessions** (the OAuth handler at `server/src/index.js:241-303` writes `user.name || null` and clearly `user.name` came back null from /user). **Email is not stored at all.** |\n| `/data/git-tokens.json` | OAuth access tokens per (myco-user, github). 93-char tokens, `repo` scope. Usable to call `api.github.com/user` directly. |\n| Existing `git config user.*` writers in repo | **None** — `grep` across `server/` finds only a test fixture in `test/files-git-decorators.test.js` and a comment in `/git` slashcmd warning about `git config --global`. **There is no production code that configures git identity per-session.** |\n| Actual commits on origin/main | Today's `107575a` is by `zanqingzhang <zanqingzhang@gmail.com>`, `a8217cc` is by `kkrazy <kkrazy0630@gmail.com>`. So *some* sessions do attribute correctly — but only because each user's agent **manually** ran `git config user.email …` at some point (the CLAUDE.md context auto-injects `userEmail`, so the agent has the data and *might* set it). |\n\n### Verdict: fr-26 is real and unsolved\n\nIdentity wiring is **happenstance**, not systematic. Whether a commit gets attributed correctly depends on whether the agent thought to run `git config user.email` in that workspace. Not safe to rely on.\n\n### Two problems with the design as written\n\n1. **`gh api user`** — `gh` CLI is NOT installed in the prod container (verified: `which gh` returns nothing). We'd have to either:\n   - Install `gh` in the Dockerfile (extra 30MB of Go binary for a single API call), OR\n   - Skip `gh` and hit `https://api.github.com/user` directly using the OAuth token we already store at `/data/git-tokens.json` (preferred — zero new dep).\n\n2. **\"Pre-commit hook entry point\"** — git hooks are per-repo and only run if installed in `.git/hooks/`. They can't fix an unconfigured identity on the **first** commit (chicken-and-egg — the commit fires before the hook can do anything useful for author selection). **Setting identity at session-spawn time** is simpler and correct for the very first commit.\n\n### The data we already have for free\n\nFor any logged-in user, auth-sessions.json gives us:\n- `login` — always present\n- `githubId` — always present (numeric)\n\nThat's sufficient to construct the **noreply email**:\n\n```\n<githubId>+<login>@users.noreply.github.com\n```\n\nGitHub treats this form as authoritative — it correctly attributes commits to the user's profile + avatar, and crucially **never leaks their real email**. For `kkrazy`: `65970723+kkrazy@users.noreply.github.com`.\n\nName is trickier — `user.name` from OAuth is null. Options:\n- Use `login` as the name (simplest, always works)\n- Make a one-time `api.github.com/users/{login}` call to fetch the public display name; cache in auth-sessions.json (richer but adds a network call + cache invalidation question)\n\n### Multi-tenant correctness — pick a model\n\nmyco supports **multi-user attach** (owner + viewers + delegates can all share a session). When user A asks the agent and user B asks the agent to commit, *whose* identity does the commit carry?\n\n| Model | Author of commit | Pros | Cons |\n|---|---|---|---|\n| **Session-owner identity** (Recommended) | Always the user who spawned the session | Simple, matches workspace ownership semantics | Delegate's contribution is hidden in author field |\n| **Per-attach identity** | The user whose chat turn triggered the commit | Most accurate attribution | Requires pushing GIT_AUTHOR_* into the SDK env per-turn, hard to thread through Bash tool calls |\n| **Co-author trailer** | Author = session owner, `Co-Authored-By:` lists the attaching user(s) | Honest about both | Needs the agent to opt in to writing the trailer — easy to forget |\n\nRecommend: **start with session-owner identity** (covers the 95% case where attribution is owed to the spawner), document that delegates contributing significant code should add a Co-Authored-By trailer manually. Per-attach is a fr-XX follow-up if needed.\n\n### Hook point in the code\n\nTwo natural places:\n\n| Hook | Where | Effect |\n|---|---|---|\n| **A. Write `.git/config` at session spawn** | `server/src/sessions.js spawnSession()` — after `mkdir -p` of the workspace, run `git config user.email/name` against the new `.git/` (if/when one exists) | Sticky per-repo. Operator can override locally. Doesn't follow if user later does `git clone` into a sibling dir. |\n| **B. Set GIT_AUTHOR_*/GIT_COMMITTER_* env in agent SDK spawn** | `server/src/agent-session.js` — when assembling `options` for `query()`, inject the env into the child process | Per-process. Covers ANY git invocation by the agent (including in sub-cloned dirs). Env vars trump config. Doesn't apply to commits the user makes from outside the agent (e.g. via `/git commit` slashcmd). |\n\n**Recommend BOTH (belt + braces):**\n- A ensures human-side commits via `/git commit` or VS Code-Remote get the right identity\n- B ensures agent-side commits via Bash tool always get the right identity even in clone-derived dirs\n\n### Test plan\n\n`test/fr-26-git-author-identity.test.js`:\n1. Build a fake auth-sessions entry for `{login:\"alice\", githubId:1234}`\n2. Call the identity resolver → assert `{name:\"alice\", email:\"1234+alice@users.noreply.github.com\"}`\n3. Spawn a temp git repo with the env vars set → `git commit --allow-empty -m t` → assert `git log -1 --format=%ae` matches\n4. Cover the absence of `gh` CLI (no `gh` calls in the implementation)\n\n### Three options for the user to pick from\n\n**Option A — Minimal, ships in <1 hr**\n- Add `server/src/git-identity.js` exporting `buildIdentity({login, githubId, name})` → `{name, email}` using the noreply form\n- Hook into `agent-session.js`: inject GIT_AUTHOR_* / GIT_COMMITTER_* into `options.env` for `query()`\n- Hook into `spawnSession()`: `git config user.name/email` once at session create\n- One regression test (4 cases)\n\n**Option B — Option A + fetch public name from GitHub**\n- Same as A, plus a one-time `api.github.com/user` call on first session-spawn for a given login → store `name` in auth-sessions.json\n- Adds a network dep (graceful fallback to `login` if API call fails)\n- ~2 hr\n\n**Option C — Option A + Co-Authored-By for attaching delegates**\n- A, plus when the agent is invoked by a turn from a non-owner attacher, the commit message gets an automatic Co-Authored-By trailer\n- Most accurate but invasive (touches the agent's commit-message construction path which isn't centralized)\n- ~half day\n\n**My recommendation: Option A.** Honest about its scope (\"commits authored by session-owner\"), zero new deps, fits the existing data model, easy to extend later. Filing fr-XX for delegate-attribution if/when needed.\n\nStatus: analysis only; awaiting Option A/B/C pick.",
+          "ts": "2026-05-23T03:49:29.845Z",
+          "meta": {
+            "kind": "investigation"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "git commit to use current user github id so that the work is accountable. please add some design to this fr as you rewrite and adding to plan item list",
@@ -1491,7 +1503,9 @@
       "addedAt": "2026-05-18T16:54:11.799Z",
       "addedBy": "claude",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": []
     },
     {
@@ -1502,7 +1516,9 @@
       "addedAt": "2026-05-18T16:54:11.799Z",
       "addedBy": "claude",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": []
     },
     {
@@ -1549,7 +1565,7 @@
       "id": "fr-39",
       "text": "**Problem:** Session owners have no way to delegate management responsibilities, forcing all admin actions through a single user.\n**Expected:** Owner can assign an admin role that grants the same permissions as the owner, except deletion of the session.\n**Actual:** Only the owner holds elevated permissions; no admin role exists.",
       "layer": "Feature",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-19T00:45:33.513Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -1756,7 +1772,9 @@
       "addedAt": "2026-05-19T03:46:53.136Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -2132,7 +2150,9 @@
       "addedAt": "2026-05-20T20:10:12.849Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -2148,13 +2168,36 @@
       "addedAt": "2026-05-20T20:16:14.347Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
-      "comments": [],
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "rs-8efe57e01837",
+          "user": "claude",
+          "text": "**Root cause (this is the THIRD fr-51 commit; prior two were symptomatic patches).**\n\n### What the prior two fixes did\n1. `slashcmds.js handleQCancel` — auto-advance the queue after a manual /qcancel\n2. `attach.js agent-event listener` — fall back to queue's running entry when `session._activeRunItem` is null/undefined\n\nBoth fixes only fire **after** a terminal `agent-event` (`turn_result` / `iteration_aborted` / `fatal`) reaches the listener. **Neither helps if no terminal event is emitted at all.**\n\n### The actual root cause — `agent-session.js` has TWO no-terminal-event escape paths\n\n```js\ntry {\n  for await (const m of stream) {\n    if (!this.alive) break;        // (A) early break, no terminal event\n    this._handleEvent(m);\n  }\n} catch (err) { streamErr = err; }\n\nif (!streamErr) break;             // (B) exit silently if stream ended cleanly\n```\n\n| Path | When | Why queue stalls |\n|---|---|---|\n| **(A) `if (!this.alive) break`** | `kill()` sets `alive=false` (5-min reaper, externally-triggered exit, etc.) while a stream message is being processed. The loop breaks BEFORE `AbortController.abort()` propagates as a thrown `AbortError`. | The catch is bypassed → `streamErr` stays null → `if (!streamErr) break` exits the retry loop without ever calling `this._emit({type:'iteration_aborted'})`. **No `agent-event` ever fires on the listener.** Queue's running entry stays `running` forever. |\n| **(B) Clean stream close without `result`** | SDK closes the async iterator without sending a `{type:'result'}` message. Rare but possible (network blip after assistant_text, server-side disconnect). | `turn_result` only emits inside `_handleEvent` when `m.type === 'result'`. If no such message arrives, no terminal event. Same outcome — queue stranded. |\n\nThe prior fr-51 patches assumed at least ONE terminal event would always reach the listener. These two paths break that assumption.\n\n### The fix (small + surgical, ~15 LOC in agent-session.js)\n\nIn the retry-loop body, track a `killedMidStream` flag set when the for-await breaks via `!this.alive`, and an `emittedTerminal` flag set when `_handleEvent` processes a `result` message. After the for-await:\n\n```js\nlet killedMidStream = false;\nlet emittedTerminal = false;\n\ntry {\n  for await (const m of stream) {\n    if (!this.alive) { killedMidStream = true; break; }\n    this._handleEvent(m);\n    if (m && m.type === 'result') emittedTerminal = true;\n  }\n} catch (err) { streamErr = err; }\n\nif (killedMidStream) {\n  this._emit({ type: 'iteration_aborted', reason: 'kill_mid_stream' });\n  break;\n}\nif (!streamErr) {\n  if (!emittedTerminal) {\n    this._emit({ type: 'iteration_aborted', reason: 'stream_closed_no_result' });\n  }\n  break;\n}\n// existing isAbort / recoverable / fatal logic continues unchanged\n```\n\nBoth new emits route through the existing attach.js listener (which already handles `iteration_aborted` per the prior fr-51 patch), so the queue marks finished + advances normally. The `reason` field is logged so we can spot which path triggered.\n\n### Test plan\n\nExtend `test/fr-51-queue-advance.test.js` (currently 9 cases) with two new static-grep guards:\n- `agent-session.js` for-await loop carries a `killedMidStream` flag (or equivalent marker) and emits `iteration_aborted` when it fires\n- `agent-session.js` for-await loop has a `stream_closed_no_result` (or equivalent) emit when the stream ends cleanly without a result message\n\nBehavior assertions on `_emit` semantics aren't easy without instantiating AgentSession with a fake SDK — static guards are the cleanest floor for \"this code path must emit `iteration_aborted` before exiting silently.\"\n\n### Why this is the right scope\n\n- Does NOT touch the existing fr-51 patches in attach.js / slashcmds.js — those remain correct as belt-and-braces for downstream cases.\n- Does NOT introduce new state on the rec — just two local flags in the retry-loop method.\n- Matches CLAUDE.md §8.4 surgical-edits discipline: the diff is exactly the no-terminal-event paths, nothing adjacent.\n\nStatus: analysis done. Implementing the fix now (no Option A/B/C — the fix is small enough that ship-and-done is the right move per fr-51's recurring history).",
+          "ts": "2026-05-23T03:58:24.414Z",
+          "meta": {
+            "kind": "investigation"
+          }
+        },
+        {
+          "id": "rs-2ea14013c2f2",
+          "user": "claude",
+          "text": "**Fix shipped (third pass).**\n\n### What changed\n`server/src/agent-session.js` — retry loop now emits `iteration_aborted` (with stable `reason` strings) on the two no-terminal-event escape paths:\n\n| Path | Trigger | New emit |\n|---|---|---|\n| `if (!this.alive) break` | `kill()` flipped alive=false mid-stream | `{type:'iteration_aborted', reason:'kill_mid_stream'}` |\n| Clean stream close without `result` | SDK closed iterator without sending turn_result | `{type:'iteration_aborted', reason:'stream_closed_no_result'}` |\n\nBoth emits route through `this._emit` → `agent-event` → the existing attach.js terminal-event listener → `_advanceRunQueue` → `markFinished` + dispatch next. No changes to attach.js / slashcmds.js — prior fr-51 patches stay in place as belt-and-braces for downstream cases.\n\nThe `reason` field is logged so `[runQueue-diag]` post-deploy can tell us which path triggered, supporting root-cause work on whatever's causing kills / clean-closes upstream.\n\n### Regression test\n`test/fr-51-queue-advance.test.js` extended from 9 → 12 cases. Three new static guards:\n1. `kill_mid_stream` marker present, `killedMidStream` flag set inside the for-await break\n2. `stream_closed_no_result` marker present, `emittedTerminal` flag set on `m.type === 'result'`\n3. Both new emits are `this._emit({type:'iteration_aborted', ...})` (not a side channel)\n\n12/12 ✓ direct. Full `./test/test.sh` aborts on host BusyBox `grep -P` (pre-existing env limit per CLAUDE.md §Pre-Commit-1, same as td-31..td-34 commits). `agent-session.test.js` skips on this host because the Anthropic SDK isn't installed in the agent sandbox.\n\n### Takes effect when\nNext `./scripts/deploy.sh` rebuilds the image — the in-process change to agent-session.js needs a server restart to take effect.\n\n### Follow-up tracking\nThe `[runQueue-diag]` lines for `reason=kill_mid_stream` will identify what's triggering kills mid-stream (most likely the 5-min reaper for idle-but-mid-iteration sessions). If that becomes a frequent occurrence in prod logs, file a follow-up to look at the reaper's idle-detection criteria — but the queue is no longer stranded either way.\n\nStatus: closed.",
+          "ts": "2026-05-23T04:02:11.510Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "queue item reported finished but never marked as finished and not moving to next item.",
         "rewritten": true
-      }
+      },
+      "status": "closed",
+      "closedAt": "2026-05-23T04:02:11.510Z"
     },
     {
       "id": "fr-52",
@@ -2343,7 +2386,7 @@
       "id": "bug-24",
       "text": "**Problem:** Queue display above the chat pane is cluttered because it shows every task.\n**Expected:** Show only some finished and some pending tasks.\n**Actual:** Shows all tasks.",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-21T19:12:20.016Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -2415,7 +2458,9 @@
       "addedAt": "2026-05-21T22:42:21.446Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -2586,7 +2631,9 @@
       "addedAt": "2026-05-22T09:26:00.310Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",
@@ -2630,12 +2677,13 @@
       ],
       "comments": [
         {
-          "id": "rs-d7bd35d254ad",
+          "id": "48e5a084c16f",
           "user": "claude",
-          "text": "**Done — Docker files consolidated under `docker/`.**\n\n### What moved\n- `Dockerfile` → `docker/Dockerfile` (via `git mv` so history follows)\n- `docker-entrypoint.sh` → `docker/docker-entrypoint.sh` (same)\n\n### What stayed at the root (deliberate)\n- `.dockerignore` — Docker CLI only honors it at the build-context root; moving it would silently disable the ignore rules and balloon the build context. Pinned by the regression test.\n\n### Reference updates\n- `docker/Dockerfile` line 52: `COPY docker-entrypoint.sh ...` → `COPY docker/docker-entrypoint.sh ...` (path is relative to build context, which stays at repo root)\n- `deploy.sh` line 133: `docker build -t \"$IMAGE\" .` → `docker build -t \"$IMAGE\" -f docker/Dockerfile .`\n- `test.sh` line 1377: `grep -q '/build\\.txt' Dockerfile` → `grep -q '/build\\.txt' docker/Dockerfile`\n- `test/fr-55-lean-ctx-mcp.test.js` line 35: path updated\n- `test/sidebar-manual-link.test.js` line 152: path updated\n\n### Regression test\n`test/td-31-docker-folder.test.js` (8 cases, wired into test.sh after bug-27) pins:\n1. `docker/Dockerfile` exists\n2. `docker/docker-entrypoint.sh` exists\n3. NO `Dockerfile` at repo root\n4. NO `docker-entrypoint.sh` at repo root\n5. Dockerfile's internal COPY uses `docker/docker-entrypoint.sh`\n6. `deploy.sh` builds with `-f docker/Dockerfile`\n7. `.dockerignore` stays at repo root\n8. `test.sh` greps `docker/Dockerfile`\n\n### Validation\n- `node test/td-31-docker-folder.test.js` → 8/8 ✓\n- `node test/fr-55-lean-ctx-mcp.test.js` → 10/10 ✓ (still finds Dockerfile at new path)\n- `node test/sidebar-manual-link.test.js` → 16/16 ✓ (same)\n- Full `./test.sh` aborts on the host's BusyBox `grep -P` (pre-existing env limitation noted in CLAUDE.md §Pre-Commit-1) — not a td-31 regression. The Node tests touching td-31's changes all pass when run directly.\n\n### Next-deploy validation\n`deploy.sh` will exercise the `-f docker/Dockerfile` invocation on the user's next `./deploy.sh` push. If the move broke the build, deploy fails fast at the build step.",
-          "ts": "2026-05-23T00:21:37.957Z",
+          "text": "✓ success · 696.5s · $11.4240 · 50↓/17570↑\n\nCommit landed locally (`b832b5e`), but push needs the user's credentials (HTTPS auth isn't configured in this sandbox).\n\n## td-31 done\n\n**Moved** (via `git mv` so history follows):\n- `Dockerfile` → `docker/Dockerfile`\n- `docker-entrypoint.sh` → `docker/docker-entrypoint.sh`\n\n**Stayed at root** (deliberate): `.dockerignore` — Docker CLI only honors it at the build-context root.\n\n**Reference updates:**\n- `docker/Dockerfile` line 52 → `COPY docker/docker-entrypoint.sh /docker-entrypoint.sh`\n- `deploy.sh` line 133 → `docker build -t \"$IMAGE\" -f docker/Dockerfile .`\n- `test.sh` line 1377 → `grep -q '/build\\.txt' docker/Dockerfile`\n- `test/fr-55-lean-ctx-mcp.test.js`, `test/sidebar-manual-link.test.js` → `path.join(__dirname, '..', 'docker', 'Dockerfile')`\n\n**Regression test:** `test/td-31-do…",
+          "ts": "2026-05-23T00:22:39.846Z",
           "meta": {
-            "kind": "run-summary"
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-23T00:11:01.546Z"
           }
         }
       ],
@@ -2644,9 +2692,68 @@
         "originalText": "refactor: move all docker related files to docker folder",
         "rewritten": true
       },
-      "status": "closed",
-      "closedAt": "2026-05-23T00:21:37.957Z"
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-23T00:22:39.846Z",
+          "startedAt": "2026-05-23T00:11:01.546Z",
+          "summary": "696.5s · 50→17570 tok",
+          "result": "Commit landed locally (`b832b5e`), but push needs the user's credentials (HTTPS auth isn't configured in this sandbox).\n\n## td-31 done\n\n**Moved** (via `git mv` so history follows):\n- `Dockerfile` → `docker/Dockerfile`\n- `docker-entrypoint.sh` → `docker/docker-entrypoint.sh`\n\n**Stayed at root** (deliberate): `.dockerignore` — Docker CLI only honors it at the build-context root.\n\n**Reference updates:**\n- `docker/Dockerfile` line 52 → `COPY docker/docker-entrypoint.sh /docker-entrypoint.sh`\n- `deploy.sh` line 133 → `docker build -t \"$IMAGE\" -f docker/Dockerfile .`\n- `test.sh` line 1377 → `grep -q '/build\\.txt' docker/Dockerfile`\n- `test/fr-55-lean-ctx-mcp.test.js`, `test/sidebar-manual-link.test.js` → `path.join(__dirname, '..', 'docker', 'Dockerfile')`\n\n**Regression test:** `test/td-31-docker-folder.test.js` (8 cases, wired into test.sh after bug-27). Pins both files at the new path, neither at the root, the internal COPY uses the new path, `deploy.sh` uses `-f`, and `.dockerignore` stays at root.\n\n**Validation:** new test 8/8, fr-55-lean-ctx-mcp 10/10, sidebar-manual-link 16/16. Full `./test.sh` aborts on host BusyBox `grep -P` (pre-existing env limit). The deploy will exercise the `-f docker/Dockerfile` flag and fail fast if the move broke anything.\n\n**Closed** in `_myco_/plan.json` with the run-summary above.\n\nLocal commit: `b832b5e td-31: consolidate Docker files under docker/ folder`. Run `git push` (or your usual `./deploy.sh`) when ready."
+        }
+      ]
+    },
+    {
+      "id": "bug-31",
+      "text": "**Problem:** Clicking outside an AskUserQuestion prompt dismisses it with no way to reopen or answer until the next AskUserQuestion appears, blocking the user from responding or clarifying.\n**Expected:** Outside-clicks should not dismiss the prompt, or the user should be able to re-open it / chat with the agent to provide a custom answer or deeper clarification.\n**Actual:** The prompt becomes stuck and unanswerable; there is no affordance for user-specific questions or free-form clarification with the agent until another AskUserQuestion is shown.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-23T01:51:32.555Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "accidentially click outside the askuserquestion would stuck without opportunith to answer again until next askuserquestion show up. It doesnt have a way to provide user specific questions or allow user to chat with agent for deeper clarification.",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "bug-32",
+      "text": "Chat pane keep scroll to the latest msg as they come making it difficult for user who are reading the history",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-23T03:57:07.157Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "originalText": "scro",
+        "editedBy": "kkrazy",
+        "editedAt": "2026-05-23T03:58:23.713Z"
+      }
+    },
+    {
+      "id": "bug-33",
+      "text": "**Problem:** The file viewer path breadcrumb is cluttered by the icons sharing its row at the top.\n**Expected:** Breadcrumb sits on its own dedicated row, separate from the icons.\n**Actual:** Breadcrumb and icons are crammed together on the same top row.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-23T04:01:34.197Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the file viewer path breadscrum cluttered with the icons on the top, it should be in its own row",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-23T00:21:37.957Z"
+  "updatedAt": "2026-05-23T04:02:11.510Z"
 }

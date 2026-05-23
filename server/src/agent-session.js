@@ -411,16 +411,46 @@ class AgentSession extends EventEmitter {
       this._emit({ type: 'iteration_start', resume: !!sdkOpts.resume, attempt });
 
       let streamErr = null;
+      // fr-51 (third pass): track whether this iteration emitted any
+      // terminal `agent-event` so the queue listener gets unblocked
+      // even when the SDK never sends a `{type:'result'}` message.
+      //   - killedMidStream: `kill()` flipped alive=false while a stream
+      //     message was in flight; the loop breaks BEFORE AbortError
+      //     propagates as a throw. Pre-fix the catch was bypassed, no
+      //     terminal event fired, and any run-queue `running` entry
+      //     stayed `running` forever — blocking every pending entry.
+      //   - emittedTerminal: SDK closed the stream cleanly without ever
+      //     sending a `result` message (rare but observed under server-
+      //     side disconnect / mid-stream network blip). Same outcome.
+      // Both new emits route through the existing attach.js terminal-
+      // event listener, which already handles `iteration_aborted` (prior
+      // fr-51 patch), so the queue marks finished + advances normally.
+      let killedMidStream = false;
+      let emittedTerminal = false;
       try {
         for await (const m of stream) {
-          if (!this.alive) break;
+          if (!this.alive) { killedMidStream = true; break; }
           this._handleEvent(m);
+          if (m && m.type === 'result') emittedTerminal = true;
         }
       } catch (err) {
         streamErr = err;
       }
 
-      if (!streamErr) break;   // stream ended cleanly — done.
+      if (killedMidStream) {
+        this._emit({ type: 'iteration_aborted', reason: 'kill_mid_stream' });
+        break;
+      }
+      if (!streamErr) {
+        // Stream ended cleanly. If it never emitted a `result`, the
+        // run-queue listener has no terminal event to advance on —
+        // emit iteration_aborted with a stable reason so the [runQueue-diag]
+        // log can identify this path.
+        if (!emittedTerminal) {
+          this._emit({ type: 'iteration_aborted', reason: 'stream_closed_no_result' });
+        }
+        break;   // stream ended cleanly — done.
+      }
 
       const isAbort = (streamErr && (streamErr.name === 'AbortError' || /aborted|abort/i.test(String(streamErr.message || ''))));
       if (isAbort) {
