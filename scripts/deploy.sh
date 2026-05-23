@@ -564,7 +564,13 @@ post_deploy_checks() {
 
 main() {
   parse_args "$@"
-  cd "$(dirname "$0")"
+  # NOTE: cwd is anchored to the repo root by the early `cd` near
+  # line 46 (after td-33 moved this script into scripts/). The
+  # previous `cd "$(dirname "$0")"` here was a leftover from when
+  # deploy.sh lived at the repo root, where it was a no-op — after
+  # the move it cd'd INTO scripts/, undoing the line-46 anchor and
+  # breaking `docker build -f docker/Dockerfile .` plus the
+  # `./test/test.sh` invocation. Don't reintroduce.
 
   # Single-shot config flags: do the operation and exit, no build/ship.
   if [ -n "$ADD_ALLOW" ]; then

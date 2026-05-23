@@ -1496,6 +1496,20 @@ test_deploy_oauth_flags() {
   # design decision — we removed --add-token entirely.
   ! grep -qE -- '--add-token' scripts/deploy.sh && pass "deploy.sh: --add-token removed"               || fail "deploy.sh: --add-token still referenced"
   ! grep -q 'MYCO_TOKENS' scripts/deploy.sh     && pass "deploy.sh: MYCO_TOKENS removed"               || fail "deploy.sh: MYCO_TOKENS still referenced"
+  # Regression (2026-05-23): td-33 moved deploy.sh into scripts/.
+  # The pre-move main() started with `cd "$(dirname "$0")"` which
+  # was a no-op when the script lived at the repo root, but now
+  # cds INTO scripts/ — undoing the cd-anchor near the top and
+  # breaking `docker build -f docker/Dockerfile .` plus
+  # `./test/test.sh`. Negative guard: that line must NOT exist
+  # inside main() anymore. (The cwd anchor near line ~46 lives in
+  # the top-level code BEFORE main(), so the `cd $(dirname …)`
+  # pattern is fine there — only the leftover inside main() is
+  # the buggy one.)
+  awk '/^main\(\)/,/^}$/' scripts/deploy.sh \
+    | grep -qE '^\s*cd "\$\(dirname "\$0"\)"' \
+    && fail "deploy.sh main(): leftover 'cd \$(dirname \$0)' undoes the cwd anchor (bug re-introduced)" \
+    || pass "deploy.sh main(): no leftover 'cd \$(dirname \$0)' (cwd anchor preserved)"
   # Regression (2026-05-16): verify_deploy used to grep `app.js?v=\d+` on
   # both source + served HTML, which broke once the server started
   # rewriting `?v=` to the URL-encoded build.txt timestamp (e.g.
