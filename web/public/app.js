@@ -6745,7 +6745,8 @@ function renderArtifact(type, artifact) {
     return `<li class="${cls}" ${liId} data-id="${escHtml(it.id)}">
       <div class="artifact-item-row">
         <div class="artifact-item-meta">${statusChip}${idChip}</div>
-        <div class="artifact-item-text artifact-md">${renderMd(it.text || '')}</div>
+        <div class="${_planItemTextClass(it)}">${renderMd(it.text || '')}</div>
+        ${_planItemTextExpandToggle(it)}
       </div>
       ${byLine}
       ${actionsRow}
@@ -6887,6 +6888,21 @@ function renderArtifact(type, artifact) {
         if (!key) return;
         const cur = _readPlanLayerExpanded(key);
         _writePlanLayerExpanded(key, !cur);
+        const cached = state.artifacts && state.artifacts.byType && state.artifacts.byType.plan;
+        if (cached) renderArtifact('plan', cached);
+      });
+    });
+    // Per-item "Show more / less" toggle — flips state.planExpandedItems
+    // membership for the clicked item and re-renders the cached plan
+    // artifact so the clamp/expand takes effect immediately.
+    body.querySelectorAll('.artifact-item-text-expand').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();   // don't bubble into any row-level handler
+        const id = btn.dataset.id;
+        if (!id) return;
+        if (!state.planExpandedItems) state.planExpandedItems = new Set();
+        if (state.planExpandedItems.has(id)) state.planExpandedItems.delete(id);
+        else state.planExpandedItems.add(id);
         const cached = state.artifacts && state.artifacts.byType && state.artifacts.byType.plan;
         if (cached) renderArtifact('plan', cached);
       });
@@ -9142,6 +9158,39 @@ function _readPlanLayerExpanded(layerKey) {
 }
 function _writePlanLayerExpanded(layerKey, expanded) {
   try { localStorage.setItem('myco_plan_layer_expand_' + layerKey, expanded ? '1' : '0'); } catch {}
+}
+
+// User feedback: "Some plan items have long text, making it difficult
+// to scroll, put a limit and allow expand." Clamp long item text to
+// ~5 lines with CSS line-clamp; show a "Show more / less" pill that
+// flips per-item expand state. State lives in state.planExpandedItems
+// (a Set of item ids) — not persisted (fresh per page load — expand
+// is a "right now I want to read this" intent, not a preference).
+//
+// Threshold for "long": >280 chars OR ≥4 newlines. Either heuristic
+// catches the common cases without needing DOM measurement (cheaper
+// than a getBoundingClientRect / scrollHeight check on every render).
+function _planItemIsLongText(it) {
+  const raw = (it && it.text) || '';
+  if (raw.length > 280) return true;
+  const nl = (raw.match(/\n/g) || []).length;
+  return nl >= 4;
+}
+function _planItemIsExpanded(it) {
+  return !!(state.planExpandedItems && state.planExpandedItems.has(it && it.id));
+}
+function _planItemTextClass(it) {
+  const base = 'artifact-item-text artifact-md';
+  if (_planItemIsLongText(it) && !_planItemIsExpanded(it)) {
+    return base + ' is-clamped';
+  }
+  return base;
+}
+function _planItemTextExpandToggle(it) {
+  if (!_planItemIsLongText(it)) return '';
+  const expanded = _planItemIsExpanded(it);
+  const label = expanded ? 'Show less' : 'Show more';
+  return `<button class="artifact-item-text-expand" data-id="${escHtml(it.id)}" type="button" aria-expanded="${expanded ? 'true' : 'false'}">${label}</button>`;
 }
 
 // fr-64: derive a single status string for a plan item based on

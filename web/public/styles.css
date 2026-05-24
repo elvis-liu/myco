@@ -2127,6 +2127,40 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   border-color: var(--accent-warm, #d97706);
 }
 .artifact-item-text { flex: 1; word-break: break-word; min-width: 0; }
+/* Clamp long item text to ~5 lines; "Show more / less" pill toggles
+   the .is-clamped class via _planItemTextExpandToggle in app.js.
+   line-clamp on a -webkit-box gives a clean ellipsis at the bottom
+   of the last visible line — supported across all modern browsers
+   (Safari/Chrome/Firefox 2022+). The expand pill is hidden when
+   the item's text is short (the toggle is omitted entirely for
+   text under ~280 chars / 4 newlines — see _planItemIsLongText). */
+.artifact-item-text.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  position: relative;
+}
+.artifact-item-text-expand {
+  display: inline-block;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 3px 10px;
+  font-size: .72rem;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--accent, #7ab4ff);
+  background: rgba(80, 120, 200, .14);
+  border: 1px solid rgba(80, 120, 200, .35);
+  border-radius: 999px;
+  cursor: pointer;
+  user-select: none;
+  transition: background .12s, border-color .12s;
+}
+.artifact-item-text-expand:hover {
+  background: rgba(80, 120, 200, .26);
+  border-color: rgba(80, 120, 200, .55);
+}
 /* Creator line — small muted "filed by @user · <ts>" on its own row
  * BELOW the body text. Doesn\'t compete with body for horizontal
  * space. Hover-title carries the raw addedAt timestamp. */
