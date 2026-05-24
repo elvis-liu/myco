@@ -180,16 +180,13 @@
       <div id="plan-wrap" class="artifact-main-view" hidden>
         <div class="artifact-header">
           <span class="artifact-title">Plan</span>
-          <label class="artifact-toggle-bp" title="Hide done items so only open bugs / features / todos are visible">
-            <input type="checkbox" id="plan-open-only-toggle" />
-            <span>Open only</span>
-          </label>
           <button class="artifact-refresh" data-type="plan" title="Re-extract from the latest session activity">↻ Refresh</button>
         </div>
         <!-- fr-56: type filter + fuzz search row. Chips persist across
              reloads (localStorage.myco_plan_type_filter); search resets
              on reload (fresh slate). Intersected with the Open only
-             toggle above by _filterPlanItems. -->
+             toggle (moved here from the header so all filter controls
+             sit together) by _filterPlanItems. -->
         <div class="artifact-subheader" id="plan-filter-row">
           <div class="plan-type-filters" role="group" aria-label="Filter plan items by type">
             <label class="plan-type-chip" data-type="Bug" title="Show / hide Bug items">
@@ -205,6 +202,14 @@
               <span>✅ Todo</span>
             </label>
           </div>
+          <!-- Open only checkbox — same place as the other filter chips
+               so all "narrow what's shown" controls live together.
+               Was inside .artifact-header above; moved here per user
+               feedback so the filter row is the single filter UI. -->
+          <label class="artifact-toggle-bp plan-open-only-inline" title="Hide done items so only open bugs / features / todos are visible">
+            <input type="checkbox" id="plan-open-only-toggle" />
+            <span>Open only</span>
+          </label>
           <input type="search" id="plan-search" class="plan-search-input"
                  placeholder="Search plan items…" autocomplete="off"
                  aria-label="Search plan items by text or id" />

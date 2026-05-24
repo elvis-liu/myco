@@ -1766,7 +1766,11 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 14px 8px 14px;
+  /* User feedback: collapse the visible gap between the header and
+     the filter row — they should read as one toolbar. Top padding
+     now 0; horizontal padding matches the body for clean alignment;
+     small bottom padding gives breathing room before the item list. */
+  padding: 0 14px 6px 14px;
   border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
   flex-wrap: wrap;
 }
@@ -1781,15 +1785,25 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
      - z-index: 5   — above the plan items but below modal overlays
      - background   — opaque so items scrolling underneath don't
                       visually bleed through the row
-     - margin: -12px -14px 0 -14px — counter the body's padding so
+     - margin: -16px -16px 0 -16px — counter the body's padding so
                       the sticky row spans the full body width
-                      (matches the visual "header strip" look). */
+                      (matches the visual "header strip" look).
+                      Desktop body padding is 16px (line ~3181);
+                      mobile is 12px 14px — -16 over-cancels mobile
+                      by a few px but visually clean either way. */
 #plan-filter-row {
   position: sticky;
   top: 0;
   z-index: 5;
   background: var(--bg);
-  margin: -12px -14px 0 -14px;
+  margin: -16px -16px 0 -16px;
+}
+/* Open only checkbox now lives inside the filter row alongside the
+   chips (moved per user feedback). Same compact pill look so it
+   reads as part of the same filter group, not the header chrome. */
+.plan-open-only-inline {
+  font-size: .76rem;
+  flex-shrink: 0;
 }
 .plan-type-filters {
   display: inline-flex;
