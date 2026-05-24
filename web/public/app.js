@@ -6744,8 +6744,7 @@ function renderArtifact(type, artifact) {
     const liId = it.id ? `id="artifact-item-${escHtml(it.id)}"` : '';
     return `<li class="${cls}" ${liId} data-id="${escHtml(it.id)}">
       <div class="artifact-item-row">
-        ${statusChip}
-        ${idChip}
+        <div class="artifact-item-meta">${statusChip}${idChip}</div>
         <div class="artifact-item-text artifact-md">${renderMd(it.text || '')}</div>
       </div>
       ${byLine}

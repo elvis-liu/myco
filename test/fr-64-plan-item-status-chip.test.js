@@ -61,11 +61,17 @@ t('app.js: status map carries all 5 states with glyph + cls + label', () => {
   }
 });
 
-t('app.js: chip injected at the START of the plan-item row (before idChip)', () => {
-  // The row template is `<div class="artifact-item-row">${statusChip}${idChip}<div...text...></div></div>`.
-  // Order matters — chip first so it's the leftmost visual at-a-glance signal.
-  assert.ok(/<div class="artifact-item-row">\s*\$\{statusChip\}\s*\$\{idChip\}/.test(APP),
-    'plan-item row template must declare ${statusChip} BEFORE ${idChip} so the status glyph is the leftmost element');
+t('app.js: chip injected at the START of the meta row (before idChip)', () => {
+  // Post-bug "rearrange status+id to enlarge text": status + id sit
+  // inside an .artifact-item-meta wrapper that stacks ABOVE the text
+  // (so text takes full row width). Order within the meta wrapper:
+  // statusChip BEFORE idChip so the status glyph is still the leftmost
+  // visual at-a-glance signal in the meta strip.
+  assert.ok(/<div class="artifact-item-meta">\$\{statusChip\}\$\{idChip\}/.test(APP),
+    'plan-item meta wrapper must contain ${statusChip}${idChip} in that order — status glyph stays leftmost in the meta strip');
+  // The wrapper itself must be inside .artifact-item-row.
+  assert.ok(/<div class="artifact-item-row">[\s\S]{0,200}<div class="artifact-item-meta">/.test(APP),
+    '.artifact-item-meta wrapper must live inside .artifact-item-row (which is now flex-direction: column)');
 });
 
 t('app.js: chip is computed only when supportsVoting (Plan items, not Test)', () => {
