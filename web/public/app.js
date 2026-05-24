@@ -6501,6 +6501,7 @@ function renderArtifact(type, artifact) {
     // path too — the user just merged the last item, the callout might
     // still have more proposals to render).
     if (preservedCallout) body.insertBefore(preservedCallout, body.firstChild);
+    _attachPlanFilterRowToBody(body, type);
     return;
   }
   if (!displayItems.length) {
@@ -6521,6 +6522,7 @@ function renderArtifact(type, artifact) {
       body.innerHTML = `<div class="artifact-empty">No items match${whyText}. ${items.length} total item(s) in the plan.</div>`;
     }
     if (preservedCallout) body.insertBefore(preservedCallout, body.firstChild);
+    _attachPlanFilterRowToBody(body, type);
     return;
   }
   const me = state.chatUser || '';
@@ -6786,6 +6788,10 @@ function renderArtifact(type, artifact) {
   }
   body.innerHTML = bodyHtml +
     (artifact.updatedAt ? `<div class="artifact-updated">Updated ${escHtml(formatChatTsWithDate(artifact.updatedAt) || artifact.updatedAt)}</div>` : '');
+  // fr-61: prepend the sticky filter row so it shares the body's
+  // scroll context (sibling-position sticky doesn't pin against
+  // a different scroll container).
+  _attachPlanFilterRowToBody(body, type);
   // After the items' markdown is in place, sweep for mermaid fences
   // so any ```mermaid blocks inside an item's text become SVG.
   // marked emits them as <pre><code class="language-mermaid">; this
@@ -9052,6 +9058,26 @@ function bindPlanSearch() {
       if (cached) renderArtifact('plan', cached);
     }, 150);
   });
+}
+
+// fr-61: relocate #plan-filter-row INTO #artifact-body-plan so the
+// CSS `position: sticky; top: 0` actually pins the filter row to
+// the top of the body's scroll viewport. Without this move the
+// row is a SIBLING of the scroll container and sticky has no
+// scrolling ancestor to pin against (it silently behaves like
+// static — the filter would scroll out of view on a long list).
+// Idempotent: safe to call multiple times. Called after every
+// body.innerHTML write in the plan-rendering paths because the
+// innerHTML write wipes the body's children (filter row included).
+function _attachPlanFilterRowToBody(body, type) {
+  if (type !== 'plan' || !body) return;
+  const filterRow = document.getElementById('plan-filter-row');
+  if (!filterRow) return;
+  // Only re-insert if not already the first child of the body —
+  // saves a layout pass on no-op calls.
+  if (filterRow.parentElement !== body || filterRow !== body.firstElementChild) {
+    body.insertBefore(filterRow, body.firstChild);
+  }
 }
 
 // fr-65: per-layer "closed items" accordion state. Each layer

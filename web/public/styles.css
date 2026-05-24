@@ -1770,6 +1770,27 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
   flex-wrap: wrap;
 }
+/* fr-61: #plan-filter-row stays visible at the top of the plan list
+   while the user scrolls through the 100+ items. position: sticky
+   works because we relocate the row into #artifact-body-plan (the
+   scrolling container, overflow-y: auto) at render-time — see
+   _attachPlanFilterRowToBody in app.js. Without that JS relocate
+   the row is a sibling of the body and sticky has no scrolling
+   ancestor to pin against.
+     - top: 0       — pins at the top of the body's scroll viewport
+     - z-index: 5   — above the plan items but below modal overlays
+     - background   — opaque so items scrolling underneath don't
+                      visually bleed through the row
+     - margin: -12px -14px 0 -14px — counter the body's padding so
+                      the sticky row spans the full body width
+                      (matches the visual "header strip" look). */
+#plan-filter-row {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  margin: -12px -14px 0 -14px;
+}
 .plan-type-filters {
   display: inline-flex;
   align-items: center;

@@ -2422,6 +2422,14 @@ test_chat_window() {
   # tap size. Desktop styling is unchanged (no min-height on the base
   # rules). Static-grep only.
   node_test_result test/fr-62-plan-item-mobile-tap-targets.test.js "test/fr-62-plan-item-mobile-tap-targets.test.js (9 cases)"
+  # fr-61: #plan-filter-row sticky at top of body scroll. CSS adds
+  # position: sticky + top: 0 + opaque background + z-index. JS
+  # helper _attachPlanFilterRowToBody relocates the row from being
+  # a sibling of #artifact-body-plan to being its first child (so
+  # sticky has a scroll-container ancestor to pin against). Called
+  # after every plan-path body.innerHTML write so the row survives
+  # innerHTML wipes. Static-grep only.
+  node_test_result test/fr-61-plan-filter-row-sticky.test.js "test/fr-61-plan-filter-row-sticky.test.js (9 cases)"
   # fr-39: per-session admin delegation. Owners can /admin @user to
   # grant admin (multi-admin supported); admins inherit everything
   # except DELETE-session + grant/revoke admin (those stay

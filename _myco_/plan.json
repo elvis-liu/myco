@@ -2925,7 +2925,19 @@
       "voters": [
         "kkrazy"
       ],
-      "comments": []
+      "comments": [
+        {
+          "id": "rs-8008013904e9",
+          "user": "claude",
+          "text": "**Shipped.**\n\n### What the user gets\nfr-56's type chips (🐞 Bug / ✨ Feature / ✅ Todo) + search input now stay pinned to the top of the plan list while you scroll through items. No more swiping back up to retype a search or toggle a type filter.\n\n### Why \"CSS-only\" wasn't actually possible\nThe fr-61 description called for CSS-only, but `#plan-filter-row` is a **sibling** of the scrollable body (`#artifact-body-plan`), not a descendant. `position: sticky` only pins against the closest scrolling ancestor — sibling-to-scrolling-element doesn't work; the row would silently behave like `static`.\n\nTwo-part fix:\n1. **CSS** (`styles.css`): `#plan-filter-row { position: sticky; top: 0; z-index: 5; background: var(--bg); margin: -12px -14px 0 -14px; }`. Negative margins counter the body's padding so the sticky row spans the full body width (clean strip look).\n2. **JS** (`app.js`): new `_attachPlanFilterRowToBody(body, type)` helper relocates `#plan-filter-row` from its static-HTML position (sibling of body) into the body's first-child slot. Called after every plan-path `body.innerHTML` write so the row survives the wipe.\n\n### Idempotent + scoped\n- Helper short-circuits when `type !== 'plan'` (other artifact tabs unaffected)\n- Helper checks `firstElementChild` before re-inserting (no DOM churn on no-op calls)\n- Existing event listeners on the chips + search input survive the move (`insertBefore` preserves them)\n\n### Test\n`test/fr-61-plan-filter-row-sticky.test.js` — 9 cases:\n- CSS: `#plan-filter-row` declares `position: sticky` + `top: 0` + opaque background + z-index\n- JS helper exists; no-op on non-plan; uses `insertBefore(filterRow, body.firstChild)`; idempotent via `firstElementChild` check\n- Call sites: ≥4 references to the helper (definition + ≥3 callers — one per plan-path `body.innerHTML` write site)\n- HTML: `#plan-filter-row` still in static markup (the helper assumes it exists)\n\n9/9 ✓ direct. **Red-flipped against pre-fix CSS** (3/9 fail when sticky declaration absent). All 5 adjacent plan-tab tests stay green: fr-56-plan-filter-search 20/20 ✓, fr-64-plan-item-status-chip 16/16 ✓, fr-65-plan-layer-done-accordion 12/12 ✓, fr-62-plan-item-mobile-tap-targets 9/9 ✓, plan-open-only-toggle 9/9 ✓.\n\nFull `./test/test.sh` aborts on host BusyBox `grep -P` (pre-existing env limit per CLAUDE.md §Pre-Commit-1).\n\n### Takes effect on browser reload after next `./scripts/deploy.sh` push\nPure web/public/ change.\n\nStatus: closed.",
+          "ts": "2026-05-24T01:47:37.009Z",
+          "meta": {
+            "kind": "run-summary"
+          }
+        }
+      ],
+      "status": "closed",
+      "closedAt": "2026-05-24T01:47:37.009Z"
     },
     {
       "id": "fr-62",
@@ -3146,5 +3158,5 @@
       }
     }
   ],
-  "updatedAt": "2026-05-24T01:38:02.043Z"
+  "updatedAt": "2026-05-24T01:47:37.009Z"
 }
