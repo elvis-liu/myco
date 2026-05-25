@@ -6617,6 +6617,18 @@ function renderArtifact(type, artifact) {
     renderMermaidInContainer(body).catch(() => {});
     return;
   }
+  // bug-35: the upcoming renderArtifact path moves #plan-filter-row twice
+  // (out of #artifact-body-plan via _stashPlanFilterRow, then back in via
+  // _attachPlanFilterRowToBody). Each insertBefore-move detaches+reattaches
+  // the row's DOM tree, and browsers drop focus from any focused descendant
+  // on the detach step. The #plan-search input lives INSIDE that row, so the
+  // debounced search re-render kicked focus out mid-typing — the user's next
+  // keystroke landed outside the field. Snapshot the focused-ness + caret
+  // position BEFORE the move pair; the 3 plan-branch exits below each call
+  // _restorePlanSearchFocus(snap) right after _attachPlanFilterRowToBody.
+  // Plan-only (test artifact doesn't have the filter row).
+  const planSearchFocusSnap = (type === 'plan') ? _capturePlanSearchFocus() : null;
+
   // plan / test → checkbox list. Plan items also get vote button + comment thread.
   const items = (artifact && Array.isArray(artifact.items)) ? artifact.items : [];
   // Plan tab filters (Plan only — Test tab is a flat unfiltered list):
@@ -6647,6 +6659,7 @@ function renderArtifact(type, artifact) {
     // still have more proposals to render).
     if (preservedCallout) body.insertBefore(preservedCallout, body.firstChild);
     _attachPlanFilterRowToBody(body, type);
+    _restorePlanSearchFocus(planSearchFocusSnap);
     return;
   }
   if (!displayItems.length) {
@@ -6669,6 +6682,7 @@ function renderArtifact(type, artifact) {
     }
     if (preservedCallout) body.insertBefore(preservedCallout, body.firstChild);
     _attachPlanFilterRowToBody(body, type);
+    _restorePlanSearchFocus(planSearchFocusSnap);
     return;
   }
   const me = state.chatUser || '';
@@ -6950,6 +6964,8 @@ function renderArtifact(type, artifact) {
   // scroll context (sibling-position sticky doesn't pin against
   // a different scroll container).
   _attachPlanFilterRowToBody(body, type);
+  // bug-35: restore plan-search focus + caret that the row-move blurred.
+  _restorePlanSearchFocus(planSearchFocusSnap);
   // After the items' markdown is in place, sweep for mermaid fences
   // so any ```mermaid blocks inside an item's text become SVG.
   // marked emits them as <pre><code class="language-mermaid">; this
@@ -9445,6 +9461,42 @@ function bindPlanTypeFilters() {
       if (cached) renderArtifact('plan', cached);
     });
   });
+}
+
+// bug-35: capture + restore #plan-search focus across renderArtifact's
+// plan path. renderArtifact moves #plan-filter-row twice via insertBefore
+// (out of the body for the innerHTML wipe, then back in). Each move
+// detaches the row, and browsers drop focus from any focused descendant
+// on detach. Without these helpers, the 150ms debounced search re-render
+// kicked focus out of #plan-search mid-typing.
+//
+// Capture is taken BEFORE the first stash; restore runs AFTER the matching
+// attach. Returns null when #plan-search isn't focused (no-op restore).
+// Caret position (selectionStart/End) is preserved so re-focus doesn't
+// jump the cursor to the end of the input.
+function _capturePlanSearchFocus() {
+  try {
+    const input = document.getElementById('plan-search');
+    if (!input) return null;
+    if (document.activeElement !== input) return null;
+    return {
+      start: input.selectionStart,
+      end:   input.selectionEnd,
+    };
+  } catch { return null; }
+}
+function _restorePlanSearchFocus(snap) {
+  if (!snap) return;
+  try {
+    const input = document.getElementById('plan-search');
+    if (!input) return;
+    // Refocus first, then restore caret. setSelectionRange before focus
+    // is a no-op on some browsers when the input isn't focused.
+    input.focus();
+    if (typeof snap.start === 'number' && typeof snap.end === 'number') {
+      input.setSelectionRange(snap.start, snap.end);
+    }
+  } catch { /* element detached / not focusable — give up silently */ }
 }
 
 // fr-56: Plan-tab fuzz-search input. Case-insensitive substring across
