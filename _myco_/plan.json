@@ -3242,13 +3242,63 @@
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "39cf9509ab92",
+          "user": "kkrazy",
+          "text": "on top of the file changes add a description on what has changed, idea with reference to bug/td/fr",
+          "ts": "2026-05-25T13:59:14.643Z"
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "file explorer directory section should be break into two sections, the bottom section shows all of the files changed so that user can easily see what files are changed and allow bring up a diff view.",
         "rewritten": true
       }
+    },
+    {
+      "id": "fr-78",
+      "text": "**Problem:** Chat pane has no in-memory history, so users can't quickly recall prior inputs.\n**Expected:** Up/down arrow keys cycle through previously submitted messages in the current session.\n**Actual:** Arrow keys do not recall prior chat pane entries.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-25T13:53:19.490Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "chat pane should have in memory history that can be recall using up/down arrow",
+        "rewritten": true
+      },
+      "runs": [
+        {
+          "status": "running",
+          "ts": "2026-05-25T13:53:36.383Z",
+          "summary": null
+        }
+      ]
+    },
+    {
+      "id": "bug-35",
+      "text": "**Problem:** Plan view search field loses focus before the user finishes typing, breaking incremental filtering.\n**Expected:** Search field stays focused while filtering as the user types.\n**Actual:** Focus is dropped mid-typing, forcing the user to click back into the field.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-25T13:54:52.181Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "plan view search field lost focus before I finishes typing, it should stay focused while filtering as I type.",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-25T13:20:24.675Z"
+  "updatedAt": "2026-05-25T13:54:57.181Z"
 }

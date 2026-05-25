@@ -3676,6 +3676,72 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   color: var(--muted, #8b949e);
   font-style: italic;
 }
+/* fr-77 r2: description rows (Mentions + Recent commits) above the
+   file list. Static text, no hover/click affordances — purely for
+   context. Compact so the file list stays the focal point. */
+#files-changed-desc {
+  padding: 6px 8px 4px;
+  font-size: 0.72rem;
+  color: var(--muted, #8b949e);
+  border-bottom: 1px solid rgba(255, 255, 255, .04);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#files-changed-desc[hidden] { display: none; }
+.fc-desc-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  line-height: 1.35;
+}
+.fc-desc-label {
+  flex: 0 0 auto;
+  color: var(--muted, #8b949e);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.65rem;
+  padding-top: 1px;
+  min-width: 56px;
+}
+.fc-desc-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.fc-mention-chip {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: rgba(199, 146, 234, .12);
+  color: #c792ea;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.55;
+  border: 1px solid rgba(199, 146, 234, .25);
+}
+.fc-recent-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  overflow: hidden;
+}
+.fc-recent-sha {
+  flex: 0 0 auto;
+  color: #6fdc97;
+}
+.fc-recent-subject {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg, #c9d1d9);
+}
 /* In tree-collapsed mode the whole bottom section disappears. */
 #files-wrap.files-tree-collapsed #files-changed-section {
   display: none;

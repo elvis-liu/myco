@@ -383,29 +383,99 @@ async function writeFile(absRoot, relPath, { content, expectedMtimeMs }) {
 // fr-77: flat list of all git-status-changed files at the project root.
 // Powers the file explorer's bottom "Changed files" section. Reuses
 // _gitStatusMap (so we don't re-fork git status). Returns:
-//   { entries: [{path, status}], truncated: false }
+//   { entries: [{path, status}], truncated, mentions, recentCommits }
 // where status is the same single-letter primary code _gitStatusMap
 // already returns. Sorted by path for deterministic UI render order.
 // Renamed files surface as the NEW path only (the old path is implicit
 // in the rename + would clutter the list).
+//
+// fr-77 r2 (kkrazy 2026-05-25 comment): also surface a description
+// above the list:
+//   - mentions: bug-N / fr-N / td-N tokens extracted from the diff
+//     text of the uncommitted changes (scanned via one
+//     `git diff HEAD` call, no path filter). Lets the user see
+//     "what plan items did this change touch / mention?" at a glance.
+//   - recentCommits: last 5 commits' [{sha, subject, mentions}].
+//     The mentions array per commit gives the same bug/fr/td refs
+//     extracted from the subject. Gives "what was the last activity
+//     on this repo" context.
+// Both are bounded + best-effort — degrade silently in non-git
+// workspaces / on git errors.
 async function listChangedFiles(absRoot) {
   const gitMap = await _gitStatusMap(absRoot);
-  if (!gitMap || gitMap.size === 0) {
-    return { entries: [], truncated: false };
+  // fr-77 r2: even when the worktree is clean (gitMap empty), we still
+  // want recentCommits in the description — "what was the last activity
+  // on this repo" stays useful. Only non-git workspaces short-circuit
+  // to fully-empty.
+  const gitInfo = _findGitRoot(absRoot);
+  if (!gitInfo) {
+    return { entries: [], truncated: false, mentions: [], recentCommits: [] };
   }
   const entries = [];
-  for (const [p, s] of gitMap) entries.push({ path: p, status: s });
-  // De-dup by path (rename produces both old + new — both got 'R' via
-  // _gitStatusMap; keep one). And sort by path for deterministic render.
+  if (gitMap) for (const [p, s] of gitMap) entries.push({ path: p, status: s });
   const byPath = new Map();
   for (const e of entries) byPath.set(e.path, e);
   const out = Array.from(byPath.values()).sort((a, b) => a.path.localeCompare(b.path));
-  // Cap to 500 entries to bound the response on busy worktrees. UI
-  // surfaces truncated=true so the user knows to use the terminal for
-  // the full picture if it hits the cap.
   const MAX = 500;
   const truncated = out.length > MAX;
-  return { entries: truncated ? out.slice(0, MAX) : out, truncated };
+
+  // fr-77 r2: extract mentions + recent commits using the resolved
+  // git root (same _findGitRoot helper used by _gitStatusMap).
+  let mentions = [];
+  let recentCommits = [];
+  {
+    const { gitRoot } = gitInfo;
+    // Mentions — single `git diff HEAD` call covers all changed files.
+    // Cap output at 1MB; if the diff is huge, we still scan whatever
+    // came back (best-effort).
+    try {
+      const diffAll = await new Promise((resolve, reject) => {
+        execFile('git', ['-C', gitRoot, 'diff', '--no-color', '--no-ext-diff', 'HEAD'],
+          { timeout: 5000, maxBuffer: 1 * 1024 * 1024 },
+          (err, stdout) => err ? reject(err) : resolve(String(stdout)));
+      });
+      mentions = _extractMentions(diffAll);
+    } catch { /* timeout / huge diff / other — leave mentions=[] */ }
+    // Recent commits — last 5. NUL-separator between record fields
+    // so subjects with embedded tabs survive intact.
+    try {
+      const log = await new Promise((resolve, reject) => {
+        execFile('git', ['-C', gitRoot, 'log', '-5', '--pretty=format:%h%x00%s'],
+          { timeout: 3000, maxBuffer: 64 * 1024 },
+          (err, stdout) => err ? reject(err) : resolve(String(stdout)));
+      });
+      for (const line of log.split('\n')) {
+        const nul = line.indexOf('\0');
+        if (nul < 0) continue;
+        const sha = line.slice(0, nul);
+        const subject = line.slice(nul + 1);
+        recentCommits.push({ sha, subject, mentions: _extractMentions(subject) });
+      }
+    } catch { /* shallow repo with no commits / other — leave empty */ }
+  }
+
+  return {
+    entries: truncated ? out.slice(0, MAX) : out,
+    truncated,
+    mentions,
+    recentCommits,
+  };
+}
+
+// fr-77 r2: extract bug-N / fr-N / td-N tokens from arbitrary text,
+// deduplicated + cap'd at 50 (defense against absurdly mention-heavy
+// diffs). Same regex shape as sessionPool.extractMentions but local
+// to files.js to avoid the cross-module dep.
+function _extractMentions(text) {
+  if (!text) return [];
+  const re = /\b(?:fr|bug|td)-\d+\b/g;
+  const found = new Set();
+  let m;
+  while ((m = re.exec(String(text))) !== null) {
+    found.add(m[0]);
+    if (found.size >= 50) break;
+  }
+  return Array.from(found).sort();
 }
 
 // fr-77: read the unified diff for a single file relative to HEAD.

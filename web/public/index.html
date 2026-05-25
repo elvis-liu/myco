@@ -21,7 +21,7 @@
   <link rel="icon" type="image/png" href="/hetu.png?v=2" />
   <link rel="apple-touch-icon" href="/hetu.png?v=2" />
   <title>myco</title>
-  <link rel="stylesheet" href="styles.css?v=257" />
+  <link rel="stylesheet" href="styles.css?v=258" />
   <link rel="stylesheet" href="/vendor/github-dark.min.css" />
 </head>
 <body>
@@ -277,6 +277,13 @@
                 <svg class="ft-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
               </button>
             </header>
+            <!-- fr-77 r2: description rows above the file list.
+                 .fc-desc-row[data-kind="mentions"] holds bug/td/fr chips
+                 extracted from `git diff HEAD`; .fc-desc-row[data-kind="recent"]
+                 lists the last 5 commit subjects. Static text (no click
+                 handlers) — purely descriptive. Hidden when empty so the
+                 normal "no changes" empty state stays uncluttered. -->
+            <div id="files-changed-desc" hidden></div>
             <ul id="files-changed-list"></ul>
             <div id="files-changed-msg" hidden></div>
           </div>
@@ -476,6 +483,6 @@
        Exposes window.MycoCM with { createEditor, EditorView, ... }. -->
   <script src="/vendor/codemirror.bundle.js"></script>
   <script>if (typeof mermaid !== 'undefined') mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
-  <script src="app.js?v=223"></script>
+  <script src="app.js?v=224"></script>
 </body>
 </html>

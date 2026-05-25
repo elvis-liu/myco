@@ -7812,7 +7812,16 @@ async function loadFilesChanged({ force } = {}) {
     return;
   }
   const data = await res.json();
-  state.filesChanged = { entries: data.entries || [], loadedAt: now, truncated: !!data.truncated };
+  state.filesChanged = {
+    entries: data.entries || [],
+    loadedAt: now,
+    truncated: !!data.truncated,
+    // fr-77 r2: bug/td/fr mentions extracted from `git diff HEAD` and
+    // last 5 commit subjects. Both default to [] if the server didn't
+    // send them (older builds or repo-less workspaces).
+    mentions: Array.isArray(data.mentions) ? data.mentions : [],
+    recentCommits: Array.isArray(data.recentCommits) ? data.recentCommits : [],
+  };
   _renderFilesChanged();
 }
 
@@ -7828,6 +7837,10 @@ function _renderFilesChanged() {
     countEl.textContent = entries.length === 0 ? '' :
       (fc.truncated ? `(${entries.length}+)` : `(${entries.length})`);
   }
+  // fr-77 r2: description rows (mentions + recent commits). Rendered
+  // even when entries.length === 0 IF recentCommits has anything —
+  // a clean repo with prior history still benefits from the context.
+  _renderFilesChangedDesc(fc);
   if (entries.length === 0) {
     ul.innerHTML = '';
     msgEl.textContent = 'No changes vs HEAD.';
@@ -7855,6 +7868,47 @@ function _renderFilesChanged() {
     </li>`;
   }).join('');
   ul.innerHTML = html;
+}
+
+// fr-77 r2: render the optional "Mentions" + "Recent" description rows
+// above the file list. Static text — no click handlers. Hidden when
+// both lists are empty so the section stays compact for a clean repo.
+function _renderFilesChangedDesc(fc) {
+  const el = document.getElementById('files-changed-desc');
+  if (!el) return;
+  const mentions = Array.isArray(fc.mentions) ? fc.mentions : [];
+  const recent   = Array.isArray(fc.recentCommits) ? fc.recentCommits : [];
+  if (mentions.length === 0 && recent.length === 0) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const rows = [];
+  if (mentions.length > 0) {
+    const chips = mentions.map((m) =>
+      `<span class="fc-mention-chip">${escHtml(m)}</span>`
+    ).join('');
+    rows.push(`<div class="fc-desc-row" data-kind="mentions">
+      <span class="fc-desc-label">Mentions:</span>
+      <span class="fc-desc-body">${chips}</span>
+    </div>`);
+  }
+  if (recent.length > 0) {
+    const lines = recent.map((c) => {
+      const sha = escHtml(String(c.sha || '').slice(0, 12));
+      const subject = escHtml(String(c.subject || ''));
+      return `<div class="fc-recent-line">
+        <span class="fc-recent-sha">${sha}</span>
+        <span class="fc-recent-subject">${subject}</span>
+      </div>`;
+    }).join('');
+    rows.push(`<div class="fc-desc-row" data-kind="recent">
+      <span class="fc-desc-label">Recent:</span>
+      <span class="fc-desc-body">${lines}</span>
+    </div>`);
+  }
+  el.innerHTML = rows.join('');
+  el.hidden = false;
 }
 
 // fr-77: open the diff viewer for a single file. Mirrors the shape of

@@ -159,7 +159,14 @@ await tAsync('behavior: listChangedFiles returns empty in a clean repo', async (
   try {
     const filesMod = require('../server/src/files');
     const out = await filesMod.listChangedFiles(root);
-    assert.deepStrictEqual(out, { entries: [], truncated: false });
+    assert.deepStrictEqual(out.entries, []);
+    assert.strictEqual(out.truncated, false);
+    // fr-77 r2: mentions are [] (no diff in a clean repo); recentCommits
+    // includes the seed commit (subject = 'init') with empty mentions.
+    assert.deepStrictEqual(out.mentions, []);
+    assert.ok(Array.isArray(out.recentCommits) && out.recentCommits.length >= 1,
+      'recentCommits must include at least the seed commit');
+    assert.strictEqual(out.recentCommits[0].subject, 'init');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -171,7 +178,11 @@ await tAsync('behavior: listChangedFiles tolerates non-git workspaces (empty)', 
     fs.writeFileSync(path.join(root, 'x.txt'), 'x');
     const filesMod = require('../server/src/files');
     const out = await filesMod.listChangedFiles(root);
-    assert.deepStrictEqual(out, { entries: [], truncated: false });
+    // fr-77 r2: shape stays `{ entries, truncated, mentions, recentCommits }`
+    // — all empty for a non-git workspace.
+    assert.deepStrictEqual(out, {
+      entries: [], truncated: false, mentions: [], recentCommits: [],
+    });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -265,6 +276,135 @@ await tAsync('behavior: NESTED repo layout — list + diff resolve via project s
   } finally {
     fs.rmSync(wrapper, { recursive: true, force: true });
   }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// fr-77 r2 — description (mentions from diff + recent commits)
+// ──────────────────────────────────────────────────────────────────────
+
+await tAsync('fr-77 r2: listChangedFiles surfaces bug/fr/td mentions from diff text', async () => {
+  const root = mkTempRepo();
+  try {
+    // Insert a line mentioning bug-99 + fr-100. Both should land in mentions
+    // because they appear inside the unified diff output.
+    fs.writeFileSync(path.join(root, 'a.txt'),
+      'hello\n// touches bug-99 and fr-100 (also td-7)\n');
+    const filesMod = require('../server/src/files');
+    const out = await filesMod.listChangedFiles(root);
+    assert.ok(Array.isArray(out.mentions),
+      'mentions field must be an array');
+    // Deduped + sorted — the regex picks all three.
+    assert.deepStrictEqual(out.mentions, ['bug-99', 'fr-100', 'td-7'].sort());
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+await tAsync('fr-77 r2: listChangedFiles surfaces last-5 commit subjects with per-commit mentions', async () => {
+  const root = mkTempRepo();
+  try {
+    // Layer two more commits whose subjects reference work items.
+    fs.writeFileSync(path.join(root, 'a.txt'), 'v2\n');
+    execFileSync('git', ['-C', root, 'commit', '-aqm', 'feat(fr-200): pretty diffs']);
+    fs.writeFileSync(path.join(root, 'a.txt'), 'v3\n');
+    execFileSync('git', ['-C', root, 'commit', '-aqm', 'fix(bug-300): handle edge case']);
+    const filesMod = require('../server/src/files');
+    const out = await filesMod.listChangedFiles(root);
+    assert.ok(Array.isArray(out.recentCommits),
+      'recentCommits must be an array');
+    assert.ok(out.recentCommits.length >= 3,
+      'recentCommits must include the three commits we made');
+    // Most-recent first (git log default order).
+    assert.ok(/bug-300/.test(out.recentCommits[0].subject),
+      'first recent commit must be the bug-300 one');
+    assert.deepStrictEqual(out.recentCommits[0].mentions, ['bug-300']);
+    assert.deepStrictEqual(out.recentCommits[1].mentions, ['fr-200']);
+    // Each commit carries a short SHA.
+    for (const c of out.recentCommits) {
+      assert.ok(/^[0-9a-f]{4,}$/.test(c.sha),
+        `sha must be a short hex SHA; got ${JSON.stringify(c.sha)}`);
+      assert.strictEqual(typeof c.subject, 'string');
+      assert.ok(Array.isArray(c.mentions));
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+t('fr-77 r2 server: _extractMentions caps at 50 entries (defense)', () => {
+  // Static-shape guard — the cap is what prevents an absurdly mention-
+  // heavy diff from exploding the response payload.
+  const idx = FILES_SRC.search(/function\s+_extractMentions\s*\(/);
+  assert.ok(idx > -1, '_extractMentions must be defined');
+  const win = FILES_SRC.slice(idx, idx + 600);
+  assert.ok(/found\.size\s*>=\s*50/.test(win),
+    '_extractMentions must cap at 50 entries');
+  // Regex catches bug-N / fr-N / td-N tokens.
+  assert.ok(/fr\|bug\|td|bug\|fr\|td|td\|fr\|bug/.test(win),
+    '_extractMentions regex must include fr|bug|td alternation');
+});
+
+t('fr-77 r2 server: log parser uses NUL separator (%h%x00%s) safely', () => {
+  // The pretty-format key + the indexOf must agree on NUL as the
+  // separator. Regression guard against the literal-newline bug
+  // that briefly shipped during fr-77 r2 development.
+  const idx = FILES_SRC.search(/--pretty=format:%h%x00%s/);
+  assert.ok(idx > -1, 'git log must use %h%x00%s (NUL between sha+subject)');
+  const win = FILES_SRC.slice(idx, idx + 600);
+  assert.ok(/line\.indexOf\('\\0'\)/.test(win),
+    "parser must call indexOf('\\\\0') — NUL byte split, not newline");
+});
+
+t('app.js: _renderFilesChangedDesc renders mentions + recent rows', () => {
+  assert.ok(/function\s+_renderFilesChangedDesc\s*\(/.test(APP),
+    '_renderFilesChangedDesc helper must be defined');
+  const idx = APP.search(/function\s+_renderFilesChangedDesc\s*\(/);
+  const win = APP.slice(idx, idx + 2500);
+  assert.ok(/fc-mention-chip/.test(win),
+    'mentions must render as .fc-mention-chip spans');
+  assert.ok(/fc-recent-line/.test(win),
+    'recent commits must render as .fc-recent-line blocks');
+  assert.ok(/fc-recent-sha/.test(win) && /fc-recent-subject/.test(win),
+    'each recent line must split sha + subject for separate styling');
+  // Hidden when both empty.
+  assert.ok(/mentions\.length\s*===\s*0\s*&&\s*recent\.length\s*===\s*0/.test(win),
+    'both-empty case must hide the desc element');
+});
+
+t('app.js: _renderFilesChanged calls _renderFilesChangedDesc on every render', () => {
+  const idx = APP.search(/function\s+_renderFilesChanged\s*\(/);
+  const win = APP.slice(idx, idx + 2500);
+  assert.ok(/_renderFilesChangedDesc\(/.test(win),
+    '_renderFilesChanged must invoke the desc helper');
+});
+
+t('app.js: loadFilesChanged captures mentions + recentCommits into state', () => {
+  const idx = APP.search(/async\s+function\s+loadFilesChanged\s*\(/);
+  assert.ok(idx > -1);
+  const win = APP.slice(idx, idx + 2000);
+  assert.ok(/mentions:\s*Array\.isArray\(data\.mentions\)/.test(win),
+    'loadFilesChanged must mirror data.mentions into state.filesChanged');
+  assert.ok(/recentCommits:\s*Array\.isArray\(data\.recentCommits\)/.test(win),
+    'loadFilesChanged must mirror data.recentCommits into state.filesChanged');
+});
+
+t('index.html: #files-changed-desc container present (above the list)', () => {
+  assert.ok(/id="files-changed-desc"/.test(HTML),
+    '#files-changed-desc container must exist for the description rows');
+  // Ordering: desc sits between header and list, not after.
+  const descIdx = HTML.indexOf('id="files-changed-desc"');
+  const listIdx = HTML.indexOf('id="files-changed-list"');
+  assert.ok(descIdx > -1 && listIdx > -1 && descIdx < listIdx,
+    'desc must render BEFORE the list element');
+});
+
+t('styles.css: description-row classes present (.fc-mention-chip + .fc-recent-line)', () => {
+  assert.ok(/\.fc-mention-chip\b/.test(CSS),
+    '.fc-mention-chip rule must be defined');
+  assert.ok(/\.fc-recent-line\b/.test(CSS),
+    '.fc-recent-line rule must be defined');
+  assert.ok(/\.fc-desc-label\b/.test(CSS),
+    '.fc-desc-label rule must be defined');
 });
 
 await tAsync('behavior: readDiff rejects path traversal', async () => {
