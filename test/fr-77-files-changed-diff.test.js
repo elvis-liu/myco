@@ -511,6 +511,81 @@ t('app.js: _saveFileEdit success path refreshes the Plan changed-files section',
 });
 
 // ──────────────────────────────────────────────────────────────────────
+// fr-77 r7 — per-language syntax highlight inside the inline diff
+// ──────────────────────────────────────────────────────────────────────
+
+t('app.js: _diffLangForPath + _highlightDiffWithLang defined', () => {
+  assert.ok(/function\s+_diffLangForPath\s*\(/.test(APP),
+    '_diffLangForPath helper must be defined');
+  assert.ok(/function\s+_highlightDiffWithLang\s*\(/.test(APP),
+    '_highlightDiffWithLang helper must be defined');
+});
+
+t('app.js: _diffLangForPath reuses hljsLangForExt + handles Dockerfile/Makefile basenames', () => {
+  const idx = APP.search(/function\s+_diffLangForPath\s*\(/);
+  const win = APP.slice(idx, idx + 1200);
+  assert.ok(/hljsLangForExt\s*\(/.test(win),
+    'must consult the existing extension→language map');
+  assert.ok(/Dockerfile/i.test(win),
+    'must recognise Dockerfile basename');
+  assert.ok(/Makefile/i.test(win),
+    'must recognise Makefile basename');
+});
+
+t('app.js: _highlightDiffWithLang classifies meta / hunk / add / rm / ctx', () => {
+  const idx = APP.search(/function\s+_highlightDiffWithLang\s*\(/);
+  const win = APP.slice(idx, idx + 4500);
+  for (const cls of ['pcf-diff-meta', 'pcf-diff-hunk', 'pcf-diff-add', 'pcf-diff-rm', 'pcf-diff-ctx']) {
+    assert.ok(win.includes(cls),
+      `line classifier must emit ${cls}`);
+  }
+  // Marker span + code span split — so per-line bg tint isn't
+  // confused by hljs colors on the +/- character itself.
+  assert.ok(/pcf-diff-marker/.test(win),
+    'marker character must live in its own .pcf-diff-marker span');
+  assert.ok(/pcf-diff-code/.test(win),
+    'code body must live in its own .pcf-diff-code span');
+  // Metadata recognition covers the common git-diff preamble lines.
+  for (const prefix of ['diff --git', 'index ', '--- ', '+++ ', 'new file', 'deleted file', '@@']) {
+    assert.ok(win.includes(prefix),
+      `meta/hunk classifier must check for ${JSON.stringify(prefix)}`);
+  }
+});
+
+t('app.js: _highlightDiffWithLang calls hljs.highlight per line with detected language', () => {
+  const idx = APP.search(/function\s+_highlightDiffWithLang\s*\(/);
+  const win = APP.slice(idx, idx + 4500);
+  assert.ok(/window\.hljs\.highlight\s*\(/.test(win),
+    'must call window.hljs.highlight per line for syntax tokens');
+  assert.ok(/getLanguage\s*\(/.test(win),
+    'must check hljs.getLanguage(lang) before highlighting (graceful fallback)');
+  assert.ok(/ignoreIllegals/.test(win),
+    'must pass ignoreIllegals: true so a one-line snippet does not throw');
+});
+
+t('app.js: _renderInlineDiffBody wires the per-language highlighter (not the old language-diff block)', () => {
+  const idx = APP.search(/function\s+_renderInlineDiffBody\s*\(/);
+  const win = APP.slice(idx, idx + 2500);
+  assert.ok(/_highlightDiffWithLang\s*\(/.test(win),
+    '_renderInlineDiffBody must call _highlightDiffWithLang');
+  assert.ok(/_diffLangForPath\s*\(/.test(win),
+    'must pick language via _diffLangForPath(body.path)');
+  // The old code-language-diff hljs path should be GONE.
+  assert.ok(!/code\.language-diff/.test(win),
+    'old whole-block language-diff hljs path must be removed');
+});
+
+t('styles.css: per-line diff classes defined (.pcf-diff-line / -add / -rm / -hunk / -meta + marker + code)', () => {
+  for (const cls of [
+    'pcf-diff-pre', 'pcf-diff-line', 'pcf-diff-marker', 'pcf-diff-code',
+    'pcf-diff-add', 'pcf-diff-rm', 'pcf-diff-ctx', 'pcf-diff-hunk', 'pcf-diff-meta',
+  ]) {
+    assert.ok(new RegExp('\\.' + cls + '\\b').test(CSS),
+      `.${cls} CSS rule must be defined`);
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────
 // fr-77 r6 — per-file line-count chips (+N / −M)
 // ──────────────────────────────────────────────────────────────────────
 

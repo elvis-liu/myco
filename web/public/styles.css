@@ -3880,17 +3880,58 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   color: var(--muted, #8b949e);
   font-style: italic;
 }
-.pcf-diff-body pre.fc-diff {
+/* fr-77 r7: per-line diff structure (replaces the previous pre>code
+   language-diff block). Each line is a <div.pcf-diff-line.pcf-diff-{kind}>
+   with the marker (+/-/space) split off into its own span so the
+   highlighted code body sits cleanly to the right. Line backgrounds
+   tint add/remove rows; metadata + hunk-header rows are muted. */
+.pcf-diff-body .pcf-diff-pre {
   margin: 0;
   padding: 0;
   background: #0d1117;
-}
-.pcf-diff-body pre.fc-diff code.language-diff {
-  display: block;
-  padding: 8px 16px;
-  white-space: pre;
   overflow-x: auto;
+  white-space: pre;
 }
+.pcf-diff-body .pcf-diff-line {
+  display: block;
+  padding: 0 16px;
+  white-space: pre;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  min-height: 1.5em;
+}
+.pcf-diff-body .pcf-diff-marker {
+  display: inline-block;
+  width: 1ch;
+  margin-right: 0.5ch;
+  color: var(--muted, #8b949e);
+  user-select: none;
+}
+.pcf-diff-body .pcf-diff-code {
+  /* hljs token spans inherit color from here when no class matches. */
+  color: #c9d1d9;
+}
+/* Per-kind row backgrounds + marker colors. Tints kept light so the
+   highlight.js token colors stay readable on top. */
+.pcf-diff-body .pcf-diff-add {
+  background: rgba(46, 160, 67, .12);
+}
+.pcf-diff-body .pcf-diff-add .pcf-diff-marker { color: #6fdc97; }
+.pcf-diff-body .pcf-diff-rm {
+  background: rgba(248, 81, 73, .12);
+}
+.pcf-diff-body .pcf-diff-rm .pcf-diff-marker { color: #ff8a8a; }
+.pcf-diff-body .pcf-diff-ctx { background: transparent; }
+.pcf-diff-body .pcf-diff-hunk {
+  background: rgba(56, 139, 253, .08);
+  color: #58a6ff;
+}
+.pcf-diff-body .pcf-diff-meta {
+  color: var(--muted, #8b949e);
+  background: rgba(255, 255, 255, .02);
+}
+.pcf-diff-body .pcf-diff-blank { background: transparent; }
 .pcf-diff-loading {
   padding: 8px 16px;
   font-size: 0.78rem;

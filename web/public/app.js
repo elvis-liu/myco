@@ -8023,15 +8023,94 @@ function _renderInlineDiffBody(diffRow, body) {
   if (!body.diff || !body.diff.trim()) {
     diffHtml = '<div class="fc-diff-empty">(no diff — file may be untracked or unchanged vs HEAD)</div>';
   } else {
-    diffHtml = `<pre class="fc-diff"><code class="language-diff">${escHtml(body.diff)}</code></pre>`;
+    // fr-77 r7: per-language syntax highlight. Detect language from
+    // file extension, walk each diff line, highlight the code body
+    // (without the +/-/space marker) with hljs, wrap each line in a
+    // class that supplies the per-line background tint (add/rm/ctx/
+    // hunk/meta). Falls back to plain escaped text if hljs is missing
+    // or no language match.
+    const lang = _diffLangForPath(body.path);
+    diffHtml = `<div class="pcf-diff-pre">${_highlightDiffWithLang(body.diff, lang)}</div>`;
   }
   container.innerHTML = headerBits.join('') + diffHtml;
-  try {
-    if (window.hljs) {
-      const codeEl = container.querySelector('code.language-diff');
-      if (codeEl) window.hljs.highlightElement(codeEl);
+}
+
+// fr-77 r7: pick a highlight.js language id from a diff's file path.
+// Mirrors hljsLangForExt + adds a few diff-common extensions. Returns
+// null when no match, in which case _highlightDiffWithLang falls back
+// to escaped plain text (still gets the per-line markers + tints).
+function _diffLangForPath(p) {
+  if (!p) return null;
+  const m = String(p).toLowerCase().match(/\.([a-z0-9_]+)$/);
+  const ext = m ? m[1] : '';
+  // Reuse the shared file-viewer mapping where possible.
+  if (typeof hljsLangForExt === 'function') {
+    const lang = hljsLangForExt(ext);
+    if (lang) return lang;
+  }
+  // Filename-based fallbacks (no extension) for common dotfiles.
+  const base = String(p).split('/').pop() || '';
+  if (/^Dockerfile/i.test(base)) return 'dockerfile';
+  if (/^Makefile/i.test(base)) return 'makefile';
+  return null;
+}
+
+// fr-77 r7: render a unified diff with per-language syntax highlight
+// on the actual code content + diff markers preserved. Each line
+// becomes a <div.pcf-diff-line.pcf-diff-{kind}> with a leading
+// <span.pcf-diff-marker> (the +/-/space) followed by the highlighted
+// code body. Diff metadata (diff --git, index, ---, +++, @@) are
+// emitted as separate kinds so CSS can tone them down.
+//
+// Highlighting is per-LINE (not whole-block) so the per-line +/- marker
+// can stay outside the highlighted span. This costs a small amount of
+// cross-line state accuracy (a multi-line string / comment may render
+// without its outer context), but the readability win on the rest
+// of the lines is much larger.
+function _highlightDiffWithLang(diffText, lang) {
+  const lines = String(diffText || '').split('\n');
+  const out = [];
+  const haveLang = !!(lang && window.hljs && window.hljs.getLanguage(lang));
+  for (const line of lines) {
+    if (line === '') { out.push('<div class="pcf-diff-line pcf-diff-blank"> </div>'); continue; }
+    // Metadata lines — show muted, no language highlight.
+    if (line.startsWith('diff --git') || line.startsWith('index ') ||
+        line.startsWith('--- ') || line.startsWith('+++ ') ||
+        line.startsWith('new file') || line.startsWith('deleted file') ||
+        line.startsWith('similarity index') || line.startsWith('rename ') ||
+        line.startsWith('copy ') || line.startsWith('Binary files') ||
+        line.startsWith('\\ No newline')) {
+      out.push(`<div class="pcf-diff-line pcf-diff-meta">${escHtml(line)}</div>`);
+      continue;
     }
-  } catch (err) { /* hljs missing — leave the plain pre */ }
+    // Hunk header — color separately (anchor of a hunk).
+    if (line.startsWith('@@')) {
+      out.push(`<div class="pcf-diff-line pcf-diff-hunk">${escHtml(line)}</div>`);
+      continue;
+    }
+    // Content lines. First char is the marker; rest is the code body.
+    const c = line.charAt(0);
+    let kindCls, marker;
+    if      (c === '+') { kindCls = 'pcf-diff-add'; marker = '+'; }
+    else if (c === '-') { kindCls = 'pcf-diff-rm';  marker = '−'; }  // U+2212 (visual)
+    else if (c === ' ') { kindCls = 'pcf-diff-ctx'; marker = ' '; }
+    else {
+      // Anything else — render as raw, no marker, no highlight.
+      out.push(`<div class="pcf-diff-line">${escHtml(line)}</div>`);
+      continue;
+    }
+    const body = line.slice(1);
+    let bodyHtml;
+    if (haveLang) {
+      try {
+        bodyHtml = window.hljs.highlight(body, { language: lang, ignoreIllegals: true }).value;
+      } catch { bodyHtml = escHtml(body); }
+    } else {
+      bodyHtml = escHtml(body);
+    }
+    out.push(`<div class="pcf-diff-line ${kindCls}"><span class="pcf-diff-marker">${marker}</span><span class="pcf-diff-code">${bodyHtml}</span></div>`);
+  }
+  return out.join('');
 }
 
 // fr-77 r3: bind the Plan-view changed-files section once. Called from
