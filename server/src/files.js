@@ -598,9 +598,60 @@ async function readDiff(absRoot, relPath) {
   // render a "deleted" badge instead of trying to also show the
   // current source.
   let exists = true;
-  try { await fsp.stat(path.join(absRoot, relPath)); }
+  const absPath = path.join(absRoot, relPath);
+  try { await fsp.stat(absPath); }
   catch { exists = false; }
+  // fr-77 r10: untracked files don't show up in `git diff HEAD` (git
+  // doesn't track them), so the diff above came back empty. Render
+  // them as an "all-additions" diff using `git diff --no-index` —
+  // produces the same unified-diff shape (with proper @@ hunks +
+  // mode header) the UI already handles. Skips when the file is
+  // tracked-but-clean (a true no-op), is gone, or is too big.
+  if (exists && !diff.trim()) {
+    diff = await _synthDiffForUntracked(absPath, relPath) || '';
+  }
   return { path: relPath, diff, head, exists };
+}
+
+// fr-77 r10: synthesize a unified-diff for an untracked file by
+// asking git to diff it against /dev/null. Returns '' on any failure
+// (tracked-but-clean file, too big, binary, missing git, etc.) so
+// the caller falls back to the existing "no diff" UI notice.
+//
+// `git diff --no-index` exits with code 1 when files differ (expected
+// here since /dev/null is empty), and that gets surfaced as an Error
+// by execFile. We treat exit code 1 with non-empty stdout as success.
+async function _synthDiffForUntracked(absFilePath, displayPath) {
+  // Cap at 1MB to avoid hauling a giant log file or video into the
+  // response. Caller's empty-diff UI notice covers the >1MB case.
+  let st;
+  try { st = await fsp.stat(absFilePath); } catch { return ''; }
+  if (!st.isFile() || st.size > 1 * 1024 * 1024) return '';
+  return await new Promise((resolve) => {
+    execFile('git',
+      ['diff', '--no-color', '--no-ext-diff', '--no-index', '--', '/dev/null', absFilePath],
+      { timeout: 5000, maxBuffer: 4 * 1024 * 1024 },
+      (e, stdout) => {
+        // Exit code 1 = "files differ" — that's the success path here.
+        // Any stdout means git produced a diff; use it. On hard failure
+        // (no stdout), fall back to '' so the caller's empty-diff notice
+        // takes over.
+        const out = String(stdout || '');
+        if (!out) return resolve('');
+        // `git diff --no-index /dev/null <abs>` emits both `a/<abs>` and
+        // `b/<abs>` on the `diff --git` line (NOT a/dev/null), plus
+        // `+++ b/<abs>` on the file header. Rewrite both so they show
+        // the session-relative display path — the UI's syntax-highlight
+        // language detection keys off the extension on the +++ line, and
+        // copy/paste of the diff matches what the user is browsing.
+        const rewritten = out
+          .replace(/^diff --git a\/.+ b\/.+$/m,
+                   'diff --git a/dev/null b/' + displayPath)
+          .replace(/^\+\+\+ b\/.+$/m,
+                   '+++ b/' + displayPath);
+        resolve(rewritten);
+      });
+  });
 }
 
 module.exports = { safeJoin, listDir, readFile, writeFile, listChangedFiles, readDiff };

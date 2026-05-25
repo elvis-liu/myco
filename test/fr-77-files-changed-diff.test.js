@@ -249,6 +249,59 @@ await tAsync('behavior: NESTED repo layout — list + diff resolve via project s
   }
 });
 
+await tAsync('fr-77 r10: readDiff synthesizes an all-additions diff for untracked files', async () => {
+  // Untracked (new) files don't appear in `git diff HEAD` — git only
+  // diffs tracked content. Pre-r10 the inline expand showed the user
+  // "(no diff)" notice. r10 falls back to `git diff --no-index
+  // /dev/null <file>` to render the file's contents as additions,
+  // matching the GitHub-PR-style view for a new file.
+  const root = mkTempRepo();
+  try {
+    fs.writeFileSync(path.join(root, 'fresh.js'),
+      'const x = 1;\nfunction foo() { return x; }\n');
+    delete require.cache[require.resolve('../server/src/files')];
+    const filesMod = require('../server/src/files');
+    const out = await filesMod.readDiff(root, 'fresh.js');
+    assert.strictEqual(out.path, 'fresh.js');
+    assert.strictEqual(out.exists, true);
+    // Synthetic diff body: must include the file header + hunk header +
+    // both source lines as additions.
+    assert.ok(out.diff && out.diff.length > 0,
+      'synthetic diff must be non-empty for an untracked file');
+    assert.ok(/diff --git a\/dev\/null b\/fresh\.js/.test(out.diff),
+      'synthetic diff header must use a/dev/null b/<displayPath>');
+    assert.ok(/^\+\+\+ b\/fresh\.js$/m.test(out.diff),
+      '+++ header must use the display path (so language detection sees .js)');
+    assert.ok(/^@@\s+-0,0\s+\+1,2\s+@@/m.test(out.diff),
+      'hunk header must declare 0 lines from /dev/null + 2 lines added');
+    assert.ok(/^\+const x = 1;$/m.test(out.diff),
+      'each source line must appear as an addition');
+    assert.ok(/^\+function foo\(\)/m.test(out.diff),
+      'second source line must appear as an addition');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+await tAsync('fr-77 r10: untracked diff skipped for files >1MB (size cap)', async () => {
+  // The synthesizer caps at 1MB to avoid OOM on a stray log dump.
+  // Files over the cap fall through to the existing empty-diff UI
+  // notice rather than streaming megabytes of additions to the client.
+  const root = mkTempRepo();
+  try {
+    const big = Buffer.alloc(1.2 * 1024 * 1024, 0x61); // 1.2MB of 'a'
+    fs.writeFileSync(path.join(root, 'big.log'), big);
+    delete require.cache[require.resolve('../server/src/files')];
+    const filesMod = require('../server/src/files');
+    const out = await filesMod.readDiff(root, 'big.log');
+    assert.strictEqual(out.exists, true);
+    assert.strictEqual(out.diff, '',
+      'files over 1MB must skip synthesis and return empty diff');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 await tAsync('behavior: readDiff rejects path traversal', async () => {
   const root = mkTempRepo();
   try {
