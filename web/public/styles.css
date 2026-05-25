@@ -3582,7 +3582,15 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid rgba(255, 255, 255, .08);
+  /* fr-77 r11: visible decorator separating the section from the plan
+     items above. Previously a 1px@8% line that was effectively invisible
+     on dark — users couldn't tell where the plan ended and the changed-
+     files section began. Now a 2px accent-blue divider matching the
+     file-row hover/expanded color, plus a 12px margin above for breathing
+     room. The section header gets a stronger background tint (below) so
+     the "Changed files" title band reads as its own panel header. */
+  border-top: 2px solid rgba(56, 139, 253, .35);
+  margin-top: 12px;
   background: rgba(255, 255, 255, .02);
   box-sizing: border-box;
   width: 100%;
@@ -3643,12 +3651,17 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   gap: 6px;
   /* fr-77 r5: 16px horizontal matches .artifact-body's padding so the
      section's visible content (title + count + file rows) lines up
-     edge-for-edge with the plan items above. */
-  padding: 6px 16px;
+     edge-for-edge with the plan items above.
+     fr-77 r11: tinted background + slightly brighter title color so the
+     header reads as a distinct panel band — reinforces the 2px accent
+     divider that separates the section from the plan items above. */
+  padding: 8px 16px;
   font-size: 0.78rem;
-  color: var(--muted, #8b949e);
+  color: #c9d1d9;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  background: rgba(56, 139, 253, .07);
+  border-bottom: 1px solid rgba(255, 255, 255, .05);
   flex: 0 0 auto;
   user-select: none;
 }

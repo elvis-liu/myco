@@ -585,6 +585,36 @@ t('app.js: _saveFileEdit success path refreshes the Plan changed-files section',
 });
 
 // ──────────────────────────────────────────────────────────────────────
+// fr-77 r11 — visible decorator between plan items and Changed-files
+// ──────────────────────────────────────────────────────────────────────
+
+t('styles.css: fr-77 r11 — section has a visible border-top divider (>=2px, accent color, not the 8% near-invisible)', () => {
+  // Anchor on the line-starting standalone rule.
+  const m = CSS.match(/\n#plan-changed-files-section\s*\{[\s\S]*?\n\}/);
+  assert.ok(m, '#plan-changed-files-section base rule must exist');
+  const block = m[0];
+  // Border must be at least 2px (the old 1px @ 8% opacity was invisible
+  // against the dark theme — users could not see where the section started).
+  assert.ok(/border-top:\s*[2-9]\d*px/.test(block),
+    'border-top must be ≥2px so the divider is visible (was: 1px @ 8% — invisible)');
+  // And there must be breathing room above the section so it visually
+  // lifts off the plan items.
+  assert.ok(/margin-top:\s*\d+px/.test(block),
+    'margin-top must add breathing room above the section');
+});
+
+t('styles.css: fr-77 r11 — section header has a tinted background band', () => {
+  // Anchor on the line-starting standalone header rule.
+  const m = CSS.match(/\n#plan-changed-files-header\s*\{[\s\S]*?\n\}/);
+  assert.ok(m, '#plan-changed-files-header rule must exist');
+  const block = m[0];
+  // Header must have its own background (transparent in r3-r10 → looked
+  // like the rest of the section, no visible band).
+  assert.ok(/background:\s*rgba/.test(block) || /background:\s*#/.test(block),
+    'header must have a non-transparent background so it reads as a panel band');
+});
+
+// ──────────────────────────────────────────────────────────────────────
 // fr-77 r7 — per-language syntax highlight inside the inline diff
 // ──────────────────────────────────────────────────────────────────────
 
