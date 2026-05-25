@@ -3631,7 +3631,10 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  /* fr-77 r5: 16px horizontal matches .artifact-body's padding so the
+     section's visible content (title + count + file rows) lines up
+     edge-for-edge with the plan items above. */
+  padding: 6px 16px;
   font-size: 0.78rem;
   color: var(--muted, #8b949e);
   letter-spacing: 0.04em;
@@ -3678,7 +3681,9 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
+  /* fr-77 r5: 16px horizontal aligns the file-row caret/status/path
+     with the plan items above. */
+  padding: 4px 16px;
   font-size: 0.82rem;
   cursor: pointer;
   white-space: nowrap;
@@ -3731,7 +3736,8 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   white-space: nowrap;
 }
 #plan-changed-files-msg {
-  padding: 8px 12px;
+  /* fr-77 r5: 16px horizontal matches plan-body padding. */
+  padding: 8px 16px;
   font-size: 0.78rem;
   color: var(--muted, #8b949e);
   font-style: italic;
@@ -3740,7 +3746,8 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
    file list. Static text, no hover/click affordances — purely for
    context. Compact so the file list stays the focal point. */
 #plan-changed-files-desc {
-  padding: 6px 12px 4px;
+  /* fr-77 r5: 16px horizontal matches plan-body padding. */
+  padding: 6px 16px 4px;
   font-size: 0.72rem;
   color: var(--muted, #8b949e);
   border-bottom: 1px solid rgba(255, 255, 255, .04);
@@ -3830,7 +3837,8 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   line-height: 1.5;
 }
 .pcf-diff-body .fc-diff-header {
-  padding: 6px 12px;
+  /* fr-77 r5: match the 16px horizontal of the rest of the section. */
+  padding: 6px 16px;
   font-size: 0.74rem;
   color: var(--muted, #8b949e);
   border-bottom: 1px solid rgba(255, 255, 255, .06);
@@ -3848,7 +3856,7 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 }
 .pcf-diff-body .fc-diff-notice,
 .pcf-diff-body .fc-diff-empty {
-  padding: 8px 12px;
+  padding: 8px 16px;
   font-size: 0.78rem;
   color: var(--muted, #8b949e);
   font-style: italic;
@@ -3860,12 +3868,12 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 }
 .pcf-diff-body pre.fc-diff code.language-diff {
   display: block;
-  padding: 8px 12px;
+  padding: 8px 16px;
   white-space: pre;
   overflow-x: auto;
 }
 .pcf-diff-loading {
-  padding: 8px 12px;
+  padding: 8px 16px;
   font-size: 0.78rem;
   color: var(--muted, #8b949e);
   font-style: italic;
