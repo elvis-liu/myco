@@ -8029,6 +8029,86 @@ function bindPlanChangedFilesUi() {
     if (!li) return;
     _togglePlanChangedFileExpand(li);
   });
+  bindPlanChangedFilesResize();
+}
+
+// fr-77 r4: vertical drag-to-resize on #plan-changed-files-section.
+// Pointerdown on the .pcf-resize-handle starts a drag; pointermove
+// updates the section's inline height (clamped to the CSS min/max
+// bounds 60px–80vh); pointerup persists the chosen height in
+// localStorage (myco_plan_changed_h). Double-click on the handle
+// resets to the CSS default (clears the inline height + the saved
+// value). Mirrors the chatpane resize pattern (bindChatpaneResize)
+// in event flow + persistence.
+function bindPlanChangedFilesResize() {
+  const sec    = document.getElementById('plan-changed-files-section');
+  const handle = document.getElementById('plan-changed-files-resize');
+  if (!sec || !handle || handle.dataset.bound) return;
+  handle.dataset.bound = '1';
+
+  const STORAGE_KEY = 'myco_plan_changed_h';
+  const MIN_PX = 60;
+  const maxPx  = () => Math.floor(window.innerHeight * 0.8);
+
+  // Restore last-saved height — clamp against the current viewport
+  // so a value persisted on a taller window doesn't end up filling
+  // a shorter one. Out-of-range value → drop it; CSS default takes over.
+  try {
+    const saved = parseInt(localStorage.getItem(STORAGE_KEY) || '', 10);
+    if (Number.isFinite(saved) && saved >= MIN_PX && saved <= maxPx()) {
+      sec.style.height = saved + 'px';
+    } else if (Number.isFinite(saved)) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {}
+
+  let dragging = false;
+  let startY = 0;
+  let startH = 0;
+  const onDown = (e) => {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    startH = sec.getBoundingClientRect().height;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'row-resize';
+    document.body.style.userSelect = 'none';
+    try { handle.setPointerCapture(e.pointerId); } catch {}
+  };
+  const onMove = (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    // Drag UP (smaller clientY) → section grows. The handle is at
+    // the TOP edge of the section, so newH = startH + (startY - currY).
+    const delta = startY - e.clientY;
+    const max = maxPx();
+    const newH = Math.max(MIN_PX, Math.min(max, startH + delta));
+    sec.style.height = newH + 'px';
+  };
+  const onUp = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    try { handle.releasePointerCapture(e.pointerId); } catch {}
+    const px = parseInt(sec.style.height, 10);
+    if (Number.isFinite(px)) {
+      try { localStorage.setItem(STORAGE_KEY, String(px)); } catch {}
+    }
+  };
+
+  handle.addEventListener('pointerdown', onDown);
+  handle.addEventListener('pointermove', onMove);
+  handle.addEventListener('pointerup', onUp);
+  handle.addEventListener('pointercancel', onUp);
+  handle.addEventListener('dblclick', () => {
+    // Double-click resets to the CSS default — clear the inline height
+    // + the saved value so future loads use the stylesheet's 40vh.
+    sec.style.height = '';
+    try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  });
 }
 
 function renderFilesList(entries, truncated, relPath) {

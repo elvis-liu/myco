@@ -3558,14 +3558,22 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
    880px max-width as the rest of the Plan view content on desktop. */
 #plan-changed-files-section {
   flex: 0 0 auto;
-  max-height: 40vh;
-  min-height: 80px;
+  /* fr-77 r4: switched from max-height to fixed height so the drag
+     handle can grow the section beyond the default. Bounds enforced
+     by min-height + max-height; JS clamps to the same range before
+     writing style.height. Default 40vh; user-resized value persisted
+     in localStorage (myco_plan_changed_h) is restored inline by
+     bindPlanChangedFilesResize. */
+  height: 40vh;
+  min-height: 60px;
+  max-height: 80vh;
   display: flex;
   flex-direction: column;
   border-top: 1px solid rgba(255, 255, 255, .08);
   background: rgba(255, 255, 255, .02);
   box-sizing: border-box;
   width: 100%;
+  position: relative;
 }
 @media (min-width: 901px) {
   #plan-changed-files-section {
@@ -3575,6 +3583,9 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   }
 }
 #plan-changed-files-section.is-collapsed {
+  /* Collapsed mode: only the header strip is visible — drop the
+     fixed-height + min so it shrinks to header-only. */
+  height: auto;
   max-height: none;
   min-height: 0;
 }
@@ -3582,6 +3593,35 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 #plan-changed-files-section.is-collapsed #plan-changed-files-desc,
 #plan-changed-files-section.is-collapsed #plan-changed-files-msg {
   display: none;
+}
+#plan-changed-files-section.is-collapsed .pcf-resize-handle {
+  /* No room to drag when collapsed. */
+  display: none;
+}
+/* fr-77 r4: vertical drag handle along the top edge of the section.
+   Sits ABOVE the header so the grab affordance is right where the
+   section meets the plan items above it. Visible thin strip on hover,
+   thicker when actively dragging. Pointer events handled in
+   bindPlanChangedFilesResize. */
+.pcf-resize-handle {
+  flex: 0 0 auto;
+  height: 6px;
+  cursor: row-resize;
+  background: transparent;
+  border-top: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+  transition: background .12s, border-color .12s;
+  touch-action: none;        /* keep page from scrolling on touch drag */
+  user-select: none;
+}
+.pcf-resize-handle:hover,
+.pcf-resize-handle.dragging {
+  background: rgba(56, 139, 253, .25);
+  border-top-color: rgba(56, 139, 253, .4);
+  border-bottom-color: rgba(56, 139, 253, .4);
+}
+.pcf-resize-handle.dragging {
+  background: rgba(56, 139, 253, .45);
 }
 #plan-changed-files-section.is-collapsed #plan-changed-files-collapse svg {
   /* Chevron points up when section is collapsed (click to expand). */

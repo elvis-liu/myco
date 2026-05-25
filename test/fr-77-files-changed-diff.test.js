@@ -510,6 +510,111 @@ t('app.js: _saveFileEdit success path refreshes the Plan changed-files section',
     '_saveFileEdit must call loadPlanChangedFiles({force:true}) on save so the chip count refreshes');
 });
 
+// ──────────────────────────────────────────────────────────────────────
+// fr-77 r4 — vertical drag-to-resize on the Plan changed-files section
+// ──────────────────────────────────────────────────────────────────────
+
+t('index.html: #plan-changed-files-resize handle present at top of section', () => {
+  assert.ok(/id="plan-changed-files-resize"/.test(HTML),
+    '#plan-changed-files-resize handle must exist');
+  // It must sit INSIDE the section AND before the header (top edge).
+  const secIdx = HTML.indexOf('id="plan-changed-files-section"');
+  const handleIdx = HTML.indexOf('id="plan-changed-files-resize"', secIdx);
+  const headerIdx = HTML.indexOf('id="plan-changed-files-header"', secIdx);
+  assert.ok(handleIdx > -1 && handleIdx < headerIdx,
+    'resize handle must sit at the top of the section, before the header');
+});
+
+t('styles.css: .pcf-resize-handle has cursor row-resize + touch-action none', () => {
+  // Anchor on the line-starting base rule (not the .is-collapsed
+  // descendant selector earlier in the file).
+  const m = CSS.match(/\n\.pcf-resize-handle\s*\{[\s\S]*?\n\}/);
+  assert.ok(m, '.pcf-resize-handle base rule must be defined');
+  const block = m[0];
+  assert.ok(/cursor:\s*row-resize/.test(block),
+    'resize handle must use row-resize cursor');
+  assert.ok(/touch-action:\s*none/.test(block),
+    'resize handle must set touch-action:none so touch-drag does not scroll the page');
+});
+
+t('styles.css: section has fixed height (not max-height) with min/max bounds', () => {
+  const idx = CSS.indexOf('#plan-changed-files-section {');
+  assert.ok(idx > -1);
+  const blockEnd = CSS.indexOf('}', idx);
+  const block = CSS.slice(idx, blockEnd);
+  // r4 switched from max-height → height so the drag can grow the section.
+  assert.ok(/\bheight:\s*\d+vh/.test(block),
+    'section must use explicit `height` (not just max-height) so JS can override');
+  assert.ok(/min-height:\s*\d+px/.test(block),
+    'section must declare a min-height bound for the drag');
+  assert.ok(/max-height:\s*\d+vh/.test(block),
+    'section must declare a max-height bound for the drag');
+});
+
+t('styles.css: .is-collapsed hides the resize handle', () => {
+  // No reason to expose a drag handle when there is nothing to resize.
+  assert.ok(
+    /#plan-changed-files-section\.is-collapsed\s+\.pcf-resize-handle\s*\{[\s\S]{0,80}display:\s*none/.test(CSS),
+    'collapsed section must hide the resize handle');
+});
+
+t('app.js: bindPlanChangedFilesResize defined + wired into bindPlanChangedFilesUi', () => {
+  assert.ok(/function\s+bindPlanChangedFilesResize\s*\(/.test(APP),
+    'bindPlanChangedFilesResize must be defined');
+  // Must be invoked from bindPlanChangedFilesUi so the resize wires up
+  // alongside the rest of the section's bindings on first plan-show.
+  const idx = APP.search(/function\s+bindPlanChangedFilesUi\s*\(/);
+  const win = APP.slice(idx, idx + 2500);
+  assert.ok(/bindPlanChangedFilesResize\(/.test(win),
+    'bindPlanChangedFilesUi must call bindPlanChangedFilesResize');
+});
+
+t('app.js: resize handler uses pointer events + persists to localStorage', () => {
+  const idx = APP.search(/function\s+bindPlanChangedFilesResize\s*\(/);
+  assert.ok(idx > -1);
+  const win = APP.slice(idx, idx + 4000);
+  // Pointer events — works for both mouse + touch.
+  assert.ok(/addEventListener\(['"]pointerdown['"]/.test(win),
+    'must bind pointerdown on the handle');
+  assert.ok(/addEventListener\(['"]pointermove['"]/.test(win),
+    'must bind pointermove on the handle');
+  assert.ok(/addEventListener\(['"]pointerup['"]/.test(win),
+    'must bind pointerup on the handle');
+  // Persistence under a specific key (so the choice survives reloads).
+  assert.ok(/myco_plan_changed_h/.test(win),
+    'must persist the chosen height under localStorage key myco_plan_changed_h');
+  assert.ok(/localStorage\.setItem/.test(win),
+    'must call localStorage.setItem on drag end');
+  assert.ok(/localStorage\.getItem/.test(win),
+    'must call localStorage.getItem to restore on bind');
+});
+
+t('app.js: resize clamps to MIN + viewport-fraction MAX', () => {
+  const idx = APP.search(/function\s+bindPlanChangedFilesResize\s*\(/);
+  const win = APP.slice(idx, idx + 4000);
+  // MIN constant + Math.max/min clamp.
+  assert.ok(/MIN_PX/.test(win) || /Math\.max\([^)]*\d+/.test(win),
+    'must declare a MIN bound (≥60px) to keep the handle reachable');
+  assert.ok(/window\.innerHeight/.test(win),
+    'must derive MAX from window.innerHeight so we never grow past viewport');
+  assert.ok(/Math\.min\s*\(/.test(win),
+    'must clamp the new height with Math.min against the MAX');
+});
+
+t('app.js: double-click on handle resets to CSS default (clears inline height + saved value)', () => {
+  const idx = APP.search(/function\s+bindPlanChangedFilesResize\s*\(/);
+  const win = APP.slice(idx, idx + 4000);
+  assert.ok(/addEventListener\(['"]dblclick['"]/.test(win),
+    'must bind dblclick on the handle');
+  // The dblclick handler must clear sec.style.height AND remove the
+  // saved value so the next reload uses the stylesheet default.
+  assert.ok(/style\.height\s*=\s*['"]['"]|style\.removeProperty\(['"]height['"]/.test(win),
+    'dblclick must clear the inline height (style.height = "" or removeProperty)');
+  assert.ok(/localStorage\.removeItem\([^)]*myco_plan_changed_h/.test(win) ||
+            /removeItem\(\s*STORAGE_KEY\s*\)/.test(win),
+    'dblclick must remove the saved value from localStorage');
+});
+
 t('app.js: stale fr-77 r1/r2 symbols removed (openFileDiffViewer / _renderDiffViewerBody / loadFilesChanged / _renderFilesChanged)', () => {
   // Comments stripped so a leftover "// see openFileDiffViewer" doesn't
   // false-positive — we want to assert the actual symbol is gone.

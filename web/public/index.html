@@ -21,7 +21,7 @@
   <link rel="icon" type="image/png" href="/hetu.png?v=2" />
   <link rel="apple-touch-icon" href="/hetu.png?v=2" />
   <title>myco</title>
-  <link rel="stylesheet" href="styles.css?v=259" />
+  <link rel="stylesheet" href="styles.css?v=260" />
   <link rel="stylesheet" href="/vendor/github-dark.min.css" />
 </head>
 <body>
@@ -232,6 +232,14 @@
              rows (mentions from diff + last 5 commit subjects, fr-77
              r2) sit above the file list, hidden when both empty. -->
         <div id="plan-changed-files-section">
+          <!-- fr-77 r4: drag the handle at the very top to resize the
+               section vertically. Double-click to reset to the CSS
+               default (40vh). Height is persisted in localStorage
+               (myco_plan_changed_h) so the choice survives reloads. -->
+          <div id="plan-changed-files-resize" class="pcf-resize-handle"
+               role="separator" aria-orientation="horizontal"
+               aria-label="Drag to resize the Changed-files section. Double-click to reset."
+               title="Drag to resize · double-click to reset"></div>
           <header id="plan-changed-files-header">
             <span id="plan-changed-files-title">Changed files</span>
             <span id="plan-changed-files-count" aria-live="polite"></span>
@@ -485,6 +493,6 @@
        Exposes window.MycoCM with { createEditor, EditorView, ... }. -->
   <script src="/vendor/codemirror.bundle.js"></script>
   <script>if (typeof mermaid !== 'undefined') mermaid.initialize({ startOnLoad: false, theme: 'dark' });</script>
-  <script src="app.js?v=226"></script>
+  <script src="app.js?v=227"></script>
 </body>
 </html>
