@@ -3230,7 +3230,25 @@
         "originalText": "plan view as the main axis we should be able to chat with AI directory from a fr/bug/td so that the ctx is focused and decision is recorded. related plan items should be brought into attention if needed.",
         "rewritten": true
       }
+    },
+    {
+      "id": "fr-77",
+      "text": "**Problem:** File explorer makes it hard to see which files have changed and quickly open a diff view.\n**Expected:** Directory pane split into two sections, with the bottom section listing all changed files and supporting click-to-open diff view.\n**Actual:** Single directory section with no dedicated changed-files list or diff entry point.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-25T13:20:17.262Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "file explorer directory section should be break into two sections, the bottom section shows all of the files changed so that user can easily see what files are changed and allow bring up a diff view.",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-24T02:06:35.983Z"
+  "updatedAt": "2026-05-25T13:20:24.675Z"
 }
