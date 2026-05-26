@@ -6981,6 +6981,7 @@ function renderArtifact(type, artifact) {
         <div class="artifact-item-meta">${statusChip}${idChip}</div>
         <div class="${_planItemTextClass(it)}">${renderMd(it.text || '')}</div>
         ${_planItemTextExpandToggle(it)}
+        ${_planItemDescriptionHtml(it)}
         ${_planItemDetailsHtml(it)}
       </div>
       ${byLine}
@@ -10292,6 +10293,23 @@ function _planItemTextExpandToggle(it) {
   const expanded = _planItemIsExpanded(it);
   const label = expanded ? 'Show less' : 'Show more';
   return `<button class="artifact-item-text-expand" data-id="${escHtml(it.id)}" type="button" aria-expanded="${expanded ? 'true' : 'false'}">${label}</button>`;
+}
+
+// fr-80 r6: render `item.description` as the body of the plan card.
+// New `description` field (added when claude rewrites with TITLE +
+// DESCRIPTION) carries the Problem/Expected/Actual/Context body. The
+// `text` field becomes the one-line scannable title; this helper
+// renders the body markdown directly below the title — visible by
+// default, since description IS the body, not an optional section
+// (contrast with _planItemDetailsHtml's Analysis/Impl-Plan, which
+// stay collapsed to keep the list compact). Items without a
+// description (pre-r6 plan items where the whole body lives in
+// item.text) render exactly as before — this returns ''.
+function _planItemDescriptionHtml(it) {
+  if (!it) return '';
+  const txt = (it.description == null) ? '' : String(it.description).trim();
+  if (!txt) return '';
+  return `<div class="artifact-item-description artifact-md">${renderMd(txt)}</div>`;
 }
 
 // fr-77 r17 Phase 1: optional Analysis + Implementation-Plan sections.

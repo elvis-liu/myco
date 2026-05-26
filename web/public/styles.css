@@ -2291,6 +2291,38 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 }
 .artifact-item-text.artifact-md .conv-mermaid svg { max-width: 100%; height: auto; }
 
+/* fr-80 r6: plan-item description body — rendered below the title
+   line when item.description is present (claude-rewrite output split
+   into TITLE + DESCRIPTION). Visually distinct from the title:
+   slightly muted, indented under the title row, smaller line-height.
+   Shares the artifact-md cascade so paragraphs / lists / fences look
+   identical to the body that used to live in item.text. */
+.artifact-item-description.artifact-md {
+  margin: 6px 0 2px 0;
+  padding: 6px 8px;
+  font-size: 0.92em;
+  color: var(--text);
+  background: rgba(255, 255, 255, .02);
+  border-left: 2px solid rgba(56, 139, 253, .25);
+  border-radius: 3px;
+  line-height: 1.45;
+}
+.artifact-item-description.artifact-md > :first-child { margin-top: 0; }
+.artifact-item-description.artifact-md > :last-child  { margin-bottom: 0; }
+.artifact-item-description.artifact-md p,
+.artifact-item-description.artifact-md ul,
+.artifact-item-description.artifact-md ol { margin: 5px 0; }
+.artifact-item-description.artifact-md ul,
+.artifact-item-description.artifact-md ol { padding-left: 22px; }
+.artifact-item-description.artifact-md li { margin: 2px 0; }
+.artifact-item-description.artifact-md code {
+  background: rgba(255, 255, 255, .06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
 /* id chip + merged-from badge. The chip sits between the checkbox and
    the body text; the badge sits AFTER the text and shows count + the
    list of absorbed ids on hover. */

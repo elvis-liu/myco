@@ -347,9 +347,17 @@ function addPlanItem(ctx, layer) {
       ctx.reply(`Usage: /${cmdName} @${targetName}${alias ? ' --as ' + alias : ''} <description>`);
       return;
     }
+    // fr-80 r5: same rewrite policy as local plan items applies to
+    // remote issues — short captures (≤ 8 words, no `!`) submit
+    // verbatim; long descriptions OR explicit `!` force-rewrite get
+    // the Problem/Expected/Actual rewrite via claude BEFORE the
+    // POST. Without this, /fr @myco landed unstructured one-liners
+    // on GitHub which the user explicitly flagged.
+    const wordCount = remainder.split(/\s+/).filter(Boolean).length;
+    const shouldRewrite = forceRewrite || wordCount > PLAN_ITEM_REWRITE_WORD_THRESHOLD;
     // Route to remote issue + return — does NOT append a local plan
     // item (the user wanted this to land on the OTHER repo).
-    return handleRemoteIssue(ctx, layer, targetName, remainder, alias);
+    return handleRemoteIssue(ctx, layer, targetName, remainder, alias, shouldRewrite);
   }
   const wordCount = text.split(/\s+/).filter(Boolean).length;
   const shouldRewrite = forceRewrite || wordCount > PLAN_ITEM_REWRITE_WORD_THRESHOLD;
@@ -408,16 +416,43 @@ function addPlanItem(ctx, layer) {
 // rec.artifacts.plan.items[].text. The schema in the user message
 // (problem / expected / actual / context) matches what a software
 // engineer would look for first when triaging.
+// fr-80 r6: unified rewrite prompt — produces TITLE + DESCRIPTION as
+// separate fields. Used identically by local plan items and remote
+// GitHub issues so both surfaces look the same.
 const _PLAN_REWRITE_SYSTEM = [
-  'You rewrite a short plan-item description into a tight software-engineering issue body.',
-  'OUTPUT FORMAT — markdown, in this order, omit sections that don\'t apply:',
-  '**Problem:** one sentence calling out the actual user-facing or developer-facing pain.',
-  '**Expected:** what the right behaviour or shape is.',
-  '**Actual:** what currently happens instead.',
-  '**Context:** any extra signal (file path, repro steps, env) — only if present in the input.',
-  'KEEP IT TIGHT: total ≤ 4 short lines for trivial items, ≤ 10 lines for complex ones.',
-  'Preserve the user\'s domain words verbatim — do not paraphrase technical terms. No preamble, no closing remarks, no "here is the rewrite".',
+  'You rewrite a short plan-item description into a tight software-engineering issue with a scannable title + a structured body.',
+  '',
+  'OUTPUT FORMAT — EXACTLY this shape, starting with "TITLE:":',
+  '  TITLE: <one-line title, ≤ 80 chars, no markdown, no trailing period>',
+  '',
+  '  DESCRIPTION:',
+  '  **Problem:** one sentence calling out the actual user-facing or developer-facing pain.',
+  '  **Expected:** what the right behaviour or shape is.',
+  '  **Actual:** what currently happens instead.',
+  '  **Context:** any extra signal (file path, repro steps, env) — only if present in the input.',
+  '',
+  'KEEP IT TIGHT: description ≤ 4 short lines for trivial items, ≤ 10 lines for complex ones. Omit sections that don\'t apply.',
+  'Preserve the user\'s domain words verbatim — do not paraphrase technical terms. No preamble, no closing remarks, no "here is the rewrite". Start with "TITLE:".',
 ].join('\n');
+
+// fr-80 r6: split a rewrite response into { title, description }.
+// Returns null when the response doesn't match the expected shape so
+// the caller can fall back to "submit as-is" instead of mangling the
+// item with malformed output.
+function _parseIssueRewrite(raw) {
+  if (typeof raw !== 'string') return null;
+  // Strip optional ``` fences the model may wrap around.
+  let s = raw.trim().replace(/^```(?:markdown)?\s*([\s\S]*?)\s*```$/i, '$1').trim();
+  // Defensive against "(claude failed ...)" stand-ins.
+  if (/^\(claude /.test(s)) return null;
+  // Match: "TITLE: <line>" then "DESCRIPTION:" then the rest.
+  const m = s.match(/^TITLE:\s*([^\n\r]+)[\r\n]+(?:\s*[\r\n])?DESCRIPTION:\s*([\s\S]+)$/i);
+  if (!m) return null;
+  const title = m[1].trim();
+  const description = m[2].trim();
+  if (!title || !description) return null;
+  return { title, description };
+}
 
 async function _rewritePlanItemAsync(sessionId, itemId, originalText, layer, ctx) {
   const cwd = (ctx && ctx.absCwd) || process.cwd();
@@ -451,13 +486,28 @@ function _applyPlanItemRewrite(sessionId, itemId, rewritten, originalText) {
   } catch { return; }
   if (!item.meta) item.meta = {};
   delete item.meta.rewritePending;
-  const cleanedRewrite = _sanitizePlanRewrite(rewritten);
-  if (cleanedRewrite) {
+  // fr-80 r6: parse the TITLE/DESCRIPTION shape — title goes to
+  // item.text (one-line, scannable), description to item.description
+  // (markdown body). Both surfaces (local plan card + remote GitHub
+  // issue) read these two fields directly so they look identical.
+  const parsed = _parseIssueRewrite(rewritten);
+  if (parsed) {
     item.meta.originalText = originalText;
     item.meta.rewritten = true;
-    item.text = cleanedRewrite;
+    item.text = parsed.title;
+    item.description = parsed.description;
   } else {
-    item.meta.rewriteFailed = true;
+    // Fall back to the older sanitize path so a model that ignored the
+    // new TITLE/DESCRIPTION shape still produces a usable single-blob
+    // rewrite instead of dropping back to the original text.
+    const cleanedRewrite = _sanitizePlanRewrite(rewritten);
+    if (cleanedRewrite) {
+      item.meta.originalText = originalText;
+      item.meta.rewritten = true;
+      item.text = cleanedRewrite;
+    } else {
+      item.meta.rewriteFailed = true;
+    }
   }
   _persistPlanArtifact(rec, sessionId);
 }
@@ -887,7 +937,7 @@ function handleTaskSkip(ctx) {
 // Distinct from handleIssue (which uses the session's git remote) —
 // here the target is a fixed repo unrelated to the session's cwd, so
 // no `git remote get-url` is run.
-async function handleRemoteIssue(ctx, layer, targetName, description, alias) {
+async function handleRemoteIssue(ctx, layer, targetName, description, alias, shouldRewrite) {
   const target = REMOTE_TARGETS[targetName];
   if (!target) {                 // defensive — caller already validated
     ctx.reply(`(unknown @target \`@${targetName}\`)`);
@@ -896,18 +946,66 @@ async function handleRemoteIssue(ctx, layer, targetName, description, alias) {
   const labels = REMOTE_LABEL_BY_LAYER[layer] || [];
   const cmdName = layer === 'Feature' ? 'fr' : layer === 'Bug' ? 'bug' : 'td';
   const aliasSuffix = alias ? ' --as ' + alias : '';
-  // Title = first sentence (or up to 80 chars) so the GitHub issue
-  // list is scannable. Full text always lives in the body.
-  const firstLine = String(description).split(/[\r\n]/, 1)[0].trim();
-  const title = firstLine.length > 80
-    ? firstLine.slice(0, 77) + '…'
-    : firstLine;
+  // fr-80 r5: rewrite into Problem/Expected/Actual format via claude
+  // (same _PLAN_REWRITE_SYSTEM prompt that local plan items use).
+  // Sync await — the user submits the slash command, gets feedback
+  // when the issue lands. Failure leaves the original description in
+  // place + flags `(rewrite failed — submitted as-is)` so the issue
+  // still gets filed.
+  let issueBody = String(description);
+  let issueTitle = null;          // fr-80 r6: set when rewrite parsed cleanly
+  let rewriteNote = '';
+  if (shouldRewrite) {
+    try {
+      const btw = require('./btw');
+      const cwd = ctx.absCwd || process.cwd();
+      const userPrompt = [
+        `Layer: ${layer}`,
+        `Original description: ${description}`,
+        '',
+        'Rewrite the description following the system prompt format.',
+      ].join('\n');
+      const rewritten = await btw.runClaudeP(cwd, `${_PLAN_REWRITE_SYSTEM}\n\n${userPrompt}`);
+      // fr-80 r6: parse the TITLE/DESCRIPTION shape directly — keeps
+      // the GitHub issue title and body in lockstep with the local plan
+      // item's text/description (same source, same parse).
+      const parsed = _parseIssueRewrite(rewritten);
+      if (parsed) {
+        issueTitle = parsed.title;
+        issueBody = parsed.description;
+        rewriteNote = ' _(body rewritten by claude)_';
+      } else {
+        const cleaned = _sanitizePlanRewrite(rewritten);
+        if (cleaned) {
+          issueBody = cleaned;
+          rewriteNote = ' _(rewrite returned non-standard shape — used as-is)_';
+        } else {
+          rewriteNote = ' _(rewrite failed — submitted as-is)_';
+        }
+      }
+    } catch (err) {
+      rewriteNote = ` _(rewrite errored: ${err.message} — submitted as-is)_`;
+    }
+  }
+  // Title: prefer the parsed TITLE field from the rewrite (fr-80 r6).
+  // Fall back to first-line-of-body extraction when the rewrite was
+  // skipped or didn't parse — same scannable-title behavior as before.
+  let title;
+  if (issueTitle) {
+    title = issueTitle.length > 80 ? issueTitle.slice(0, 77) + '…' : issueTitle;
+  } else {
+    const firstLine = String(issueBody).split(/[\r\n]/, 1)[0]
+      .replace(/^\*+|\*+$/g, '')
+      .replace(/^\s*\*\*(.+?):\*\*\s*/, '$1: ')
+      .trim();
+    title = firstLine.length > 80 ? firstLine.slice(0, 77) + '…' : firstLine;
+  }
   const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
   const body = [
-    description,
+    issueBody,
     '',
     '---',
-    `Filed by **@${ctx.user}** via [myco](https://myco.labxnow.ai/) (\`/${cmdName} @${targetName}\`) on ${ts} UTC.`,
+    `Filed by **@${ctx.user}** via [myco](https://myco.labxnow.ai/) (\`/${cmdName} @${targetName}${aliasSuffix}\`) on ${ts} UTC.${rewriteNote}`,
   ].join('\n');
   const token = gitHosts.getToken(ctx.user, target.provider, target.owner, target.repo, alias);
   if (!token) {

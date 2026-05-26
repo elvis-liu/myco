@@ -135,14 +135,18 @@ t('slashcmds.js: addPlanItem parses --as <alias> after @<target> + forwards to h
   const win = SRC.slice(idx, idx + 4000);
   assert.ok(/aliasMatch\s*=\s*remainder\.match\(\s*\/\^--as\\s\+\(\[a-z0-9_-\]\+\)/i.test(win),
     'addPlanItem must parse --as <alias> in the @<target> branch');
-  assert.ok(/return\s+handleRemoteIssue\(\s*ctx,\s*layer,\s*targetName,\s*remainder,\s*alias\s*\)/.test(win),
-    'addPlanItem must forward alias to handleRemoteIssue');
+  // r5 added shouldRewrite as the 6th arg; alias stays as 5th. Accept
+  // either signature width but require `alias` to be in the call.
+  assert.ok(/return\s+handleRemoteIssue\(\s*ctx,\s*layer,\s*targetName,\s*remainder,\s*alias[\s,)]/.test(win),
+    'addPlanItem must forward alias to handleRemoteIssue (5th arg; 6th = shouldRewrite added in r5)');
 });
 
 t('slashcmds.js: handleRemoteIssue accepts alias + passes to gitHosts.getToken', () => {
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
   const win = SRC.slice(idx, idx + 8000);
-  assert.ok(/async\s+function\s+handleRemoteIssue\s*\(\s*ctx\s*,\s*layer\s*,\s*targetName\s*,\s*description\s*,\s*alias\s*\)/.test(win),
+  // fr-80 r5 added a 6th `shouldRewrite` arg after `alias`. Accept the
+  // wider signature — what we're pinning is that `alias` is present.
+  assert.ok(/async\s+function\s+handleRemoteIssue\s*\(\s*ctx\s*,\s*layer\s*,\s*targetName\s*,\s*description\s*,\s*alias\s*[,)]/.test(win),
     'handleRemoteIssue signature must include the alias parameter');
   assert.ok(/gitHosts\.getToken\(\s*ctx\.user\s*,\s*target\.provider\s*,\s*target\.owner\s*,\s*target\.repo\s*,\s*alias\s*\)/.test(win),
     'getToken call must pass alias through');

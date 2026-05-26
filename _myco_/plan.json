@@ -3304,7 +3304,129 @@
         "originalText": "plan view search field lost focus before I finishes typing, it should stay focused while filtering as I type.",
         "rewritten": true
       }
+    },
+    {
+      "id": "fr-79",
+      "text": "**Problem:** No at-a-glance history of recently shipped fr/td/bug/ad hoc work.\n**Expected:** Timeline view in the top right listing implemented fr/td/bug/ad hoc items, automatically grouped by feature.\n**Actual:** No timeline surface exists; history is not visible or grouped.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-26T00:28:42.172Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "Add a timeline view on the top rigbt, with history of what fr/td/bug/ad hoc feature was implemented, with automatic grouping by feature",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "fr-80",
+      "text": "**Problem:** No in-chat shortcut exists to file feature requests, bugs, or tech-debt items against `github.com/kkrazy/myco` from another myco context.\n**Expected:** Slash commands `/fr @myco`, `/bug @myco`, and `/td @myco` rewrite the user's note into a proper issue, submit it to `github.com/kkrazy/myco`, and return a link for the user to review/update.\n**Actual:** Users must manually format and file issues on GitHub; no `@myco` mention handler routes feature/bug/tech-debt intents.\n**Context:** Three command variants (`/fr`, `/bug`, `/td`) share the same submit-and-link flow, differing only in issue type/label.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-26T01:45:38.219Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "a98bf352e780",
+          "user": "kkrazy",
+          "text": "it will use user's pat to submit the fr/td/bug",
+          "ts": "2026-05-26T01:47:42.237Z"
+        },
+        {
+          "id": "887d80db8eab",
+          "user": "claude",
+          "text": "✓ success · 414.5s · $46.2171 · 28↓/15530↑\n\nfr-80 shipped and live on opti.\n\n**Summary:**\n\n| What | How |\n|---|---|\n| **`/fr @myco <text>`** | Files a `[enhancement]` GitHub issue on `github.com/kkrazy/myco` |\n| **`/bug @myco <text>`** | Files a `[bug]` issue on `github.com/kkrazy/myco` |\n| **`/td @myco <text>`** | Files a `[todo]` issue on `github.com/kkrazy/myco` |\n| **Auth** | Per-repo PAT (set via `/setpat`) preferred, GitHub OAuth fallback (no extra setup needed for users who signed in via GitHub) |\n| **Title** | First line of your text, capped at 80 chars |\n| **Body** | Your full text + `Filed by **@<user>** via myco (` ``/fr @myco`` `) on <UTC ts>` |\n| **Result reply** | `✓ Filed feature **#42** on kkrazy/myco: <url>` |\n| **Without `@myco`** | Behaves exactly as today — appends to the local session's plan |\n| **Unknown `@<…",
+          "ts": "2026-05-26T02:02:34.710Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-26T01:55:40.095Z"
+          }
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "add a \"/fr @myco\" which would send a feature request to maco, this would add an issue to the \"github.com/kkrazy/myco\" project, should have \"/bug @myco\", \"/td @myco\". myco will rewrite it into proper format, submit to github.com/kkrazy/myco, and send back a link for user to review and update if needed.",
+        "rewritten": true
+      },
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-26T02:02:34.710Z",
+          "startedAt": "2026-05-26T01:55:40.095Z",
+          "summary": "414.5s · 28→15530 tok",
+          "result": "fr-80 shipped and live on opti.\n\n**Summary:**\n\n| What | How |\n|---|---|\n| **`/fr @myco <text>`** | Files a `[enhancement]` GitHub issue on `github.com/kkrazy/myco` |\n| **`/bug @myco <text>`** | Files a `[bug]` issue on `github.com/kkrazy/myco` |\n| **`/td @myco <text>`** | Files a `[todo]` issue on `github.com/kkrazy/myco` |\n| **Auth** | Per-repo PAT (set via `/setpat`) preferred, GitHub OAuth fallback (no extra setup needed for users who signed in via GitHub) |\n| **Title** | First line of your text, capped at 80 chars |\n| **Body** | Your full text + `Filed by **@<user>** via myco (` ``/fr @myco`` `) on <UTC ts>` |\n| **Result reply** | `✓ Filed feature **#42** on kkrazy/myco: <url>` |\n| **Without `@myco`** | Behaves exactly as today — appends to the local session's plan |\n| **Unknown `@<target>`** | Bounces with a list of registered targets (currently just `@myco`) |\n| **Adding more targets** | One-line edit to the `REMOTE_TARGETS` map in `server/src/slashcmds.js` |\n\n**Try it on opti:** from any session's chat input, type `/fr @myco test issue from <your handle>`. If you signed in via GitHub, it'll use your OAuth token automatically.\n\n**Tests:** new `test/fr-80-remote-issue-routing.test.js` (7 cases) pins the registry shape, the regex matcher, the dispatch path, the labels, and the title/body shape. All 80 test files green.\n\nv0.0.4 tag unchanged (still at `422c071`) — let me know if you want to re-roll it to include fr-80 too."
+        }
+      ]
+    },
+    {
+      "id": "fr-81",
+      "text": "**Problem:** Plan view cannot ingest issues from remote git-compatible repositories, so users can't see remote work alongside local plan items.\n**Expected:** Plan view pulls issues from GitHub, Gitee, or any git-compatible repository and displays them with a \"remote\" indicator.\n**Actual:** Plan view only shows local plan items; remote issues are not fetched or displayed.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-26T02:01:32.116Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "a683b2914699",
+          "user": "kkrazy",
+          "text": "problems in the authentication even when using a token with the right permission: PAT works but is missing read:org scope (gh's --with-token validation requires it). Workaround: use the token directly via GH_TOKEN env var — gh picks it up automatically and skips the hosts.yml validation. Identity check + scope reality:  11:02:29 ▸ × 1 🔧 mcp__lean-ctx__ctx_shell · {\"command\":\"gh api user --jq '.login + \\\" (id=\\\" + (.id|tost 11:02:30 ✓ result 419 bytes · for=UvPKuVca labxnow (id=13969529) ---actual scopes on this PAT--- Access-Control-Expose-Headers: ETag, Link, Location, Retry-After, X-GitHub-OTP, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Used, X-RateLimit-Resource, X-RateLimit-Reset, X-OAuth-Scopes, X-Accepted-OAuth-Scopes, X-Poll-Interval, X-GitHub-Media-Type, X-GitHub-SSO, X-GitHub-Request-Id, Deprecation, Sunset, Warning X-Oauth-Scopes: repo, write:discussion 11:02:43 claude Auth working — labxnow (id 13969529), PAT scopes repo + write:discussion. Ready to fire gh issue",
+          "ts": "2026-05-26T03:24:10.524Z"
+        },
+        {
+          "id": "2049fb4addde",
+          "user": "kkrazy",
+          "text": "(GitHub 403 — your stored token can't write issues on kkrazy/myco.  Your token is missing the repo scope (have: (none reported); endpoint needs: (POST /issues needs repo for private repos, public_repo for public)). Re-sign-in to refresh the OAuth grant.  Fix paths:  Re-sign-in via GitHub at the top-right user chip — refreshes the OAuth grant with the current repo scope. Most common fix. Check the OAuth grant at https://github.com/settings/applications — confirm myco has access to kkrazy/myco (org-level restrictions can block third-party OAuth apps per-repo). Classic PAT override — generate one at https://github.com/settings/tokens/new?scopes=repo and run /setpat @myco <token> from any session. Verify Issues are enabled on kkrazy/myco (Settings → General → Features). 403 also fires when Issues are turned off.)",
+          "ts": "2026-05-26T03:24:32.224Z"
+        },
+        {
+          "id": "a045b8dd0a03",
+          "user": "kkrazy",
+          "text": "the issue creation works now, but it's not rewriting it to proper format before submitting the issue",
+          "ts": "2026-05-26T03:25:11.700Z"
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "plan view should be able to pull down the issues from github or gittee or any git compatible repository and display with a indicator is remote",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "fr-82",
+      "text": "**Problem:** No way to switch between accounts backed by different PATs, blocking users who work across GitHub, Gitee, or other git-compatible repos.\n**Expected:** A \"switch account\" action that selects among stored PATs (GitHub, Gitee, git-compatible) and authenticates as the chosen identity.\n**Actual:** Only a single PAT/account is supported; switching requires manually replacing credentials.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-26T02:08:18.930Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "d968d2e090ab",
+          "user": "kkrazy",
+          "text": "(GitHub 403 — your stored token can't write issues on kkrazy/myco.  Your token is missing the repo scope (have: (none reported); endpoint needs: (POST /issues needs repo for private repos, public_repo for public)). Re-sign-in to refresh the OAuth grant.  Fix paths:  Re-sign-in via GitHub at the top-right user chip — refreshes the OAuth grant with the current repo scope. Most common fix. Check the OAuth grant at https://github.com/settings/applications — confirm myco has access to kkrazy/myco (org-level restrictions can block third-party OAuth apps per-repo). Classic PAT override — generate one at https://github.com/settings/tokens/new?scopes=repo and run /setpat @myco <token> from any session. Verify Issues are enabled on kkrazy/myco (Settings → General → Features). 403 also fires when Issues are turned off.)",
+          "ts": "2026-05-26T03:04:41.285Z"
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "add a switch account which uses different PAT to login, the PAT could be coming from different repo such as github , gitee or git compatible repos.",
+        "rewritten": true
+      }
     }
   ],
-  "updatedAt": "2026-05-25T13:54:57.181Z"
+  "updatedAt": "2026-05-26T02:08:25.110Z"
 }

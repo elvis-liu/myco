@@ -83,8 +83,8 @@ t('slashcmds.js: handleRemoteIssue is defined + uses gitHosts.{getToken,createIs
   assert.ok(/async\s+function\s+handleRemoteIssue\s*\(/.test(SRC),
     'handleRemoteIssue must be defined');
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
-  // r4 added the probe branch → bump again.
-  const win = SRC.slice(idx, idx + 7500);
+  // r4 added the probe branch + r5 added rewrite block → bump again.
+  const win = SRC.slice(idx, idx + 10000);
   assert.ok(/gitHosts\.getToken\(\s*ctx\.user/.test(win),
     'must call gitHosts.getToken(ctx.user, provider, owner, repo)');
   assert.ok(/gitHosts\.createIssue\(/.test(win),
@@ -110,7 +110,9 @@ t('slashcmds.js: handleRemoteIssue title is the first line, capped at 80 chars',
 
 t('slashcmds.js: handleRemoteIssue body includes user attribution + cmd marker', () => {
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
-  const win = SRC.slice(idx, idx + 3000);
+  // r5+r6 (rewrite + TITLE/DESCRIPTION parse) pushed the body block
+  // past the original 3000-char window. Slice bigger to keep finding it.
+  const win = SRC.slice(idx, idx + 6000);
   assert.ok(/Filed by/.test(win),
     'body must include "Filed by **@<user>**" attribution');
   assert.ok(/\/\$\{cmdName\} @\$\{targetName\}/.test(win),
@@ -228,6 +230,42 @@ t('slashcmds.js: r2 — /setpat @<target> <token> path stores PAT without needin
     'usage hint must advertise both `<token>` and `@<target> [--as <alias>] <token>` forms');
 });
 
+t('slashcmds.js: r5 — long /fr @<target> AND /fr! @<target> rewrite the body via claude before submit', () => {
+  // User report: "the issue creation works now, but it's not rewriting
+  // it to proper format before submitting the issue." r5 applies the
+  // same _PLAN_REWRITE_SYSTEM prompt used by local plan items, before
+  // the GitHub POST. Triggered by the existing word-count threshold
+  // (PLAN_ITEM_REWRITE_WORD_THRESHOLD) OR the explicit `!` force flag.
+  // shouldRewrite is computed in addPlanItem's @<target> branch and
+  // forwarded to handleRemoteIssue.
+  //
+  // Pin: addPlanItem's @<target> branch computes wordCount + shouldRewrite
+  // AND forwards them to handleRemoteIssue.
+  const idxAdd = SRC.search(/function\s+addPlanItem\s*\(/);
+  const winAdd = SRC.slice(idxAdd, idxAdd + 5000);
+  assert.ok(/wordCount\s*=\s*remainder\.split[\s\S]{0,200}shouldRewrite\s*=\s*forceRewrite\s*\|\|\s*wordCount\s*>\s*PLAN_ITEM_REWRITE_WORD_THRESHOLD/.test(winAdd),
+    'addPlanItem @<target> branch must compute shouldRewrite (forceRewrite || wordCount > threshold)');
+  assert.ok(/handleRemoteIssue\(\s*ctx,\s*layer,\s*targetName,\s*remainder,\s*alias,\s*shouldRewrite\s*\)/.test(winAdd),
+    'addPlanItem must forward shouldRewrite to handleRemoteIssue');
+  // Pin: handleRemoteIssue signature accepts shouldRewrite + runs the
+  // _PLAN_REWRITE_SYSTEM prompt via btw.runClaudeP before POSTing.
+  const idxRem = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
+  const winRem = SRC.slice(idxRem, idxRem + 10000);
+  assert.ok(/async\s+function\s+handleRemoteIssue\s*\(\s*ctx\s*,\s*layer\s*,\s*targetName\s*,\s*description\s*,\s*alias\s*,\s*shouldRewrite\s*\)/.test(winRem),
+    'handleRemoteIssue signature must include the shouldRewrite parameter');
+  assert.ok(/if\s*\(\s*shouldRewrite\s*\)/.test(winRem),
+    'handleRemoteIssue must branch on shouldRewrite before submitting');
+  assert.ok(/btw\.runClaudeP\(/.test(winRem),
+    'rewrite path must call btw.runClaudeP for the synchronous rewrite');
+  assert.ok(/_PLAN_REWRITE_SYSTEM/.test(winRem),
+    'rewrite must use the same _PLAN_REWRITE_SYSTEM prompt as local plan items');
+  assert.ok(/_sanitizePlanRewrite/.test(winRem),
+    'rewrite output must go through _sanitizePlanRewrite (drops claude error stubs)');
+  // Failure surfaces a tagline so the user knows submit-as-is happened.
+  assert.ok(/rewrite failed|submitted as-is/i.test(winRem),
+    'rewrite-failure path must include a "submitted as-is" tagline in the issue body');
+});
+
 t('slashcmds.js: command usage strings advertise @<target>', () => {
   // The /fr /bug /td registrations should hint at the remote-target
   // form in their usage line so the new path is discoverable from /help.
@@ -238,6 +276,134 @@ t('slashcmds.js: command usage strings advertise @<target>', () => {
     assert.ok(re.test(SRC),
       `/${cmd} usage string must mention @<target> form`);
   }
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// r6 — unified TITLE + DESCRIPTION rewrite shape (both local plan items
+//      and remote GitHub issues use the same parsed pair).
+//
+// User report (kkrazy 2026-05-26): "the rewrite should be suitable for
+// github issue with a title and a description. both local issue and
+// github issue should have the same format". r6 reshapes the rewrite
+// prompt to demand `TITLE:` then `DESCRIPTION:` so both surfaces split
+// the result into the same two fields (item.text + item.description on
+// the plan card; issue title + issue body on GitHub).
+// ──────────────────────────────────────────────────────────────────────
+
+t('slashcmds.js: r6 — _PLAN_REWRITE_SYSTEM demands TITLE + DESCRIPTION shape', () => {
+  const idx = SRC.search(/const\s+_PLAN_REWRITE_SYSTEM\s*=/);
+  assert.ok(idx > -1, '_PLAN_REWRITE_SYSTEM constant must be declared');
+  const win = SRC.slice(idx, idx + 3000);
+  assert.ok(/TITLE:/.test(win),
+    'prompt must instruct the model to emit a "TITLE:" line');
+  assert.ok(/DESCRIPTION:/.test(win),
+    'prompt must instruct the model to emit a "DESCRIPTION:" body');
+  // Anchor the output ordering so models can\'t flip the two.
+  assert.ok(/starting with\s+"?TITLE:/i.test(win),
+    'prompt must say the output starts with "TITLE:" (anchors parsing)');
+});
+
+t('slashcmds.js: r6 — _parseIssueRewrite splits "TITLE: ...\\nDESCRIPTION: ..." into {title, description}', () => {
+  // Pure runtime check — the parser is the load-bearing piece that
+  // keeps the plan card + the GitHub issue in lockstep. If it returns
+  // null for the canonical shape, the rewrite silently regresses.
+  delete require.cache[require.resolve('../server/src/slashcmds.js')];
+  const slashcmds = require('../server/src/slashcmds.js');
+  // The parser isn\'t exported on purpose (internal helper). Read it
+  // out of module-internals via the SRC text → eval to grab a handle.
+  // Cheaper than refactoring the module surface for one test.
+  const fnMatch = SRC.match(/function\s+_parseIssueRewrite\s*\(raw\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(fnMatch, '_parseIssueRewrite function must be defined in slashcmds.js');
+  // eslint-disable-next-line no-new-func
+  const _parseIssueRewrite = new Function('return ' + fnMatch[0])();
+  const ok = _parseIssueRewrite(
+    'TITLE: Plan card never shows description\n\n' +
+    'DESCRIPTION:\n' +
+    '**Problem:** description field never reaches the UI.\n' +
+    '**Expected:** body renders below title.\n'
+  );
+  assert.ok(ok, 'canonical TITLE+DESCRIPTION shape must parse');
+  assert.strictEqual(ok.title, 'Plan card never shows description');
+  assert.ok(/^\*\*Problem:/m.test(ok.description),
+    'description body must start with the Problem section');
+  // Code-fence wrapped output (claude sometimes adds ```markdown).
+  const fenced = _parseIssueRewrite(
+    '```markdown\nTITLE: x\n\nDESCRIPTION:\nbody\n```'
+  );
+  assert.ok(fenced, 'fenced output (```markdown ... ```) must still parse');
+  assert.strictEqual(fenced.title, 'x');
+  assert.strictEqual(fenced.description, 'body');
+  // Malformed outputs return null so the caller falls back instead of
+  // mangling the item with garbage.
+  assert.strictEqual(_parseIssueRewrite('no title or description'), null,
+    'non-matching strings must return null');
+  assert.strictEqual(_parseIssueRewrite('TITLE: only-title-no-body'), null,
+    'missing DESCRIPTION must return null');
+  assert.strictEqual(_parseIssueRewrite('(claude failed to respond)'), null,
+    'claude-error stand-ins must return null');
+  assert.strictEqual(_parseIssueRewrite(null), null,
+    'non-string input must return null');
+});
+
+t('slashcmds.js: r6 — _applyPlanItemRewrite writes title→item.text, body→item.description', () => {
+  // The local-plan path is the second-half of the unified-format
+  // contract. Same parsed pair → distinct item fields so the card can
+  // render title + body separately. Without this branch the rewrite
+  // shows up as a single TITLE-prefixed blob in item.text.
+  const idx = SRC.search(/function\s+_applyPlanItemRewrite\s*\(/);
+  assert.ok(idx > -1, '_applyPlanItemRewrite must be defined');
+  const win = SRC.slice(idx, idx + 2000);
+  assert.ok(/_parseIssueRewrite\(/.test(win),
+    '_applyPlanItemRewrite must call _parseIssueRewrite to split the response');
+  assert.ok(/item\.text\s*=\s*parsed\.title/.test(win),
+    'parsed title must be written to item.text');
+  assert.ok(/item\.description\s*=\s*parsed\.description/.test(win),
+    'parsed description must be written to item.description');
+  // Fallback path: when parse fails we still try _sanitizePlanRewrite so
+  // an off-format rewrite isn\'t silently dropped on the floor.
+  assert.ok(/_sanitizePlanRewrite\(/.test(win),
+    'parse-miss path must still try _sanitizePlanRewrite as a fallback');
+});
+
+t('slashcmds.js: r6 — handleRemoteIssue uses parsed.title for the GH issue title', () => {
+  // The remote-issue path is the first-half of the unified-format
+  // contract. Same parser → GH issue title (`parsed.title`) + body
+  // (`parsed.description`). The first-line-strip fallback only fires
+  // when the rewrite was skipped or didn\'t parse.
+  const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
+  const win = SRC.slice(idx, idx + 10000);
+  assert.ok(/_parseIssueRewrite\(/.test(win),
+    'handleRemoteIssue must call _parseIssueRewrite on the rewrite output');
+  assert.ok(/issueTitle\s*=\s*parsed\.title/.test(win),
+    'parsed.title must drive the GH issue title (not first-line strip)');
+  assert.ok(/issueBody\s*=\s*parsed\.description/.test(win),
+    'parsed.description must drive the GH issue body');
+});
+
+t('app.js: r6 — _planItemDescriptionHtml renders item.description below the title', () => {
+  const APP = fs.readFileSync(
+    path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
+  assert.ok(/function\s+_planItemDescriptionHtml\s*\(it\)/.test(APP),
+    '_planItemDescriptionHtml helper must be defined');
+  // Helper renders item.description as markdown.
+  const idx = APP.search(/function\s+_planItemDescriptionHtml\s*\(it\)/);
+  const win = APP.slice(idx, idx + 600);
+  assert.ok(/it\.description/.test(win),
+    'helper must read it.description');
+  assert.ok(/renderMd\(/.test(win),
+    'helper must render the description via renderMd (markdown)');
+  assert.ok(/artifact-item-description/.test(win),
+    'helper must emit the artifact-item-description CSS class');
+  // renderItem invokes the helper so the card actually shows it.
+  assert.ok(/\$\{_planItemDescriptionHtml\(it\)\}/.test(APP),
+    'renderItem must call _planItemDescriptionHtml(it)');
+});
+
+t('styles.css: r6 — .artifact-item-description rule exists', () => {
+  const CSS = fs.readFileSync(
+    path.join(__dirname, '..', 'web', 'public', 'styles.css'), 'utf8');
+  assert.ok(/\.artifact-item-description\.artifact-md\s*\{/.test(CSS),
+    '.artifact-item-description.artifact-md rule must exist');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
