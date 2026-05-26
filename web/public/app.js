@@ -6942,6 +6942,7 @@ function renderArtifact(type, artifact) {
         <div class="artifact-item-meta">${statusChip}${idChip}</div>
         <div class="${_planItemTextClass(it)}">${renderMd(it.text || '')}</div>
         ${_planItemTextExpandToggle(it)}
+        ${_planItemDetailsHtml(it)}
       </div>
       ${byLine}
       ${actionsRow}
@@ -10178,6 +10179,37 @@ function _planItemTextExpandToggle(it) {
   const expanded = _planItemIsExpanded(it);
   const label = expanded ? 'Show less' : 'Show more';
   return `<button class="artifact-item-text-expand" data-id="${escHtml(it.id)}" type="button" aria-expanded="${expanded ? 'true' : 'false'}">${label}</button>`;
+}
+
+// fr-77 r17 Phase 1: optional Analysis + Implementation-Plan sections.
+// User asked to "separate into analysis, impl plan" so the body of a
+// plan item is easier to read. Backed by two new optional string
+// fields on plan items: `analysis` and `implPlan`. When EITHER is
+// populated, this helper emits collapsible <details> blocks below
+// the item's main text body. Both default to closed so the list
+// stays compact; clicking the summary expands inline. Items without
+// either field render exactly as before (empty string).
+// Markdown is rendered inside via renderMd (the same path as the
+// main item body), so code fences / lists / mermaid all work.
+function _planItemDetailsHtml(it) {
+  if (!it) return '';
+  const sections = [
+    { key: 'analysis', label: 'Analysis',           text: it.analysis },
+    { key: 'implPlan', label: 'Implementation plan', text: it.implPlan },
+  ];
+  const parts = [];
+  for (const s of sections) {
+    const txt = (s.text == null) ? '' : String(s.text).trim();
+    if (!txt) continue;
+    parts.push(
+      `<details class="artifact-item-section" data-section="${escHtml(s.key)}">` +
+        `<summary class="artifact-item-section-summary">${escHtml(s.label)}</summary>` +
+        `<div class="artifact-item-section-body artifact-md">${renderMd(txt)}</div>` +
+      `</details>`
+    );
+  }
+  if (parts.length === 0) return '';
+  return `<div class="artifact-item-sections">${parts.join('')}</div>`;
 }
 
 // fr-64: derive a single status string for a plan item based on

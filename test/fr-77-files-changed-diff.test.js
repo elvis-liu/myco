@@ -588,6 +588,71 @@ t('app.js: _saveFileEdit success path refreshes the Plan changed-files section',
 });
 
 // ──────────────────────────────────────────────────────────────────────
+// fr-77 r17 — plan-item Analysis + Implementation-Plan accordions
+// ──────────────────────────────────────────────────────────────────────
+
+t('app.js: r17 _planItemDetailsHtml emits <details> for analysis + implPlan when populated', () => {
+  assert.ok(/function\s+_planItemDetailsHtml\s*\(/.test(APP),
+    '_planItemDetailsHtml helper must be defined');
+  const idx = APP.search(/function\s+_planItemDetailsHtml\s*\(/);
+  const win = APP.slice(idx, idx + 2000);
+  // Both field names referenced.
+  assert.ok(/analysis/.test(win) && /implPlan/.test(win),
+    'helper must read it.analysis + it.implPlan');
+  // Uses <details> for native collapsible behavior.
+  assert.ok(/<details/.test(win),
+    'must render each section as a <details> element');
+  // Summary labels are the human-friendly section names.
+  assert.ok(/Analysis/.test(win) && /Implementation plan/i.test(win),
+    'summary labels must be "Analysis" and "Implementation plan"');
+  // Class hook on the wrapper so CSS can style.
+  assert.ok(/artifact-item-section/.test(win),
+    'wrapper class .artifact-item-section must be applied');
+});
+
+t('app.js: r17 plan-item render invokes _planItemDetailsHtml', () => {
+  // renderItem-arrow inside the renderArtifact function references it.
+  assert.ok(/\$\{_planItemDetailsHtml\(it\)\}/.test(APP),
+    'renderItem must invoke _planItemDetailsHtml(it) so the sections render');
+});
+
+t('styles.css: r17 accordion summary + body styles defined', () => {
+  for (const cls of [
+    'artifact-item-sections',
+    'artifact-item-section',
+    'artifact-item-section-summary',
+    'artifact-item-section-body',
+  ]) {
+    assert.ok(new RegExp('\\.' + cls + '\\b').test(CSS),
+      `.${cls} CSS rule must be defined`);
+  }
+  // Collapsed marker rotates 90° when open.
+  assert.ok(/artifact-item-section\[open\][\s\S]{0,200}rotate\(90deg\)/.test(CSS),
+    'open <details> must rotate its caret marker 90deg');
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// fr-77 r18 — uniform action-button sizing + bumped comment icon
+// ──────────────────────────────────────────────────────────────────────
+
+t('styles.css: r18 action-row buttons share a fixed height (no per-button drift)', () => {
+  // Single selector list covering vote / comment-toggle / run /
+  // close / edit / delete must set height + min-height.
+  const re = /\.artifact-item-actions\s+\.artifact-vote[\s\S]{0,400}\.artifact-item-actions\s+\.artifact-item-delete\s*\{[\s\S]{0,400}height:\s*\d+px/;
+  assert.ok(re.test(CSS),
+    'r18 must declare a shared height for all action-row buttons');
+});
+
+t('styles.css: r18 comment-toggle (+ siblings) icons bumped to 16px', () => {
+  // The .vote-icon svg / .artifact-comment-toggle > svg / .btn-icon svg
+  // rule must size to 16px (was 14px before r18).
+  const m = CSS.match(/\.vote-icon\s+svg[\s\S]*?\n\}/);
+  assert.ok(m, '.vote-icon svg rule must exist');
+  assert.ok(/width:\s*16px/.test(m[0]),
+    'action-row SVG icons must be 16px (was 14px pre-r18)');
+});
+
+// ──────────────────────────────────────────────────────────────────────
 // fr-77 r14 / r15 / r16 — Lucide icons + Esc-to-cancel + accepted state
 // ──────────────────────────────────────────────────────────────────────
 

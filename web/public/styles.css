@@ -2558,11 +2558,48 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .artifact-item-edited .btn-icon svg,
 .vote-icon svg,
 .artifact-comment-toggle > svg {
-  width: 14px;
-  height: 14px;
+  /* fr-77 r18: bumped from 14px → 16px so the action-row icons read
+     comfortably alongside their text labels and the comment-toggle
+     icon stops feeling "too small". 16px is the same family-coherent
+     step between the per-row Changed-files icons (14px, in a denser
+     row) and the chrome cluster icons (18px, alone in 32px buttons). */
+  width: 16px;
+  height: 16px;
   display: inline-block;
-  vertical-align: -2px;
+  vertical-align: -3px;
 }
+
+/* fr-77 r18: uniform sizing for every plan-item action button so
+   they line up height-wise even when their content differs (icon-only
+   vote/comment vs icon+text run/edit/close vs icon-only delete).
+   Sets the shared base; individual button rules still own colour +
+   hover, but height/padding are no longer free to drift per button. */
+.artifact-item-actions .artifact-vote,
+.artifact-item-actions .artifact-comment-toggle,
+.artifact-item-actions .artifact-item-run,
+.artifact-item-actions .artifact-item-close,
+.artifact-item-actions .artifact-item-edit,
+.artifact-item-actions .artifact-item-delete {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  line-height: 1;
+}
+/* Icon-only buttons (vote count + delete) want square-ish dimensions
+   so the icon is centered and the button doesn't stretch wider than
+   its content. */
+.artifact-item-actions .artifact-item-delete {
+  width: 28px;
+  padding: 0;
+}
+/* Mobile tap-target overrides (existing rule at @media max-width: 900px
+   forces min-height: 44px) — leave those alone; this rule is the
+   desktop default. */
 .artifact-comment-edit svg,
 .artifact-comment-delete svg,
 .artifact-item-delete svg {
@@ -2590,6 +2627,54 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .artifact-vote.is-voted .vote-icon svg {
   color: #58a6ff;
 }
+
+/* fr-77 r17 Phase 1: optional Analysis + Implementation-Plan accordions.
+   <details> elements get muted summary chips that read as section
+   headers. Body indents slightly so it's visually grouped under its
+   header. Both default to closed (the user expands the one they
+   want). Items without either field render as before — no impact. */
+.artifact-item-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.artifact-item-section {
+  border-left: 2px solid rgba(56, 139, 253, .25);
+  background: rgba(56, 139, 253, .04);
+  border-radius: 0 4px 4px 0;
+}
+.artifact-item-section-summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted, #8b949e);
+  letter-spacing: 0.03em;
+  user-select: none;
+  list-style: none;
+}
+.artifact-item-section-summary::-webkit-details-marker { display: none; }
+.artifact-item-section-summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform .12s;
+  color: rgba(56, 139, 253, .7);
+}
+.artifact-item-section[open] > .artifact-item-section-summary::before {
+  transform: rotate(90deg);
+}
+.artifact-item-section[open] > .artifact-item-section-summary {
+  color: #58a6ff;
+}
+.artifact-item-section-body {
+  padding: 4px 12px 10px 18px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.artifact-item-section-body > :first-child { margin-top: 0; }
+.artifact-item-section-body > :last-child  { margin-bottom: 0; }
 .artifact-item-edited,
 .comment-edited {
   font-size: 11px;
