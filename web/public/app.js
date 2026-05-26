@@ -5947,6 +5947,11 @@ function bindChatUi() {
       state.chatHistoryIdx = null;
       state.chatHistoryDraft = null;
       input.value = '';
+      // bug: programmatic `input.value = ''` does NOT fire the `input`
+      // event the listener uses to rebuild #composer-chips. Without
+      // this explicit call, any @-mention chip rendered from the
+      // pre-send value lingers visually after the field clears.
+      _renderComposerChips();
       autoResize();
       // Lazily ask for desktop-notification permission on the user's
       // first chat send — Chrome blocks passive page-load requests,
@@ -6039,6 +6044,9 @@ function bindChatUi() {
       state.chatHistoryIdx = null;
       state.chatHistoryDraft = null;
       input.value = '';
+      // bug: programmatic clear → rebuild #composer-chips manually
+      // (`input.value = ''` doesn't fire the `input` event).
+      _renderComposerChips();
       autoResize();
       return;
     }
