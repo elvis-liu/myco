@@ -2,46 +2,27 @@
 
 Shared work surface for humans + autonomous agents on the same project.
 
-## Start
-
-1. Sign in at `https://myco.labxnow.ai` (invite-only · PAT, OAuth coming)
-2. **+ New session** → chat opens → type to steer the agent
-
-Spawn as many sessions as you want — each is an independent agent on the same workspace.
-
-## Roles
-
-| Role | Acquired by | Can do |
-|---|---|---|
-| **Owner** | Spawning | Everything |
-| **Admin** | `/admin <login>` | Everything except delete / grant admin |
-| **Guest** | Share link / non-allowlisted | `@mention`, file plan items, read-only inspect |
+**+ New session** in the sidebar → chat opens → type to steer the agent.
 
 ## Git — `/git <args>`  *(owner/admin)*
 
-Full pass-through to the `git` CLI in the session workspace.
+**Clone a repo to get started.** Every session is a fresh workspace —
+bring code in first. Full pass-through to the `git` CLI.
 
 ```
+/git clone https://github.com/owner/repo
 /git status
 /git log --oneline -10
 /git diff HEAD~3
 /git fetch origin
 /git commit -m "fix: bug X"
-/git clone https://github.com/owner/public-repo
 ```
 
-| | |
-|---|---|
-| **Cwd** | session workspace |
-| **Timeout / caps** | 60 s · 1 MB stdout · 16 KB stderr |
-| **Credentials** | `GIT_TERMINAL_PROMPT=0` — fails fast (no hang) |
-| **Quoting** | shlex-style: `"..."`, `'...'`, `\"`, `\\` |
-| **Private repos** | embed PAT in URL → `https://x-access-token:<PAT>@github.com/...` · OR `/setpat <token>` first |
-| **`--global` caveat** | mutates container `$HOME` → affects ALL sessions. Not blocked, but prefer project-scoped `git config` |
+Caps 60 s · 1 MB stdout · 16 KB stderr · `GIT_TERMINAL_PROMPT=0` (fails fast). Private repos: embed PAT in URL `https://x-access-token:<PAT>@github.com/...` or `/setpat <token>` first. `--global` mutates container `$HOME` (affects ALL sessions) — prefer project-scoped `git config`.
 
 ## Plan — `/td` `/fr` `/bug`
 
-Items live in `_myco_/plan.json` (git-tracked) → `git clone` = full onboarding. Humans + agents both contribute.
+Items live in `_myco_/plan.json` (git-tracked) → `git clone` = full onboarding.
 
 ```
 /td bump node in dockerfile
@@ -50,90 +31,49 @@ Items live in `_myco_/plan.json` (git-tracked) → `git clone` = full onboarding
 /bug! <text>                   ← agent rewrites into Problem/Expected/Actual
 ```
 
-Per-item: 👍 vote · 💬 comment · ✎ edit (owner/admin) · ▶ Run (Fix/Implement/Do) · Close/Reopen · 🗑 delete. Run → queue → agent works → `run-summary` comment posted back.
+Per-item: vote · comment · edit · ▶ Run (Fix/Implement/Do) · Close/Reopen · delete. Items with optional `analysis` / `implPlan` fields render collapsible Analysis / Implementation-plan accordions.
 
-**Optional structured sub-sections:** if a plan item carries `analysis` or `implPlan` string fields, they render as collapsible **Analysis** / **Implementation plan** accordions under the body (both default closed; click to expand).
+## Changed files (Plan footer)
 
-## Changed files — Plan view footer  *(fr-77)*
+Scroll past the plan items. Drag the top strip to resize.
 
-Scroll past the plan items in the Plan tab → "Changed files (N)" section. Drag the thin strip at the top to resize; double-click to reset.
+- **Mentions / Recent** rows — bug/fr/td tokens from diff + last 5 commit subjects
+- **+N −M chip** per file (lines added / removed)
+- **Click a row** — inline-expand the diff with per-language syntax highlight
+- **Click any `+` / context line** — per-line comment to the AI (Esc cancels)
+- **✓ Accept** = `git add <file>` · **✕ Reject** = revert tracked / DELETE untracked (confirms)
+- **Accept all / Reject all** — header bulk buttons
 
-| Affordance | What it does |
-|---|---|
-| **Mentions: bug-N fr-N td-N** | bug/fr/td tokens auto-extracted from the uncommitted diff text — see at a glance which plan items the current change touches |
-| **Recent: sha subject** | Last 5 git commit subjects (clickable mentions in each) — quick "what was the last activity" context |
-| **+N −M chip** | Lines added / removed per file (from `git diff --numstat HEAD`); `bin` badge for binary; nothing for mode-only changes |
-| **Click a row** | Inline-expand the unified diff with **per-language syntax highlight** (JS/Python/Go/etc. detected from extension). Click again to collapse |
-| **Click any `+` or context line in the diff** | Inline form appears below to send `[chat:reconsider#path:Lnnn] <comment>` to the agent. Esc dismisses (hint shown). |
-| **"Ask AI to reconsider"** | Bottom of each expanded diff — file-level comment textarea. Esc clears |
-| **✓ Accept / ✕ Reject per row** *(owner/admin)* | Accept = `git add <file>` (stages it; row gets green "accepted" pill + buttons grey out until Refresh). Reject = `git checkout HEAD --` for tracked, **delete** for untracked (confirmation prompt) |
-| **Accept all / Reject all** | Section header bulk buttons — same semantics, batched |
-| **Refresh ↻ in header** | Re-fetch git status + clear "accepted" markers |
-
-New / untracked files show their full contents rendered as additions (GitHub-PR-style "new file" view).
-
-## Chat history — `↑` / `↓`  *(fr-78)*
-
-Up/Down arrow keys at the start/end of the chat input cycle through previously submitted messages in the current session (bash-readline style). In-memory per page load; not persisted across reload.
-
-## Run queue
-
-| Command | Effect |
-|---|---|
-| `/queue fr-43 bug-21` | Add to queue (auto-dispatches if idle) |
-| `/qstatus` | Print current state (guest-allowed) |
-| `/qcancel <id>` | Remove entry; auto-advances if it was the running head |
-| `/qresume` | Unpause after auto-pause-on-failure |
-| `/qclear` | Drop every pending |
-
-Auto-pauses on failure so a stuck pattern doesn't cascade.
-
-## What's next — `/next`  *(or `/whatsnext`)*
-
-Ranked top-10 open items. Heuristic: voters × 3 · comments (cap 5) × 1 · Bug 2 / Feature 1 / Todo 0.5 · fresh < 7d +2 · stale > 90d −0.5 · last-run failed/aborted −1.5. + LLM rerank. Cached 2h. Append `force` to regenerate now.
-
-Each row shows score + layer + snippet + WHY it ranked there.
-
-## Files + editor — 📁
-
-Tree → click any text file. Owner/admin sees **✎ Edit** in the header.
-
-| | |
-|---|---|
-| **Editor** | CodeMirror 6 (highlight · line nums · search · fold · oneDark) |
-| **Save / Cancel** | Cmd/Ctrl+S · Esc |
-| **Conflict modal (409)** | ↻ Reload from disk · ⚠ Force overwrite · ✕ Cancel |
-
-Concurrent-safe via mtime check; edits never silently lost.
-
-## Chat
+## Chat + roles
 
 | | |
 |---|---|
 | Plain text | → the agent |
-| `@user` | discussion (not the agent) |
-| `@all` | broadcast ping |
+| `@user` / `@all` | discussion (not the agent) |
 | `/cmd` | slash command |
 | **Stop** (red ■) | interrupts in-flight turn |
 | **Permission modal** | Allow once / always / Deny |
+| **↑ / ↓** at input edge | recall previous messages (this session) |
 
-## Slash commands (full)
+Roles — **Owner** (spawner) · **Admin** (`/admin <login>`) · **Guest** (share link / non-allowlisted; `@mention` + file plan items only).
 
-**Guest-allowed**: `/help` · `/me` · `/whoami` · `/td` `/fr` `/bug` · `/task` `/tasks` `/skip` `/cancel` · `/allowlist` · `/qstatus` · `/whatsnext` `/next`
+## Run queue
 
-**Owner/admin**: `/admin` · `/git` · `/queue` `/qcancel` `/qclear` `/qresume` · `/btw` (side-channel) · `/feature` `/bug` (GitHub issue) · `/setpat <token>`
+`/queue fr-43 bug-21` adds + auto-dispatches if idle. `/qstatus` · `/qcancel <id>` · `/qclear` · `/qresume` after auto-pause-on-failure. `/next` ranks top-10 open items (LLM rerank, cached 2h).
 
-## Sharing
+## Files + editor
 
-Mint a share link from the session menu → read-only viewer attach. Sees live chat + tool calls + plan + files. Can `@mention` + file plan items. Can't drive the agent or edit files. Presence chips in the header show who's attached.
+Tree → click any text file. **✎ Edit** in the header (owner/admin) opens CodeMirror 6 with highlight / line nums / search / fold. Cmd/Ctrl+S to save · Esc to cancel. Mtime check prevents silent overwrites.
 
-## Cross-device + multi-session
+## Sharing · cross-device · mobile
 
-Phone ↔ laptop in seconds. Lossless reconnect after network blips (only the missed window streams back). Chat history persists indefinitely (100k cap per session). Spawn multiple sessions in the sidebar; switch with one tap.
+Mint a share link from the session menu → read-only viewer (sees live chat + tools + plan + files; can `@mention` + file plan items). Phone ↔ laptop in seconds; lossless reconnect after network blips. Mobile (≤900px): sidebar + chat are mutually exclusive overlays — back icon ☰ toggles.
 
-## Mobile (≤900px)
+## Slash commands (reference)
 
-Sidebar + chat are mutually exclusive (overlay). Back icon ☰ toggles. Re-tapping the same session card restores chat.
+**Guest**: `/help` · `/me` · `/whoami` · `/td` `/fr` `/bug` · `/task` `/skip` `/cancel` · `/allowlist` · `/qstatus` · `/whatsnext` `/next`
+
+**Owner/admin**: `/admin` · `/git` · `/queue` `/qcancel` `/qclear` `/qresume` · `/btw` · `/feature` `/bug` (GitHub issue) · `/setpat <token>`
 
 ## Troubleshooting
 
@@ -141,12 +81,7 @@ Sidebar + chat are mutually exclusive (overlay). Back icon ☰ toggles. Re-tappi
 |---|---|
 | `connecting…/reconnecting…` loop | Try incognito (clears HTTP/3 `alt-svc`) — WSS being stripped by firewall/VPN |
 | "Not invited yet" | Ask host to add your GitHub login to `allowed-github-users.txt` |
-| `/feature` "no token" | Sign out + in (refresh `repo` scope) OR `/setpat <token>` |
-| ✎ Edit hidden | Hard-refresh (cached `app.js`); confirm you're not in viewer mode |
-| Queue stalls | `/qcancel <id>` to drop the stuck head + auto-advance |
-| Chat input blocked (red ring) | Guest-restricted text — use `@mention` or a guest-allowed slash command |
-| `/git` returns "no such command" on prod | Pre-fr-54 deploy. Wait for the next `./scripts/deploy.sh` |
-
-## Reporting
-
-`/bug <description>` or `/fr <description>` → lands in `_myco_/plan.json` → ranked by `/next` → shipped via run-queue. Indefinite shared memory; new teammates inherit on `git clone`.
+| `/feature` "no token" | Sign out + in OR `/setpat <token>` |
+| ✎ Edit hidden | Hard-refresh; confirm not in viewer mode |
+| Queue stalls | `/qcancel <id>` |
+| Chat input red ring | Guest-restricted text — use `@mention` |
