@@ -50,7 +50,31 @@ Items live in `_myco_/plan.json` (git-tracked) → `git clone` = full onboarding
 /bug! <text>                   ← agent rewrites into Problem/Expected/Actual
 ```
 
-Per-item: 👍 vote · 💬 comment · ✎ edit (owner/admin) · ▶ Run (Fix/Implement/Do) · Close/Reopen. Run → queue → agent works → `run-summary` comment posted back.
+Per-item: 👍 vote · 💬 comment · ✎ edit (owner/admin) · ▶ Run (Fix/Implement/Do) · Close/Reopen · 🗑 delete. Run → queue → agent works → `run-summary` comment posted back.
+
+**Optional structured sub-sections:** if a plan item carries `analysis` or `implPlan` string fields, they render as collapsible **Analysis** / **Implementation plan** accordions under the body (both default closed; click to expand).
+
+## Changed files — Plan view footer  *(fr-77)*
+
+Scroll past the plan items in the Plan tab → "Changed files (N)" section. Drag the thin strip at the top to resize; double-click to reset.
+
+| Affordance | What it does |
+|---|---|
+| **Mentions: bug-N fr-N td-N** | bug/fr/td tokens auto-extracted from the uncommitted diff text — see at a glance which plan items the current change touches |
+| **Recent: sha subject** | Last 5 git commit subjects (clickable mentions in each) — quick "what was the last activity" context |
+| **+N −M chip** | Lines added / removed per file (from `git diff --numstat HEAD`); `bin` badge for binary; nothing for mode-only changes |
+| **Click a row** | Inline-expand the unified diff with **per-language syntax highlight** (JS/Python/Go/etc. detected from extension). Click again to collapse |
+| **Click any `+` or context line in the diff** | Inline form appears below to send `[chat:reconsider#path:Lnnn] <comment>` to the agent. Esc dismisses (hint shown). |
+| **"Ask AI to reconsider"** | Bottom of each expanded diff — file-level comment textarea. Esc clears |
+| **✓ Accept / ✕ Reject per row** *(owner/admin)* | Accept = `git add <file>` (stages it; row gets green "accepted" pill + buttons grey out until Refresh). Reject = `git checkout HEAD --` for tracked, **delete** for untracked (confirmation prompt) |
+| **Accept all / Reject all** | Section header bulk buttons — same semantics, batched |
+| **Refresh ↻ in header** | Re-fetch git status + clear "accepted" markers |
+
+New / untracked files show their full contents rendered as additions (GitHub-PR-style "new file" view).
+
+## Chat history — `↑` / `↓`  *(fr-78)*
+
+Up/Down arrow keys at the start/end of the chat input cycle through previously submitted messages in the current session (bash-readline style). In-memory per page load; not persisted across reload.
 
 ## Run queue
 
