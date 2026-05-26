@@ -1279,15 +1279,16 @@ test_new_session_readonly() {
   # Per-session memory: redirect the SDK auto-memory directory into the
   # session's own .claude/memory/ instead of the shared
   # $HOME/.claude/projects/<sanitized-cwd>/memory/. settingSources
-  # excludes 'user' so the global settings.json doesn't bleed across
-  # sessions; project + local stay so per-session .claude/settings*.json
-  # still drives per-project config.
+  # MUST include 'user' (3d75081 — proxy support: SDK picks up auth
+  # credentials from $HOME/.claude/settings.json for corporate
+  # networks behind HTTP_PROXY). project + local stay so per-session
+  # .claude/settings*.json still drives per-project config.
   grep -q "autoMemoryDirectory" server/src/agent-session.js \
     && pass "agent-session: per-session autoMemoryDirectory" \
     || fail "agent-session: autoMemoryDirectory not set"
-  grep -Pzoq "settingSources:\s*\['project',\s*'local'\]" server/src/agent-session.js \
-    && pass "agent-session: settingSources scoped to project+local" \
-    || fail "agent-session: settingSources still loading shared 'user' tier"
+  grep -Pzoq "settingSources:\s*\['project',\s*'local',\s*'user'\]" server/src/agent-session.js \
+    && pass "agent-session: settingSources = project+local+user (proxy auth)" \
+    || fail "agent-session: settingSources missing 'user' (needed for corporate-proxy auth credentials from \$HOME/.claude/settings.json)"
   # Memory migration: existing sessions whose legacy auto-memory lived
   # at ~/.claude/projects/<encoded-cwd>/memory/ get a one-shot copy
   # into <absCwd>/.claude/memory/ on the next ensureLiveSession spawn.
