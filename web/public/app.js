@@ -793,6 +793,27 @@ async function init() {
   connectLogWs();
   showBuildStamp();
   showUserStamp();
+  // fr-92: first-time users land on the manual so they know what's here
+  // before clicking around. Deferred until after the rest of init wires
+  // up so the modal opens over a populated UI (not an empty shell).
+  _maybeShowFirstTimeManual();
+}
+
+// fr-92: open the user manual modal on the first page load per browser
+// (tracked via localStorage `myco_manual_seen`). Skips:
+//   • viewer-mode visitors (share-link landing) — they're here for the
+//     host's content, not the onboarding manual
+//   • already-seen users (flag set)
+//   • localStorage failures (private mode etc.) — fail silently rather
+//     than auto-opening every page load
+// Small setTimeout so the modal doesn't fight with the first paint.
+function _maybeShowFirstTimeManual() {
+  if (state.viewerMode) return;
+  let seen = false;
+  try { seen = !!localStorage.getItem('myco_manual_seen'); } catch { return; }
+  if (seen) return;
+  try { localStorage.setItem('myco_manual_seen', '1'); } catch { /* still open, just no flag */ }
+  setTimeout(() => { try { openManualModal(); } catch {} }, 250);
 }
 
 // /build.txt is written by the Dockerfile (`date -u +%Y-%m-%dT%H:%M:%SZ`).
