@@ -46,14 +46,30 @@ console.log('── fr-55: lean-ctx MCP integration ──');
 // Dockerfile: install lean-ctx + multi-arch Caddy
 // ──────────────────────────────────────────────────────────────────────
 
-t('Dockerfile installs lean-ctx-bin globally', () => {
-  assert.ok(/npm\s+install\s+-g\s+lean-ctx-bin/.test(DOCKERFILE),
-    'Dockerfile must `npm install -g lean-ctx-bin` so the binary ships in the image');
+t('Dockerfile installs lean-ctx from upstream release tarball', () => {
+  // Proxy-fix commit 6ab2ea6 switched the install from `npm install -g
+  // lean-ctx-bin` to a direct `curl` of the release tarball — npm
+  // doesn't reliably honor the corporate proxy / self-signed cert
+  // environment some users build in. The contract that matters to
+  // downstream callers is unchanged: `lean-ctx` resolves on PATH at
+  // runtime. This test just pins that the install step is present in
+  // some form so a future Dockerfile refactor doesn't silently drop
+  // it. Mechanism is intentionally loose — npm OR curl is fine, both
+  // ship a working binary.
+  const hasNpm  = /npm\s+install\s+-g\s+lean-ctx-bin/.test(DOCKERFILE);
+  const hasCurl = /curl\s+[^\n]*lean-ctx[^\n]*\.tar\.gz/.test(DOCKERFILE);
+  assert.ok(hasNpm || hasCurl,
+    'Dockerfile must install lean-ctx (either `npm install -g lean-ctx-bin` or `curl … lean-ctx-…tar.gz`)');
 });
 
 t('Dockerfile symlinks lean-ctx into /usr/local/bin', () => {
-  assert.ok(/ln\s+-sf[^\n]*lean-ctx-bin[^\n]*\/usr\/local\/bin\/lean-ctx/.test(DOCKERFILE),
-    'Dockerfile must symlink the npm-installed binary into /usr/local/bin so the SDK\'s `command: "lean-ctx"` resolves on PATH');
+  // The symlink target is what the SDK\'s `command: "lean-ctx"`
+  // resolves to. Mechanism varies (npm path vs /usr/local/lib path)
+  // but the destination is invariant.
+  const npmSym  = /ln\s+-sf[^\n]*lean-ctx-bin[^\n]*\/usr\/local\/bin\/lean-ctx/.test(DOCKERFILE);
+  const libSym  = /ln\s+-sf[^\n]*\/usr\/local\/lib\/lean-ctx\/lean-ctx[^\n]*\/usr\/local\/bin\/lean-ctx/.test(DOCKERFILE);
+  assert.ok(npmSym || libSym,
+    'Dockerfile must symlink lean-ctx into /usr/local/bin so the SDK\'s `command: "lean-ctx"` resolves on PATH');
 });
 
 t('Dockerfile smoke-tests lean-ctx after install (catches arch mismatch at build time)', () => {
