@@ -16,6 +16,24 @@ const sessionsMod = require('./sessions');
 
 const ASSISTANT_USER = 'claude';
 
+// fr-80: cross-context "@<target>" routing for /fr, /bug, /td. When a
+// user types `/fr @myco add dark mode` from any session, the slash-
+// command instead files a GitHub issue against the mapped repo using
+// the user's PAT (per-repo token preferred, user-level GitHub OAuth
+// as fallback). Targets are intentionally a small fixed registry —
+// each target needs deliberate review of who can file what where.
+//
+// Per-layer labels mirror the existing `/feature` mapping:
+//   Feature → enhancement   Bug → bug   Todo → todo
+const REMOTE_TARGETS = {
+  myco: { provider: 'github', owner: 'kkrazy', repo: 'myco' },
+};
+const REMOTE_LABEL_BY_LAYER = {
+  Feature: ['enhancement'],
+  Bug:     ['bug'],
+  Todo:    ['todo'],
+};
+
 // Registered commands. Aliases share a handler.
 const COMMANDS = [
   {
@@ -32,20 +50,20 @@ const COMMANDS = [
   // whole list).
   {
     names: ['fr'],
-    summary: 'Add a feature-request item to this session\'s Plan',
-    usage: '/fr <description>',
+    summary: 'Add a feature-request item to this session\'s Plan (or `@<target>` for a remote repo)',
+    usage: '/fr <description>  OR  /fr @<target> <description>',
     handler: (ctx) => addPlanItem(ctx, 'Feature'),
   },
   {
     names: ['td', 'todo'],
-    summary: 'Add a todo item to this session\'s Plan',
-    usage: '/td <description>',
+    summary: 'Add a todo item to this session\'s Plan (or `@<target>` for a remote repo)',
+    usage: '/td <description>  OR  /td @<target> <description>',
     handler: (ctx) => addPlanItem(ctx, 'Todo'),
   },
   {
     names: ['bug'],
-    summary: 'Add a bug-report item to this session\'s Plan',
-    usage: '/bug <description>',
+    summary: 'Add a bug-report item to this session\'s Plan (or `@<target>` for a remote repo)',
+    usage: '/bug <description>  OR  /bug @<target> <description>',
     handler: (ctx) => addPlanItem(ctx, 'Bug'),
   },
   // Task-list intervention. The handler forwards a natural-language
@@ -292,6 +310,29 @@ function addPlanItem(ctx, layer) {
       ctx.reply(`Usage: /<cmd>! <description> — adds a ${layer} item and asks claude to rewrite it into software-issue format.`);
       return;
     }
+  }
+  // fr-80: @<target> prefix routes to a remote GitHub repo via the
+  // user's PAT instead of appending to this session's local plan.
+  // Match `@<target>` as the very first token after the optional `!`.
+  // Whitespace AFTER the target is the boundary; trailing text is the
+  // issue body. Unknown targets bounce with a usage hint listing the
+  // known ones so the user knows what's available.
+  const targetMatch = text.match(/^@([a-z0-9_-]+)(\s+|$)/i);
+  if (targetMatch) {
+    const targetName = targetMatch[1].toLowerCase();
+    const remainder = text.slice(targetMatch[0].length).trim();
+    if (!REMOTE_TARGETS[targetName]) {
+      const known = Object.keys(REMOTE_TARGETS).map((n) => '`@' + n + '`').join(', ') || '(none registered)';
+      ctx.reply(`(unknown @target \`@${targetName}\`. Known targets: ${known}.)`);
+      return;
+    }
+    if (!remainder) {
+      ctx.reply(`Usage: /${layer === 'Feature' ? 'fr' : layer === 'Bug' ? 'bug' : 'td'} @${targetName} <description>`);
+      return;
+    }
+    // Route to remote issue + return — does NOT append a local plan
+    // item (the user wanted this to land on the OTHER repo).
+    return handleRemoteIssue(ctx, layer, targetName, remainder);
   }
   const wordCount = text.split(/\s+/).filter(Boolean).length;
   const shouldRewrite = forceRewrite || wordCount > PLAN_ITEM_REWRITE_WORD_THRESHOLD;
@@ -822,6 +863,54 @@ function handleTaskSkip(ctx) {
     return;
   }
   ctx.session.write(`Please dismiss internal task #${arg} via TaskUpdate({ taskId, status: 'deleted' }) and reply with one line confirming.`);
+}
+
+// fr-80: file an issue on a registered REMOTE_TARGETS repo using the
+// user's stored token (per-repo PAT preferred, GitHub OAuth fallback).
+// Distinct from handleIssue (which uses the session's git remote) —
+// here the target is a fixed repo unrelated to the session's cwd, so
+// no `git remote get-url` is run.
+async function handleRemoteIssue(ctx, layer, targetName, description) {
+  const target = REMOTE_TARGETS[targetName];
+  if (!target) {                 // defensive — caller already validated
+    ctx.reply(`(unknown @target \`@${targetName}\`)`);
+    return;
+  }
+  const labels = REMOTE_LABEL_BY_LAYER[layer] || [];
+  const cmdName = layer === 'Feature' ? 'fr' : layer === 'Bug' ? 'bug' : 'td';
+  // Title = first sentence (or up to 80 chars) so the GitHub issue
+  // list is scannable. Full text always lives in the body.
+  const firstLine = String(description).split(/[\r\n]/, 1)[0].trim();
+  const title = firstLine.length > 80
+    ? firstLine.slice(0, 77) + '…'
+    : firstLine;
+  const ts = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const body = [
+    description,
+    '',
+    '---',
+    `Filed by **@${ctx.user}** via [myco](https://myco.labxnow.ai/) (\`/${cmdName} @${targetName}\`) on ${ts} UTC.`,
+  ].join('\n');
+  const token = gitHosts.getToken(ctx.user, target.provider, target.owner, target.repo);
+  if (!token) {
+    ctx.reply(
+      `(no ${target.provider === 'github' ? 'GitHub' : 'Gitee'} token on file for @${ctx.user} for ${target.owner}/${target.repo}. ` +
+      `${target.provider === 'github'
+          ? 'Sign in via GitHub OAuth to get a user-level token, or'
+          : 'Generate a PAT at https://gitee.com/profile/personal_access_tokens and'} ` +
+      `run \`/setpat <token>\` from a session whose origin points at that repo.)`
+    );
+    return;
+  }
+  const result = await gitHosts.createIssue({
+    provider: target.provider, token, owner: target.owner, repo: target.repo, title, body, labels,
+  });
+  if (result.error) {
+    const label = target.provider === 'gitee' ? 'Gitee' : 'GitHub';
+    ctx.reply(`(${label} error: ${result.error}${result.status ? ` [HTTP ${result.status}]` : ''})`);
+    return;
+  }
+  ctx.reply(`✓ Filed ${layer.toLowerCase()} **#${result.number}** on ${target.owner}/${target.repo}: ${result.url}`);
 }
 
 async function handleIssue(ctx, { kind, labels }) {

@@ -29,6 +29,7 @@ Items live in `_myco_/plan.json` (git-tracked) → `git clone` = full onboarding
 /fr add dark-mode toggle
 /bug load-older loops past page 5
 /bug! <text>                   ← agent rewrites into Problem/Expected/Actual
+/fr @myco add dark-mode toggle ← files an issue on github.com/kkrazy/myco (uses your PAT)
 ```
 
 Per-item: vote · comment · edit · ▶ Run (Fix/Implement/Do) · Close/Reopen · delete. Items with optional `analysis` / `implPlan` fields render collapsible Analysis / Implementation-plan accordions.
