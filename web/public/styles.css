@@ -3101,10 +3101,13 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   min-width: 120px;
   box-sizing: border-box;
   display: none;
-  flex-direction: row;
-  align-items: center;
+  /* r5: column-flex — preview on top spans the full popover width,
+     input row (input + send + close) sits below in its own flex-row
+     container. Previous row-flex constrained the preview to ~100 px. */
+  flex-direction: column;
+  align-items: stretch;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 8px 10px;
   background: rgba(28, 30, 34, .98);
   border: 1px solid rgba(80, 120, 200, .45);
   border-radius: 8px;
@@ -3113,14 +3116,24 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   -webkit-backdrop-filter: blur(8px);
 }
 #chat-clarify-popover .chat-clarify-preview {
-  flex: 0 0 auto;
-  max-width: 100px;
-  font-size: 11px;
+  /* r5: full popover width — the prior narrow cap only fit
+     ~10-15 chars of the selected text. Now spans the row and
+     ellipsis kicks in only at the popover width (~chat-window
+     width). */
+  font-size: 12px;
   color: var(--muted, #8b949e);
   font-style: italic;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* r5: input row holds the textbox + send + close on one line.
+   Input expands; buttons stay fixed-size on the right. */
+.chat-clarify-input-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
 }
 #chat-clarify-popover #chat-clarify-input {
   flex: 1 1 auto;

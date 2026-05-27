@@ -290,6 +290,94 @@ t('app.js: r4 — close removes the scroll + resize listeners (no leak when × c
     '_closeClarifyPopover must removeEventListener("resize", ...)');
 });
 
+t('app.js: r5 — popover has a dedicated input row (input + send + close in one flex row)', () => {
+  // User: "move the -> and x to the same line as the input field".
+  // Pin the markup shape so the input row is a single container that
+  // CSS can flex-row, with the input expanding and the two buttons
+  // staying fixed-size on the right.
+  assert.ok(/chat-clarify-input-row/.test(APP),
+    'popover markup must include a .chat-clarify-input-row wrapper around the input + send + close buttons');
+});
+
+t('css: r5 — popover stacks preview ON TOP, input row BELOW (always column-flex)', () => {
+  // Was: row-flex with preview / input / send / close as siblings.
+  // Now: column-flex always — preview full-width on top, input row
+  // (input + send + close) below.
+  const idx = CSS.search(/#chat-clarify-popover\s*\{/);
+  assert.ok(idx > -1, '#chat-clarify-popover rule must exist');
+  const win = CSS.slice(idx, idx + 1500);
+  assert.ok(/flex-direction:\s*column/.test(win),
+    '#chat-clarify-popover must be flex-direction:column (preview on top, input row below)');
+  // Input row itself must be row-flex so the buttons sit beside the input.
+  assert.ok(/\.chat-clarify-input-row\s*\{[\s\S]{0,400}flex-direction:\s*row/.test(CSS) ||
+            /\.chat-clarify-input-row\s*\{[\s\S]{0,400}display:\s*flex/.test(CSS),
+    '.chat-clarify-input-row must be flex (default row) so input + send + close sit on one line');
+});
+
+t('css: r5 — preview is full-width (no narrow max-width cap)', () => {
+  // Was: max-width 100px → preview only showed ~10-15 chars before
+  // ellipsis. User: "the title should occupy the entire space to
+  // show as much of the selected text as possible, right now it
+  // shows a very short text".
+  const previewIdx = CSS.search(/\.chat-clarify-preview\s*\{/);
+  assert.ok(previewIdx > -1, '.chat-clarify-preview rule must exist');
+  const win = CSS.slice(previewIdx, previewIdx + 500);
+  assert.ok(!/max-width:\s*100px/.test(win),
+    'preview must NOT cap at 100px (was the bug — only ~15 chars visible)');
+});
+
+t('app.js: r5 — preview truncation bumped to ≥ 200 chars (was 60)', () => {
+  // The JS truncate cap was 60 chars; user wants more. Match anything
+  // >= 200 (no hard upper bound) so the preview shows ~one or two
+  // sentences.
+  const m = APP.match(/selectedText\.length\s*>\s*(\d+)\s*\?\s*selectedText\.slice\(\s*0\s*,\s*(\d+)/);
+  assert.ok(m, 'truncate logic must be findable');
+  const lengthCap = parseInt(m[1], 10);
+  assert.ok(lengthCap >= 200,
+    `preview truncate length cap must be ≥ 200 (got ${lengthCap}) so a one-or-two-sentence selection fits without ellipsis`);
+});
+
+t('app.js: r5 — anchor out of chat-messages viewport hides popover (re-shows on scroll back)', () => {
+  // User: "the popover should stay even if it's scrolled out of view,
+  // it should come back when I scroll back to the same location".
+  // _clarifyReposition must compare the anchor's rect against the
+  // chat-messages container's rect and toggle visibility — NOT close
+  // the popover. State stays alive; only the visibility flips.
+  const idx = APP.search(/function\s+_clarifyReposition\s*\(\s*\)/);
+  assert.ok(idx > -1, '_clarifyReposition must exist');
+  const win = APP.slice(idx, idx + 2500);
+  // Must compute the chat-messages bbox AND compare it to the anchor bbox.
+  // (chatRect is already read for left/width; now also used for visibility.)
+  assert.ok(/visibility/.test(win),
+    'reposition must toggle popover.style.visibility based on anchor in/out of chat viewport');
+  // The compare uses anchor bottom > chat top AND anchor top < chat bottom
+  // (some form of intersection test). Loose-anchor: just look for both
+  // sides of the comparison together.
+  assert.ok(/(chatRect|chatList|chatBox)\.(top|bottom)/.test(win),
+    'must read chat-messages bbox top/bottom for the visibility check');
+});
+
+t('app.js: r5 — no auto-close on outside click (popover only closes on × / Esc)', () => {
+  // User: "clicking on the chat composer shouldn't dissolve the
+  // popover either". Pattern from prior rounds (scroll-persistent,
+  // viewport-persistent): the popover is persistent state, only
+  // explicit dismissal closes it. The doc-level mousedown handler
+  // that closed on outside-click is the wrong default for this UX.
+  // Anchor on the fr-85 region so we don't false-positive on
+  // unrelated document mousedown handlers in app.js.
+  const startIdx = APP.search(/fr-85:\s*inline clarification popovers/i);
+  assert.ok(startIdx > -1, 'fr-85 region marker comment must exist');
+  const after = APP.slice(startIdx);
+  const endRel = after.search(/\n\/\/\s*── /);
+  const region = endRel > -1 ? after.slice(0, endRel) : after.slice(0, 20000);
+  // Negative-guard: no document-level mousedown handler that calls
+  // _closeClarifyPopover. (Esc keydown + × click stay.)
+  assert.ok(
+    !/document\.addEventListener\(\s*['"]mousedown['"][\s\S]{0,800}_closeClarifyPopover/.test(region),
+    'fr-85 region must NOT close the popover on outside-click — only × button and Esc dismiss'
+  );
+});
+
 t('app.js: popover closes on Escape', () => {
   const idx = APP.search(/function\s+_closeClarifyPopover\s*\(\s*\)/);
   assert.ok(idx > -1, '_closeClarifyPopover must be defined');

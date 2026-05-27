@@ -3358,13 +3358,24 @@ function _clarifyReposition() {
   const chatList = document.getElementById('chat-messages');
   const chatRect = chatList && chatList.getBoundingClientRect
     ? chatList.getBoundingClientRect()
-    : { left: 0, width: window.innerWidth };
+    : { left: 0, top: 0, width: window.innerWidth, bottom: window.innerHeight };
   const left  = chatRect.left + window.scrollX;
   const width = Math.max(120, chatRect.width);
   const top   = rect.bottom + window.scrollY + 8;
   pop.style.left  = left  + 'px';
   pop.style.top   = top   + 'px';
   pop.style.width = width + 'px';
+  // r5: keep the popover STATE alive while the anchor scrolls out of
+  // the chat viewport, but toggle visibility so it doesn't float
+  // outside the chat area. When the user scrolls back to the same
+  // location, the anchor re-enters the chat viewport → visibility
+  // flips to "visible" → popover reappears at the anchor without
+  // requiring a fresh open. Display stays 'flex' so listeners +
+  // pending clarify-reply matching keep working.
+  // Intersection test: anchor is "in view" iff any part of its rect
+  // overlaps the chat-messages viewport rect vertically.
+  const anchorInView = rect.bottom > chatRect.top && rect.top < chatRect.bottom;
+  pop.style.visibility = anchorInView ? 'visible' : 'hidden';
 }
 
 function _clarifySelectionInClaudeBubble() {
@@ -3418,11 +3429,17 @@ function _openClarifyPopover() {
     // role="dialog" so screen readers announce it; aria-label spells out intent.
     pop.setAttribute('role', 'dialog');
     pop.setAttribute('aria-label', 'Ask claude to clarify the selected text');
+    // r5: two-row layout — preview spans the full popover width on
+    // top, input + send + close share a row below. Preview no longer
+    // truncated by a narrow CSS max-width; ellipsis kicks in only at
+    // the full chat-window width.
     pop.innerHTML = `
       <div class="chat-clarify-preview" title="Selected text"></div>
-      <input id="chat-clarify-input" type="text" placeholder="Ask about this…" autocomplete="off" />
-      <button id="chat-clarify-send" type="button" title="Send (Enter)" aria-label="Send">→</button>
-      <button id="chat-clarify-close" type="button" title="Cancel (Esc)" aria-label="Cancel">×</button>
+      <div class="chat-clarify-input-row">
+        <input id="chat-clarify-input" type="text" placeholder="Ask about this…" autocomplete="off" />
+        <button id="chat-clarify-send" type="button" title="Send (Enter)" aria-label="Send">→</button>
+        <button id="chat-clarify-close" type="button" title="Cancel (Esc)" aria-label="Cancel">×</button>
+      </div>
     `;
     document.body.appendChild(pop);
     pop.querySelector('#chat-clarify-send').addEventListener('click', () => _sendClarify());
@@ -3432,11 +3449,14 @@ function _openClarifyPopover() {
       else if (e.key === 'Escape') { e.preventDefault(); _closeClarifyPopover(); }
     });
   }
-  // Preview text — show ≤ 60 chars of the selection so the user
-  // knows which span they're clarifying.
+  // Preview text — show ≤ 240 chars of the selection (r5: bumped
+  // from 60 so a one-or-two-sentence selection fits without
+  // ellipsis). The CSS rule also lets the preview span the full
+  // popover width with a white-space:nowrap + ellipsis fallback for
+  // truly long selections.
   const preview = pop.querySelector('.chat-clarify-preview');
   if (preview) {
-    const trimmed = selectedText.length > 60 ? selectedText.slice(0, 57) + '…' : selectedText;
+    const trimmed = selectedText.length > 240 ? selectedText.slice(0, 237) + '…' : selectedText;
     preview.textContent = `Clarify: "${trimmed}"`;
   }
   // r4: fresh open = clear any reply from a prior popover use +
@@ -3637,15 +3657,11 @@ function _setupChatClarify() {
       else _closeClarifyPopover();
     }, 0);
   });
-  // Click outside popover (and outside chat-messages) closes it.
-  document.addEventListener('mousedown', (e) => {
-    const pop = document.getElementById('chat-clarify-popover');
-    if (!pop || pop.style.display !== 'flex') return;
-    if (pop.contains(e.target)) return;
-    // Allow clicks inside chat-messages — user might be selecting more.
-    if (list.contains(e.target)) return;
-    _closeClarifyPopover();
-  });
+  // Persistent popover (r5): no auto-close on outside click. The user
+  // explicitly asked for the popover to survive scrolling, viewport
+  // exit, and chat-composer clicks — anything that isn't the × button
+  // or the Escape key. The only dismissals are the close button (wired
+  // in _openClarifyPopover) and the doc-level Escape handler below.
   // Escape closes anywhere (input handler also has Esc — this is the
   // doc-level catch for when focus isn't in the input yet).
   document.addEventListener('keydown', (e) => {

@@ -3426,7 +3426,142 @@
         "originalText": "add a switch account which uses different PAT to login, the PAT could be coming from different repo such as github , gitee or git compatible repos.",
         "rewritten": true
       }
+    },
+    {
+      "id": "fr-83",
+      "text": "**Problem:** When the sidebar is minimized, the \"back to home\" icon overlaps with the file explorer \"<\" icon.\n**Expected:** \"back to home\" icon sits in a location that doesn't collide with the file explorer \"<\" icon in the minimized sidebar state.\n**Actual:** The two icons render on top of each other, making both hard to target.\n**Context:** Only occurs in the minimized sidebar state.",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-26T07:56:29.402Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "a8568dcb2394",
+          "user": "kkrazy",
+          "text": "also on desktop there is space on the top, the space is needed for mobile but not for desktop version. Also the buttons for edit/save/cancel is of different style as the top right plan/file/arch/test icons",
+          "ts": "2026-05-26T08:18:54.544Z"
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "when the sidebar is minimized, the \"back to home\" icon overlap with the file explorer \"<\" icon, find a better place for the \"back to home\" icon",
+        "rewritten": true
+      }
+    },
+    {
+      "id": "fr-84",
+      "text": "Add embedded diagram drawing tool launched from chat field icon",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-27T03:25:38.429Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "e3867fd70b2b",
+          "user": "kkrazy",
+          "text": "the diagram drawing should be as light as possible and runs together with myco",
+          "ts": "2026-05-27T03:26:31.941Z"
+        },
+        {
+          "id": "7bc5ed44286f",
+          "user": "claude",
+          "text": "✓ success · 955.7s · $14.3623 · 56↓/40705↑\n\n**fr-84 shipped end-to-end.**\n\nTo verify on opti.labxnow.ai (hard-refresh to bust cache):\n1. Click the new **Draw** button between Speak and Send in the chat composer\n2. Modal opens with 5 tools (pen / rect / ellipse / line / text), 4 colors, 3 stroke widths\n3. Draw something → click **Insert** (or Ctrl/Cmd+Enter)\n4. Modal closes, `![diagram](/sessions/<id>/diagrams/...svg)` appears in the chat input\n5. Hit Send — the diagram renders inline in chat for every attached viewer\n\n**Highlights:**\n- **Zero new vendor weight** — no Excalidraw, no tldraw, no fabric, no paper, no konva. Pure browser-native SVG + mouse/touch events. The whole engine is ~250 lines of vanilla JS.\n- **All shapes are real SVG elements** on a `<g>` layer, so undo just pops the last child and save just serializes the li…",
+          "ts": "2026-05-27T03:42:39.301Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-27T03:26:41.502Z"
+          }
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "add a small embedded diagram drawing capability which can be brought up by an icon on the chat field, the result can be send to chat as input context",
+        "rewritten": true
+      },
+      "description": "**Problem:** Users have no way to sketch a quick diagram inline and feed it to the chat as context.\n**Expected:** An icon on the chat field opens a small embedded diagram drawing canvas; the finished diagram can be sent to chat as input context.\n**Actual:** No drawing affordance exists on the chat field; diagrams must be created externally and attached as images.",
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-27T03:42:39.301Z",
+          "startedAt": "2026-05-27T03:26:41.502Z",
+          "summary": "955.7s · 56→40705 tok",
+          "result": "**fr-84 shipped end-to-end.**\n\nTo verify on opti.labxnow.ai (hard-refresh to bust cache):\n1. Click the new **Draw** button between Speak and Send in the chat composer\n2. Modal opens with 5 tools (pen / rect / ellipse / line / text), 4 colors, 3 stroke widths\n3. Draw something → click **Insert** (or Ctrl/Cmd+Enter)\n4. Modal closes, `![diagram](/sessions/<id>/diagrams/...svg)` appears in the chat input\n5. Hit Send — the diagram renders inline in chat for every attached viewer\n\n**Highlights:**\n- **Zero new vendor weight** — no Excalidraw, no tldraw, no fabric, no paper, no konva. Pure browser-native SVG + mouse/touch events. The whole engine is ~250 lines of vanilla JS.\n- **All shapes are real SVG elements** on a `<g>` layer, so undo just pops the last child and save just serializes the live DOM with `XMLSerializer` — no rasterization, no canvas-to-PNG.\n- **Storage**: `_myco_/diagrams/<ts>-<hex>.svg` — travels with the repo on commit (matches the shared-project-memory rule).\n- **Server**: POST owner-only with strict SVG validation (start `<svg>`, end `</svg>`, no `<script>`, ≤ 512 KB). GET viewer-readable with strict filename whitelist (blocks path traversal) and `Content-Type: image/svg+xml`.\n- **Keyboard**: Esc closes, Ctrl/Cmd+Z undoes, Ctrl/Cmd+Enter inserts.\n- **Mobile**: `touch-action: none` on the canvas so dragging doesn't accidentally pan the page.\n- **Tests**: `fr-84-diagram-tool.test.js` — 12 cases including a \"no heavy diagramming lib imports\" guard so the \"as light as possible\" constraint can't silently regress.\n- **v0.0.4 rolled forward** to `9b37e97` (annotated SHA `befdb80`)."
+        }
+      ]
+    },
+    {
+      "id": "fr-85",
+      "text": "Inline clarification popovers on highlighted spans of a Claude response",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-27T07:42:32.471Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "ddeea0ab89f7",
+          "user": "claude",
+          "text": "✓ success · 654.4s · $70.7163 · 34↓/23241↑\n\n**fr-85 landed on `main` (`9e86679`).** No deploy per the rule.\n\nSummary:\n- **Trigger:** select text inside any claude bubble (`.chat-msg.from-claude .chat-text`) — popover anchored below the highlight. Cross-bubble drags, user messages, agent cards, and menus are all skipped.\n- **Popover:** small dark-glass floating dialog (360 px wide) with a preview of the selected text + single-line input + Send arrow + ✕. Esc closes. Click outside closes.\n- **Submit:** wraps the selected range in `<span class=\"chat-clarify-anchor\">` (dashed bottom border + blue tint) so you can see what got clarified. Injects `[clarify: \"<selected>\"] <your question>` into the composer and fires the form submit — message ships through the normal chat path (guest gates, history push, claude wakeup all preserved).\n- *…",
+          "ts": "2026-05-27T07:54:20.634Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-27T07:43:26.086Z"
+          }
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "**Problem:** Users can't ask clarifying questions about specific parts of a Claude response without losing context by scrolling away or starting a new turn.\n**Expected:** Highlight any span of a Claude response, ask a clarification question in place, and render the answer in a floating div directly below the highlighted content.\n**Actual:** No inline clarification affordance exists; follow-ups require a new message in the main thread, causing context switching. it should be almost like a /btw question with inherited context from the highlighted question, the interaction from this question shouldn't pollute the main chat window",
+        "rewritten": true
+      },
+      "description": "**Problem:** Users can't ask clarifying questions about specific parts of a Claude response without losing context by scrolling away or starting a new turn.\n**Expected:** Highlight any span of a Claude response, ask a clarification question in place, and render the answer in a floating div directly below the highlighted content. Behaves like a `/btw` question — inherits context from the highlighted span but does not pollute the main chat thread.\n**Actual:** No inline clarification affordance exists; follow-ups require a new message in the main thread, forcing context switching and polluting the primary conversation.",
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-27T07:54:20.634Z",
+          "startedAt": "2026-05-27T07:43:26.086Z",
+          "summary": "654.4s · 34→23241 tok",
+          "result": "**fr-85 landed on `main` (`9e86679`).** No deploy per the rule.\n\nSummary:\n- **Trigger:** select text inside any claude bubble (`.chat-msg.from-claude .chat-text`) — popover anchored below the highlight. Cross-bubble drags, user messages, agent cards, and menus are all skipped.\n- **Popover:** small dark-glass floating dialog (360 px wide) with a preview of the selected text + single-line input + Send arrow + ✕. Esc closes. Click outside closes.\n- **Submit:** wraps the selected range in `<span class=\"chat-clarify-anchor\">` (dashed bottom border + blue tint) so you can see what got clarified. Injects `[clarify: \"<selected>\"] <your question>` into the composer and fires the form submit — message ships through the normal chat path (guest gates, history push, claude wakeup all preserved).\n- **Response:** lands as a regular claude reply in chat (the `[clarify: \"...\"]` prefix lets claude recognize the intent and quote-anchor its answer to the original phrase).\n- **Anchor marker:** ephemeral — survives until page reload, then gone (matching the no-new-persistence path you picked when we scoped).\n\nTests: 8 new cases (`fr-85-clarify-popover.test.js`). Sweep 99/99 green.\n\nCache busters: styles.css v276→v277, app.js v243→v244. Say \"deploy\" when you want it shipped."
+        }
+      ]
+    },
+    {
+      "id": "bug-36",
+      "text": "'Build' button only sends title, omits description and comments",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-27T08:35:55.878Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "afeba32218ee",
+          "user": "kkrazy",
+          "text": "it should cover the 'fix', and 'run' buttons",
+          "ts": "2026-05-27T08:37:01.988Z"
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the 'build' button doesn't send the full content including the description and the comments, it only send the title",
+        "rewritten": true
+      },
+      "description": "**Problem:** Clicking 'Build' submits an incomplete payload, losing the description and comments.\n**Expected:** 'Build' sends the full content — title, description, and comments.\n**Actual:** Only the title is sent; description and comments are dropped."
     }
   ],
-  "updatedAt": "2026-05-26T02:08:25.110Z"
+  "updatedAt": "2026-05-27T08:36:02.689Z"
 }
