@@ -3526,10 +3526,14 @@
           "ts": "2026-05-27T23:27:09.079Z"
         },
         {
-          "id": "fr85r7-479ebb8afa4a",
+          "id": "4e642fc840ce",
           "user": "claude",
-          "text": "✓ r7: clarify branch now wraps question with brevity nudge (1-3 sentences). server/src/attach.js handleChatMessage. Test: test/fr-85-r4-clarify-server-routing.test.js r7 guard. 9/9 server-routing + 27/27 popover + 101/101 sweep green.",
-          "ts": "2026-05-27T23:33:21.388Z"
+          "text": "✓ success · 236.0s · $1.9259 · 18↓/7168↑\n\n**fr-85 r7 landed** on `main` (`e180099`). No deploy per rule.\n\nSummary:\n- `server/src/attach.js` clarify branch wraps `message.text` → `[clarify — please answer concisely in 1-3 short sentences] <user-text>`. LLM-facing only; user never sees it (clarify rows filtered from chat, popover preview shows selected text not question).\n- New test guard `test/fr-85-r4-clarify-server-routing.test.js` r7 — red pre-fix, green after.\n- 9/9 server-routing + 27/27 popover + **101/101** sweep green.\n- fr-85 closeout comment appended in `_myco_/plan.json`.\n\nSay **\"deploy\"** to ship.",
+          "ts": "2026-05-27T23:33:46.511Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-27T23:29:50.365Z"
+          }
         }
       ],
       "meta": {
@@ -3545,6 +3549,13 @@
           "startedAt": "2026-05-27T07:43:26.086Z",
           "summary": "654.4s · 34→23241 tok",
           "result": "**fr-85 landed on `main` (`9e86679`).** No deploy per the rule.\n\nSummary:\n- **Trigger:** select text inside any claude bubble (`.chat-msg.from-claude .chat-text`) — popover anchored below the highlight. Cross-bubble drags, user messages, agent cards, and menus are all skipped.\n- **Popover:** small dark-glass floating dialog (360 px wide) with a preview of the selected text + single-line input + Send arrow + ✕. Esc closes. Click outside closes.\n- **Submit:** wraps the selected range in `<span class=\"chat-clarify-anchor\">` (dashed bottom border + blue tint) so you can see what got clarified. Injects `[clarify: \"<selected>\"] <your question>` into the composer and fires the form submit — message ships through the normal chat path (guest gates, history push, claude wakeup all preserved).\n- **Response:** lands as a regular claude reply in chat (the `[clarify: \"...\"]` prefix lets claude recognize the intent and quote-anchor its answer to the original phrase).\n- **Anchor marker:** ephemeral — survives until page reload, then gone (matching the no-new-persistence path you picked when we scoped).\n\nTests: 8 new cases (`fr-85-clarify-popover.test.js`). Sweep 99/99 green.\n\nCache busters: styles.css v276→v277, app.js v243→v244. Say \"deploy\" when you want it shipped."
+        },
+        {
+          "status": "success",
+          "ts": "2026-05-27T23:33:46.511Z",
+          "startedAt": "2026-05-27T23:29:50.365Z",
+          "summary": "236.0s · 18→7168 tok",
+          "result": "**fr-85 r7 landed** on `main` (`e180099`). No deploy per rule.\n\nSummary:\n- `server/src/attach.js` clarify branch wraps `message.text` → `[clarify — please answer concisely in 1-3 short sentences] <user-text>`. LLM-facing only; user never sees it (clarify rows filtered from chat, popover preview shows selected text not question).\n- New test guard `test/fr-85-r4-clarify-server-routing.test.js` r7 — red pre-fix, green after.\n- 9/9 server-routing + 27/27 popover + **101/101** sweep green.\n- fr-85 closeout comment appended in `_myco_/plan.json`.\n\nSay **\"deploy\"** to ship."
         }
       ]
     },
@@ -3573,7 +3584,39 @@
         "rewritten": true
       },
       "description": "**Problem:** Clicking 'Build' submits an incomplete payload, losing the description and comments.\n**Expected:** 'Build' sends the full content — title, description, and comments.\n**Actual:** Only the title is sent; description and comments are dropped."
+    },
+    {
+      "id": "bug-37",
+      "text": "Stop button stays active after session aborts with no ongoing activity",
+      "layer": "Bug",
+      "done": true,
+      "addedAt": "2026-05-27T23:36:12.030Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "8ebae8f336be",
+          "user": "kkrazy",
+          "text": "Pls check the code to find out corner cases noy handled properly.",
+          "ts": "2026-05-27T23:37:35.840Z"
+        },
+        {
+          "id": "bug37cl-c22a77c7cfd9",
+          "user": "claude",
+          "text": "✓ fix: 3 corner cases closed in web/public/app.js — (1) iteration_aborted now retires the strip (was: server emits on every abort path but no follow-up turn_result); (2) WS t:\"exit\" routes through iteration_aborted (was: only wrote to xterm); (3) _retireClaudeTyping now clears kind+line (was: only awaitingClaude → stale label kept Stop visible past 30s idle). Test: test/bug-37-stop-button-state.test.js — 3 static guards, all green. Full sweep 102/102.",
+          "ts": "2026-05-27T23:44:04.671Z"
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "sometimes the stop button is not greyed out even when there is no activity for a long time. The session does say 'aborted'",
+        "rewritten": true
+      },
+      "description": "**Problem:** Users can click a Stop button that has no work to stop, creating confusion about session state.\n**Expected:** Stop button is greyed out/disabled once the session is idle or marked `aborted`.\n**Actual:** Stop button remains enabled for long idle periods even though the session status shows `aborted`."
     }
   ],
-  "updatedAt": "2026-05-27T23:33:21.389Z"
+  "updatedAt": "2026-05-27T23:44:04.671Z"
 }

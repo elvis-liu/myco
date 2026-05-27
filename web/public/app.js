@@ -1421,6 +1421,12 @@ function openSession(id, opts = {}) {
         _handleClarifyReplyFrame(msg);
       } else if (msg.t === 'exit') {
         state.term?.writeln('\r\n[session ended]');
+        // bug-37: session is fully gone — there's nothing to stop.
+        // Route through the iteration_aborted handler so the Stop
+        // button retires (and any pending status label clears) on
+        // reaper-kill / SDK process exit, the same way it does on a
+        // user-initiated abort.
+        _updateAgentStatusStrip({ type: 'iteration_aborted' });
       } else if (msg.t === 'error') {
         // Server rejected the attach — typically because the session id is
         // stale (e.g. localStorage still pointing at a deleted session after
@@ -4719,6 +4725,15 @@ function _retireClaudeTyping() {
   state.pendingClaudeToolCalls = 0;
   state.pendingClaudeReplyPosted = false;
   state._claudeSeenText = null;
+  // bug-37: also clear kind + label so the Stop-button predicate
+  //   showStop = (awaitingClaude || !!claudeStatusLine)
+  //              && kind ∈ {thinking, running, awaiting}
+  // truly flips false. Pre-fix the line and kind stayed stuck at
+  // their last values, keeping the button visible past the 30s idle
+  // timeout even when there was nothing to stop.
+  state.claudeStatusLine = '';
+  state.claudeStatusKind = null;
+  state.claudeStatus = null;
   _renderClaudeTyping();
 }
 
@@ -5181,6 +5196,20 @@ function _updateAgentStatusStrip(ev) {
     state.claudeStatusKind = 'error';
     state.awaitingClaude = true;
     _renderClaudeTyping();
+    return;
+  }
+  if (ev.type === 'iteration_aborted') {
+    // bug-37: every server-side abort path emits this (user-Stop,
+    // kill_mid_stream, stream_closed_no_result, AbortError) but NEVER
+    // a follow-up turn_result. Without an explicit handler the Stop
+    // button stays visible because the kind/line never flip. Treat
+    // it as a terminal event — retire the indicator immediately, no
+    // grace period (an abort isn't a "✓ done" moment to dwell on).
+    state.claudeStatusLine = '';
+    state.claudeStatus = null;
+    state.claudeStatusKind = null;
+    state.awaitingClaude = false;
+    _retireClaudeTyping();
     return;
   }
   if (ev.type === 'assistant_text') {
