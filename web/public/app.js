@@ -3486,7 +3486,11 @@ function _sendClarify() {
   //   - The composer textarea is untouched — user\'s in-flight chat
   //     draft (if any) survives a clarify ask.
   // Track the questionTs so the incoming clarify-reply WS frame can
-  // be matched + routed into THIS popover instance.
+  // be matched + routed into THIS popover instance. r2: questionTs
+  // is CLIENT-GENERATED and shipped in meta so the server uses our
+  // value (instead of generating its own) — without this, the
+  // server's questionTs never matched the client's and the reply
+  // dropped silently.
   const questionTs = new Date().toISOString();
   _clarifyState.questionTs = questionTs;
   _clarifyState.selected = selected;
@@ -3495,7 +3499,7 @@ function _sendClarify() {
   // ALSO inlined here as a quote so the agent sees both meta.selected
   // (machine-readable) and an inline excerpt in the prompt text.
   const text = `Re: "${selected}"\n\n${question}`;
-  sendChatMessage(text, { meta: { kind: 'clarify', selected } });
+  sendChatMessage(text, { meta: { kind: 'clarify', selected, questionTs } });
   _clarifyRenderBusy();
 }
 

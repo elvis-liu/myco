@@ -1119,11 +1119,19 @@ function _attachAgentWebSocket(session, ws, opts = {}) {
       // passed through — other meta keys are ignored as a security
       // measure (prevents a client from spoofing a meta.kind='menu'
       // or similar that could trick downstream renderers).
+      // r2: also pass through the client-generated questionTs so
+      // the eventual clarify-reply WS frame carries the SAME ts the
+      // client's popover is waiting on (the server used to generate
+      // its own, which never matched + made the reply drop silently
+      // on the client side).
       const opts = {};
       if (msg.meta && msg.meta.kind === 'clarify') {
         opts.meta = {
           kind: 'clarify',
           selected: String(msg.meta.selected || '').slice(0, 1000),
+          questionTs: typeof msg.meta.questionTs === 'string'
+            ? msg.meta.questionTs.slice(0, 64)
+            : null,
         };
       }
       if (text) handleChatMessage(sessionId, session, user, text.slice(0, CHAT_TEXT_LIMIT), opts);
@@ -1474,8 +1482,15 @@ function handleChatMessage(sessionId, session, user, text, opts = {}) {
   // only the routing of the resulting reply changes.
   if (opts && opts.meta && opts.meta.kind === 'clarify' && user !== ASSISTANT_USER) {
     message.meta = { kind: 'clarify', selected: String(opts.meta.selected || '') };
+    // r2: prefer the client-generated questionTs (round-tripped via
+    // opts.meta.questionTs) so the clarify-reply WS frame carries
+    // the SAME ts the client's popover is awaiting. Fallback to
+    // message.ts for legacy / out-of-band callers that don't supply
+    // one — those will fail the client match check but won't crash.
     session._pendingClarify = {
-      questionTs: message.ts,
+      questionTs: (opts.meta.questionTs && typeof opts.meta.questionTs === 'string')
+        ? opts.meta.questionTs
+        : message.ts,
       selected: message.meta.selected,
     };
   }

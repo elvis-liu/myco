@@ -26,6 +26,8 @@ const ATTACH = fs.readFileSync(
   path.join(__dirname, '..', 'server', 'src', 'attach.js'), 'utf8');
 const SESSION = fs.readFileSync(
   path.join(__dirname, '..', 'server', 'src', 'agent-session.js'), 'utf8');
+const APP = fs.readFileSync(
+  path.join(__dirname, '..', 'web', 'public', 'app.js'), 'utf8');
 
 console.log('── fr-85 r4: server-side clarify routing ──');
 
@@ -97,6 +99,64 @@ t('agent-session.js: pendingClarify cleared after one reply (so follow-up tool c
   const win = SESSION.slice(idx, idx + 3000);
   assert.ok(/this\._pendingClarify\s*=\s*null/.test(win),
     'method must clear this._pendingClarify after stamping the reply');
+});
+
+t('attach.js: r2 — questionTs is round-tripped from the client meta (not server-generated)', () => {
+  // Without this, server made its own questionTs in message.ts at
+  // message-creation time, which never matched the client's
+  // _clarifyState.questionTs → the clarify-reply WS frame dropped
+  // silently on the client side → "nothing in the popover".
+  // Fix: client ships questionTs in meta; server uses opts.meta.questionTs
+  // when setting session._pendingClarify (with message.ts as a fallback).
+  // WS parser must whitelist questionTs alongside selected.
+  const parserIdx = ATTACH.search(/msg\.t === ['"]chat['"][\s\S]{0,200}msg\.text/);
+  const parserWin = ATTACH.slice(parserIdx, parserIdx + 2000);
+  assert.ok(/questionTs/.test(parserWin),
+    'WS chat parser must whitelist meta.questionTs so it reaches handleChatMessage');
+  // handleChatMessage must consume opts.meta.questionTs (with fallback).
+  const idx = ATTACH.search(/function\s+handleChatMessage\s*\(/);
+  const win = ATTACH.slice(idx, idx + 6000);
+  assert.ok(/opts\.meta\.questionTs/.test(win),
+    'handleChatMessage must use opts.meta.questionTs (the client-generated value)');
+  assert.ok(/message\.ts/.test(win),
+    'handleChatMessage should still have message.ts available as a fallback');
+});
+
+t('app.js: r2 — client passes questionTs in clarify meta', () => {
+  const idx = APP.search(/function\s+_sendClarify\s*\(/);
+  const win = APP.slice(idx, idx + 4500);
+  // The questionTs must be in the meta object that sendChatMessage
+  // sees — otherwise the server picks its own and the client never
+  // matches the reply.
+  assert.ok(/meta:\s*\{\s*kind:\s*['"]clarify['"][\s\S]{0,200}questionTs/.test(win),
+    '_sendClarify must include questionTs in meta');
+});
+
+t('agent-session.js: r2 — both `assistant_text` agent-event emits are SKIPPED when _pendingClarify is set', () => {
+  // r1 (initial r4) only tagged the rec.chat record. The live
+  // `agent-event` stream still emitted assistant_text → rendered as
+  // a card in the main chat pane → the reply looked like it went to
+  // chat anyway. r2 gates BOTH emit sites in agent-session.js on
+  // `!this._pendingClarify` so the live chat-pane card is suppressed
+  // when a clarify is in flight. The clarify-reply WS frame
+  // (emitted inside _persistAssistantTextToRecChat) still delivers
+  // the reply to the popover — so the user sees the answer there,
+  // but NOT also in their main thread.
+  const emitMatches = SESSION.match(/this\._emit\(\s*\{\s*type:\s*['"]assistant_text['"]/g);
+  assert.ok(emitMatches && emitMatches.length >= 2,
+    `both assistant_text emit sites must exist (text-block + result-fallback); got ${emitMatches ? emitMatches.length : 0}`);
+  // Each emit must be guarded by a !this._pendingClarify check
+  // within a short window above it.
+  const emitRe = /this\._emit\(\s*\{\s*type:\s*['"]assistant_text['"]/g;
+  let m;
+  let count = 0;
+  while ((m = emitRe.exec(SESSION)) !== null) {
+    count++;
+    const idx = m.index;
+    const before = SESSION.slice(Math.max(0, idx - 400), idx);
+    assert.ok(/!\s*this\._pendingClarify/.test(before),
+      `assistant_text emit #${count} (at offset ${idx}) must be guarded by !this._pendingClarify within 400 chars above — otherwise the agent-event card pollutes chat during a clarify`);
+  }
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

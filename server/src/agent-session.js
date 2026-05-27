@@ -603,7 +603,20 @@ class AgentSession extends EventEmitter {
       for (const block of m.message.content) {
         if (block.type === 'text') {
           const txt = block.text || '';
-          this._emit({ type: 'assistant_text', text: txt });
+          // fr-85 r4 r2: when a clarify is in-flight (set by attach.js
+          // handleChatMessage when meta.kind='clarify' came in), SKIP
+          // the assistant_text agent-event emit — otherwise the reply
+          // renders as a card in every attached client's main chat
+          // pane EVEN THOUGH the persistence record gets tagged
+          // clarify-reply. The popover-as-response-surface model
+          // requires both rails to be suppressed:
+          //   1. agent-event (this _emit)         — gated below
+          //   2. rec.chat broadcast               — gated by render
+          //      filter + tagged via _persistAssistantTextToRecChat
+          //      which fires the clarify-reply WS frame instead
+          if (!this._pendingClarify) {
+            this._emit({ type: 'assistant_text', text: txt });
+          }
           // Track per-turn accumulator so the `result` branch below
           // can dedup. Reset on turn_start; flushed on turn_result.
           this._currentTurnAssistantText = (this._currentTurnAssistantText || '') + txt;
@@ -614,7 +627,10 @@ class AgentSession extends EventEmitter {
           // render channel, rec.chat is the forensic / paginated
           // history record, and the fromAgent rows are filtered out
           // of the default chat-history WS frame to avoid duplicate
-          // renders on attach.
+          // renders on attach. Note: this call ALSO emits the
+          // clarify-reply WS frame when _pendingClarify is set, so
+          // the popover still receives the answer; only the chat-
+          // pane card is suppressed.
           this._persistAssistantTextToRecChat(txt);
         } else if (block.type === 'tool_use') {
           this.openToolCalls.set(block.id, {
@@ -674,7 +690,13 @@ class AgentSession extends EventEmitter {
       // Only emit for success results (error subtype carries diagnostics,
       // not claude's reply, and would pollute the bubble stream).
       if (resultText && subtype === 'success' && !this._textCoversSubject(accumulated, resultText)) {
-        this._emit({ type: 'assistant_text', text: resultText });
+        // fr-85 r4 r2: same rule as the assistant.text-block path above
+        // — suppress the agent-event emit when a clarify is in flight,
+        // but still persist (which routes the reply to the popover via
+        // the clarify-reply WS frame).
+        if (!this._pendingClarify) {
+          this._emit({ type: 'assistant_text', text: resultText });
+        }
         this._persistAssistantTextToRecChat(resultText);
       }
       // Reset the per-turn accumulator now that the turn is done so
