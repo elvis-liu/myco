@@ -603,20 +603,13 @@ class AgentSession extends EventEmitter {
       for (const block of m.message.content) {
         if (block.type === 'text') {
           const txt = block.text || '';
-          // fr-85 r4 r2: when a clarify is in-flight (set by attach.js
-          // handleChatMessage when meta.kind='clarify' came in), SKIP
-          // the assistant_text agent-event emit — otherwise the reply
-          // renders as a card in every attached client's main chat
-          // pane EVEN THOUGH the persistence record gets tagged
-          // clarify-reply. The popover-as-response-surface model
-          // requires both rails to be suppressed:
-          //   1. agent-event (this _emit)         — gated below
-          //   2. rec.chat broadcast               — gated by render
-          //      filter + tagged via _persistAssistantTextToRecChat
-          //      which fires the clarify-reply WS frame instead
-          if (!this._pendingClarify) {
-            this._emit({ type: 'assistant_text', text: txt });
-          }
+          // fr-85 r4 r3: no per-site guard needed — _emit is now
+          // gated centrally on this._pendingClarify (silent mode).
+          // The emit call below is a no-op for clients during a
+          // clarify; the persist call accumulates the text into the
+          // pending replyText buffer, and the consolidated
+          // clarify-reply fires from the result handler at turn end.
+          this._emit({ type: 'assistant_text', text: txt });
           // Track per-turn accumulator so the `result` branch below
           // can dedup. Reset on turn_start; flushed on turn_result.
           this._currentTurnAssistantText = (this._currentTurnAssistantText || '') + txt;
@@ -627,10 +620,7 @@ class AgentSession extends EventEmitter {
           // render channel, rec.chat is the forensic / paginated
           // history record, and the fromAgent rows are filtered out
           // of the default chat-history WS frame to avoid duplicate
-          // renders on attach. Note: this call ALSO emits the
-          // clarify-reply WS frame when _pendingClarify is set, so
-          // the popover still receives the answer; only the chat-
-          // pane card is suppressed.
+          // renders on attach.
           this._persistAssistantTextToRecChat(txt);
         } else if (block.type === 'tool_use') {
           this.openToolCalls.set(block.id, {
@@ -690,18 +680,35 @@ class AgentSession extends EventEmitter {
       // Only emit for success results (error subtype carries diagnostics,
       // not claude's reply, and would pollute the bubble stream).
       if (resultText && subtype === 'success' && !this._textCoversSubject(accumulated, resultText)) {
-        // fr-85 r4 r2: same rule as the assistant.text-block path above
-        // — suppress the agent-event emit when a clarify is in flight,
-        // but still persist (which routes the reply to the popover via
-        // the clarify-reply WS frame).
-        if (!this._pendingClarify) {
-          this._emit({ type: 'assistant_text', text: resultText });
-        }
+        // fr-85 r4 r3: no per-site guard needed — _emit is gated on
+        // _pendingClarify centrally. During a clarify this is a no-op
+        // for clients; the persist call accumulates into pending
+        // replyText for the consolidated clarify-reply emit below.
+        this._emit({ type: 'assistant_text', text: resultText });
         this._persistAssistantTextToRecChat(resultText);
       }
       // Reset the per-turn accumulator now that the turn is done so
       // the next turn starts clean.
       this._currentTurnAssistantText = '';
+      // fr-85 r4 r3: flush the consolidated clarify-reply BEFORE
+      // emitting turn_result. Two reasons for ordering: (a) we
+      // want the popover to receive the answer atomically (one
+      // WS frame with the full accumulated text), and (b) once
+      // we clear _pendingClarify, the next _emit() (turn_result)
+      // is no longer suppressed by the silent-mode gate — which
+      // is what we want; the turn-ended chrome should reappear.
+      if (this._pendingClarify) {
+        try {
+          this.emit('clarify-reply', {
+            questionTs: this._pendingClarify.questionTs,
+            text: String(this._pendingClarify.replyText || '').trim(),
+            ts: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.error(`[clarify-reply] ${this.sessionId} emit failed: ${err && err.message ? err.message : err}`);
+        }
+        this._pendingClarify = null;
+      }
       this._emit({
         type: 'turn_result',
         subtype: m.subtype,
@@ -1194,6 +1201,18 @@ class AgentSession extends EventEmitter {
     // logged but doesn't block the in-memory emit — clients still
     // get the live event via the agent-event listener.
     this._persistEventToDisk(stamped);
+    // fr-85 r4 r3: SILENT MODE during a clarify. While
+    // session._pendingClarify is set, NO agent-event broadcasts
+    // reach attached clients — not assistant_text, tool_use,
+    // tool_result, permission_request, chrome batch, claude-status,
+    // anything. The popover stays the only user-visible surface
+    // until the turn ends. Buffer + disk persist still happen so the
+    // forensic record + agent-replay on later attach are intact.
+    // The result-handler below emits ONE consolidated clarify-reply
+    // WS frame (via this.emit('clarify-reply', ...)) when the turn
+    // completes, then clears pendingClarify so subsequent turns
+    // broadcast normally again.
+    if (this._pendingClarify) return;
     this.emit('agent-event', stamped);
   }
 
@@ -1254,29 +1273,20 @@ class AgentSession extends EventEmitter {
       ts: new Date().toISOString(),
       meta: { fromAgent: true },
     };
-    // fr-85 r4: if a clarify-tagged user input is in-flight (set by
-    // attach.js handleChatMessage when meta.kind='clarify' came in),
-    // pair this reply back to that question. Tag on the persisted
-    // record (so future chat-history fetches can be filtered) AND
-    // fire a dedicated WS event (`clarify-reply`) so all attached
-    // clients can route it to their popover instead of letting it
-    // render as a chat bubble. One-shot — clear pending after stamping
-    // so subsequent assistant_text (e.g. follow-up tool calls in the
-    // same turn) goes through the normal chat path.
+    // fr-85 r4 r3: clarify accumulation. While a clarify is in
+    // flight, append each persisted assistant_text chunk into the
+    // pending replyText buffer — the result handler will fire ONE
+    // consolidated clarify-reply WS frame at turn end (instead of
+    // one frame per streaming chunk that r1 used to do). Tagging
+    // the rec.chat record stays the same (audit trail), but the
+    // WS emit moved to the result handler so all chunks
+    // (assistant_text-block path + result-fallback path) coalesce
+    // into one popover update.
     if (this._pendingClarify) {
-      const pending = this._pendingClarify;
-      this._pendingClarify = null;
       msg.meta.kind = 'clarify-reply';
-      msg.meta.clarifyQuestionTs = pending.questionTs;
-      try {
-        this.emit('clarify-reply', {
-          questionTs: pending.questionTs,
-          text: trimmed,
-          ts: msg.ts,
-        });
-      } catch (err) {
-        console.error(`[persist-chat] ${this.sessionId} clarify-reply emit failed: ${err && err.message ? err.message : err}`);
-      }
+      msg.meta.clarifyQuestionTs = this._pendingClarify.questionTs;
+      this._pendingClarify.replyText =
+        (this._pendingClarify.replyText || '') + trimmed + '\n';
     }
     try {
       const sessionsMod = require('./sessions');

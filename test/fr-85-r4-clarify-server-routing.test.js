@@ -71,34 +71,57 @@ t('attach.js: WS attach loop forwards `clarify-reply` session event to the clien
 
 // ── agent-session.js ───────────────────────────────────────────────
 
-t('agent-session.js: _persistAssistantTextToRecChat tags reply when _pendingClarify is set', () => {
-  // Anchor on the method DECLARATION (name + (text) + {) — plain
-  // `_persistAssistantTextToRecChat(` also matches call sites earlier
-  // in the file, which would slice an unrelated window.
+t('agent-session.js: r3 — _persistAssistantTextToRecChat tags + accumulates into pending.replyText', () => {
+  // r3 architecture: while a clarify is in flight, persist still
+  // tags the rec.chat record (audit trail) AND appends the chunk
+  // into pending.replyText. The consolidated clarify-reply WS frame
+  // fires once at turn-end from the result handler (so streamed
+  // chunks coalesce into one popover update).
   const idx = SESSION.search(/_persistAssistantTextToRecChat\s*\(\s*text\s*\)\s*\{/);
   assert.ok(idx > -1, '_persistAssistantTextToRecChat must be defined');
   const win = SESSION.slice(idx, idx + 3000);
   assert.ok(/this\._pendingClarify/.test(win),
     'method must read this._pendingClarify');
   assert.ok(/msg\.meta\.kind\s*=\s*['"]clarify-reply['"]/.test(win),
-    'reply meta must be stamped with kind="clarify-reply"');
+    'reply meta must still be stamped (audit trail)');
   assert.ok(/msg\.meta\.clarifyQuestionTs\s*=/.test(win),
-    'reply meta must include clarifyQuestionTs so the client can match it to the popover');
-  assert.ok(/this\.emit\(['"]clarify-reply['"]/.test(win),
-    'method must emit a "clarify-reply" event for attach.js to forward via WS');
+    'reply meta must still include clarifyQuestionTs');
+  assert.ok(/replyText\s*=/.test(win),
+    'r3: method must append the chunk into this._pendingClarify.replyText (consolidated WS emit at turn_result)');
 });
 
-t('agent-session.js: pendingClarify cleared after one reply (so follow-up tool calls go to chat)', () => {
-  // The pending state is consumed by the FIRST assistant_text after
-  // the clarify input — subsequent assistant_text in the same turn
-  // (e.g. tool calls + reasoning) goes to chat normally.
-  // Anchor on the method DECLARATION (name + (text) + {) — plain
-  // `_persistAssistantTextToRecChat(` also matches call sites earlier
-  // in the file, which would slice an unrelated window.
-  const idx = SESSION.search(/_persistAssistantTextToRecChat\s*\(\s*text\s*\)\s*\{/);
-  const win = SESSION.slice(idx, idx + 3000);
-  assert.ok(/this\._pendingClarify\s*=\s*null/.test(win),
-    'method must clear this._pendingClarify after stamping the reply');
+t('agent-session.js: r3 — central _emit() is silent while _pendingClarify is set', () => {
+  // The single choke point that suppresses ALL agent-event broadcasts
+  // (assistant_text, tool_use, tool_result, permission_request,
+  // chrome batch, claude-status, etc) during a clarify. Buffer + disk
+  // persist still happen for the forensic record; only the live
+  // this.emit("agent-event") call is gated.
+  const idx = SESSION.search(/\n\s*_emit\s*\(\s*event\s*\)\s*\{/);
+  assert.ok(idx > -1, '_emit(event) method must be defined');
+  const win = SESSION.slice(idx, idx + 2000);
+  assert.ok(/this\._pendingClarify/.test(win),
+    '_emit must check this._pendingClarify');
+  assert.ok(/if\s*\(\s*this\._pendingClarify\s*\)\s*return/.test(win),
+    '_emit must `if (this._pendingClarify) return` BEFORE the agent-event broadcast');
+  assert.ok(/this\.emit\(\s*['"]agent-event['"]/.test(win),
+    '_emit still emits "agent-event" for non-clarify turns');
+});
+
+t('agent-session.js: r3 — consolidated clarify-reply fires from the result handler', () => {
+  // The result handler (turn end) is where we flush the accumulated
+  // replyText as a single clarify-reply WS frame. Pending is cleared
+  // right after so turn_result + subsequent turns broadcast normally.
+  // Anchor on the turn_result emit since the flush lives right
+  // before it.
+  const idx = SESSION.search(/this\._emit\(\s*\{\s*\n?\s*type:\s*['"]turn_result['"]/);
+  assert.ok(idx > -1, 'turn_result emit must exist as anchor');
+  const before = SESSION.slice(Math.max(0, idx - 1500), idx);
+  assert.ok(/this\.emit\(\s*['"]clarify-reply['"]/.test(before),
+    'clarify-reply emit must live in the result handler, just before the turn_result _emit');
+  assert.ok(/this\._pendingClarify\s*=\s*null/.test(before),
+    'pending must be cleared after the consolidated clarify-reply fires');
+  assert.ok(/replyText/.test(before),
+    'the emit must use the accumulated replyText (not a single chunk)');
 });
 
 t('attach.js: r2 — questionTs is round-tripped from the client meta (not server-generated)', () => {
@@ -132,32 +155,11 @@ t('app.js: r2 — client passes questionTs in clarify meta', () => {
     '_sendClarify must include questionTs in meta');
 });
 
-t('agent-session.js: r2 — both `assistant_text` agent-event emits are SKIPPED when _pendingClarify is set', () => {
-  // r1 (initial r4) only tagged the rec.chat record. The live
-  // `agent-event` stream still emitted assistant_text → rendered as
-  // a card in the main chat pane → the reply looked like it went to
-  // chat anyway. r2 gates BOTH emit sites in agent-session.js on
-  // `!this._pendingClarify` so the live chat-pane card is suppressed
-  // when a clarify is in flight. The clarify-reply WS frame
-  // (emitted inside _persistAssistantTextToRecChat) still delivers
-  // the reply to the popover — so the user sees the answer there,
-  // but NOT also in their main thread.
-  const emitMatches = SESSION.match(/this\._emit\(\s*\{\s*type:\s*['"]assistant_text['"]/g);
-  assert.ok(emitMatches && emitMatches.length >= 2,
-    `both assistant_text emit sites must exist (text-block + result-fallback); got ${emitMatches ? emitMatches.length : 0}`);
-  // Each emit must be guarded by a !this._pendingClarify check
-  // within a short window above it.
-  const emitRe = /this\._emit\(\s*\{\s*type:\s*['"]assistant_text['"]/g;
-  let m;
-  let count = 0;
-  while ((m = emitRe.exec(SESSION)) !== null) {
-    count++;
-    const idx = m.index;
-    const before = SESSION.slice(Math.max(0, idx - 400), idx);
-    assert.ok(/!\s*this\._pendingClarify/.test(before),
-      `assistant_text emit #${count} (at offset ${idx}) must be guarded by !this._pendingClarify within 400 chars above — otherwise the agent-event card pollutes chat during a clarify`);
-  }
-});
+// r3 removed the per-site emit guards in favor of the central _emit
+// gate (see "_emit() is silent while _pendingClarify is set" test
+// above). The two `this._emit({type:'assistant_text',...})` call
+// sites stay; they're no-ops for clients during a clarify because
+// _emit early-returns.
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);
