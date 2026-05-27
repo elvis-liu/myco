@@ -212,39 +212,36 @@ t('app.js: r3 — popover left + width come from #chat-messages bbox (not the se
   // User: "the pop up should always left align with the chat window
   // and below the content highlighted, with width the same as the
   // chat window".
-  // Position formula must read #chat-messages.getBoundingClientRect()
-  // for left + width; only the vertical anchor (top) still comes
-  // from the selection's bbox.
-  const idx = APP.search(/function\s+_openClarifyPopover\s*\(\s*\)/);
-  assert.ok(idx > -1, '_openClarifyPopover must exist');
-  // r3 made the function longer (chat-rect lookup + width set);
-  // widen the slice past the position-set lines.
-  const win = APP.slice(idx, idx + 4500);
+  // r4 refactor: the position-compute code moved out of
+  // _openClarifyPopover into a dedicated _clarifyReposition helper
+  // (so it can be called on scroll/resize too). Pin the contract
+  // there instead.
+  const idx = APP.search(/function\s+_clarifyReposition\s*\(\s*\)/);
+  assert.ok(idx > -1, '_clarifyReposition must exist');
+  const win = APP.slice(idx, idx + 2000);
   // Must look up #chat-messages for horizontal alignment.
   assert.ok(/getElementById\(['"]chat-messages['"]\)/.test(win) ||
             /querySelector\(['"]#chat-messages['"]\)/.test(win),
-    '_openClarifyPopover must read #chat-messages for horizontal alignment');
-  // Must call .getBoundingClientRect() on the chat-messages element.
+    '_clarifyReposition must read #chat-messages for horizontal alignment');
+  // Must call .getBoundingClientRect() (on chat-messages AND on the anchor).
   assert.ok(/\.getBoundingClientRect\(\)/.test(win),
-    '_openClarifyPopover must compute the chat window\'s bbox');
-  // Must explicitly set width on the popover (chat-window width, not
-  // the old fixed 360 px).
+    '_clarifyReposition must compute the chat window\'s bbox');
+  // Must explicitly set width on the popover (chat-window width).
   assert.ok(/(pop|popover)\.style\.width\s*=/i.test(win),
-    'popover must set style.width from JS (chat-window width, not a fixed CSS value)');
-  // The OLD 360-fixed POP_W constant should be gone — it pinned the
-  // wrong width model. A guard against a future "let me just hardcode
-  // it back" regression.
+    'popover must set style.width from JS (chat-window width)');
+  // The OLD 360-fixed POP_W constant should be gone.
   assert.ok(!/POP_W\s*=\s*360/.test(win),
-    'the fixed POP_W=360 constant must be gone — width now comes from chat-messages bbox');
+    'the fixed POP_W=360 constant must be gone — width comes from chat-messages bbox');
 });
 
-t('app.js: r3 — vertical anchor still uses the selection\'s bottom (below the highlight)', () => {
-  const idx = APP.search(/function\s+_openClarifyPopover\s*\(\s*\)/);
-  const win = APP.slice(idx, idx + 4500);
-  // Selection range provides `rect.bottom + scrollY` for the top.
+t('app.js: r3 — vertical anchor still uses the anchor bbox\'s bottom (below the highlight)', () => {
+  // Same r4 relocation — anchor-bottom-driven top now lives in
+  // _clarifyReposition.
+  const idx = APP.search(/function\s+_clarifyReposition\s*\(\s*\)/);
+  const win = APP.slice(idx, idx + 2000);
   assert.ok(/rect\.bottom\s*\+\s*window\.scrollY/.test(win) ||
             /selRect\.bottom\s*\+\s*window\.scrollY/.test(win),
-    'top position must still use the selection bbox\'s bottom (popover sits BELOW the highlight)');
+    'top position must use the anchor bbox\'s bottom (popover sits BELOW the highlight)');
 });
 
 t('css: #chat-clarify-popover no longer pins a fixed width', () => {
@@ -260,6 +257,37 @@ t('css: #chat-clarify-popover no longer pins a fixed width', () => {
   // but NOT prefixed by min-/max-.
   assert.ok(!/(?<!(min-|max-))width:\s*\d+px/.test(win),
     '#chat-clarify-popover base rule must not pin a fixed pixel width — JS sets it from chat-window bbox now');
+});
+
+t('app.js: r4 — popover follows chat scroll (re-positions on #chat-messages scroll + window resize)', () => {
+  // User: "when I scroll the popover should scroll together with the
+  // main chat until I click 'x' to close it". Without this the popover
+  // sits at its initial absolute position while the chat scrolls
+  // underneath — looks visually broken.
+  // Pin: there's a scroll listener attached to #chat-messages AND a
+  // resize listener (window or document) for viewport-size changes.
+  // Both must call a reposition helper that re-reads the anchor bbox.
+  assert.ok(/function\s+_clarifyReposition\s*\(/.test(APP),
+    '_clarifyReposition helper must be defined (re-reads anchor bbox + updates popover style.top/left)');
+  // Pin that the scroll listener is wired and the handler is named
+  // so the close path can detach it cleanly (anonymous handlers
+  // can\'t be removeEventListener\'d).
+  assert.ok(/addEventListener\(\s*['"]scroll['"][\s\S]{0,200}_clarifyReposition/.test(APP) ||
+            /chat-messages[\s\S]{0,300}addEventListener\(\s*['"]scroll['"][\s\S]{0,200}_clarify/.test(APP),
+    'must add a scroll listener on #chat-messages that triggers _clarifyReposition');
+  assert.ok(/addEventListener\(\s*['"]resize['"][\s\S]{0,200}_clarifyReposition/.test(APP) ||
+            /window\.addEventListener\([\s\S]{0,100}resize[\s\S]{0,200}_clarify/.test(APP),
+    'must add a window resize listener too (viewport resize moves the anchor)');
+});
+
+t('app.js: r4 — close removes the scroll + resize listeners (no leak when × clicked)', () => {
+  const idx = APP.search(/function\s+_closeClarifyPopover\s*\(\s*\)/);
+  assert.ok(idx > -1, '_closeClarifyPopover must be defined');
+  const win = APP.slice(idx, idx + 1500);
+  assert.ok(/removeEventListener\(\s*['"]scroll['"]/.test(win),
+    '_closeClarifyPopover must removeEventListener("scroll", ...)');
+  assert.ok(/removeEventListener\(\s*['"]resize['"]/.test(win),
+    '_closeClarifyPopover must removeEventListener("resize", ...)');
 });
 
 t('app.js: popover closes on Escape', () => {

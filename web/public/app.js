@@ -3330,6 +3330,42 @@ function _resortChatPaneByTs() {
 // the user picked when scoping fr-85).
 
 let _clarifyAnchorRange = null;   // saved Range captured at popover-open
+let _clarifyAnchorSpan  = null;   // r4: post-send, the surroundContents wrap
+                                  // we wrap around the selection so we can
+                                  // re-read its bbox on scroll/resize (the
+                                  // Range may be invalidated by DOM mutation
+                                  // after surroundContents; the span is the
+                                  // durable anchor).
+
+// fr-85 r4: re-position the popover under the current anchor's
+// bounding rect. Used at open-time (initial placement) AND on every
+// chat-messages scroll + window scroll/resize while the popover is
+// open, so the popover tracks the highlight as the user scrolls the
+// chat to read more context. Prefers the post-send anchor span; falls
+// back to the selection Range while the popover is in the "ask" state.
+// Vertical anchor = anchor.bottom + 8px; horizontal = #chat-messages
+// left + scrollX, full chat-window width.
+function _clarifyReposition() {
+  const pop = document.getElementById('chat-clarify-popover');
+  if (!pop || pop.style.display !== 'flex') return;
+  let rect = null;
+  if (_clarifyAnchorSpan && _clarifyAnchorSpan.isConnected) {
+    rect = _clarifyAnchorSpan.getBoundingClientRect();
+  } else if (_clarifyAnchorRange) {
+    try { rect = _clarifyAnchorRange.getBoundingClientRect(); } catch {}
+  }
+  if (!rect) return;
+  const chatList = document.getElementById('chat-messages');
+  const chatRect = chatList && chatList.getBoundingClientRect
+    ? chatList.getBoundingClientRect()
+    : { left: 0, width: window.innerWidth };
+  const left  = chatRect.left + window.scrollX;
+  const width = Math.max(120, chatRect.width);
+  const top   = rect.bottom + window.scrollY + 8;
+  pop.style.left  = left  + 'px';
+  pop.style.top   = top   + 'px';
+  pop.style.width = width + 'px';
+}
 
 function _clarifySelectionInClaudeBubble() {
   // r2: returns the container element that fully holds the current
@@ -3369,11 +3405,11 @@ function _openClarifyPopover() {
   // BEFORE that happens so we can wrap it on submit + use its
   // bounding rect for popover positioning.
   _clarifyAnchorRange = sel.getRangeAt(0).cloneRange();
+  _clarifyAnchorSpan = null;   // set on send when we surroundContents-wrap the range
   const selectedText = String(_clarifyAnchorRange.toString() || '').trim();
   if (!selectedText) { _closeClarifyPopover(); return; }
-  // Anchor rect from the SELECTION (not the bubble) so the popover
-  // attaches right under the highlight regardless of bubble size.
-  const rect = _clarifyAnchorRange.getBoundingClientRect();
+  // (Anchor bbox is read in _clarifyReposition — called at the end of
+  // this function for initial placement + on scroll/resize after.)
   // Build the popover lazily — one per page lifetime; mounted on body.
   let pop = document.getElementById('chat-clarify-popover');
   if (!pop) {
@@ -3417,22 +3453,16 @@ function _openClarifyPopover() {
   _clarifyState.selected = '';
   _clarifyState.question = '';
   pop.style.display = 'flex';
-  // r3: position UNDER the selection vertically (rect.bottom +
-  // scrollY), but anchor the popover HORIZONTALLY to the chat
-  // window (#chat-messages) — not the selection. Width tracks the
-  // chat window too. Matches the user's "always left-align with
-  // the chat window, width = chat window width" ask. Falls back to
-  // viewport bounds if the chat-messages element isn't in the DOM.
-  const chatList = document.getElementById('chat-messages');
-  const chatRect = chatList && chatList.getBoundingClientRect
-    ? chatList.getBoundingClientRect()
-    : { left: 0, width: window.innerWidth };
-  const left  = chatRect.left  + window.scrollX;
-  const width = Math.max(120, chatRect.width);   // sanity floor for narrow viewports
-  const top   = rect.bottom + window.scrollY + 8;
-  pop.style.left  = left  + 'px';
-  pop.style.top   = top   + 'px';
-  pop.style.width = width + 'px';
+  _clarifyReposition();   // initial positioning + wires up follow-the-anchor on scroll/resize
+  // r4: scroll + resize listeners so the popover tracks the anchor
+  // (selection range, then .chat-clarify-anchor span after send) as
+  // the user scrolls the chat. Removed in _closeClarifyPopover.
+  // capture-phase on the chat-messages scroller so the listener
+  // catches inner-scroll events too.
+  const cl = document.getElementById('chat-messages');
+  if (cl) cl.addEventListener('scroll', _clarifyReposition, { passive: true });
+  window.addEventListener('scroll', _clarifyReposition, { passive: true });
+  window.addEventListener('resize', _clarifyReposition);
   // Focus the input so the user can type immediately.
   const input = pop.querySelector('#chat-clarify-input');
   if (input) { input.value = ''; input.focus(); }
@@ -3449,7 +3479,16 @@ function _closeClarifyPopover() {
     const reply = pop.querySelector('.chat-clarify-reply');
     if (reply) reply.remove();
   }
+  // r4: detach the scroll-follow listeners. Wired in _openClarifyPopover.
+  // Named handler (_clarifyReposition) is the same reference so
+  // removeEventListener actually removes it (anonymous handlers
+  // wouldn't).
+  const cl = document.getElementById('chat-messages');
+  if (cl) cl.removeEventListener('scroll', _clarifyReposition);
+  window.removeEventListener('scroll', _clarifyReposition);
+  window.removeEventListener('resize', _clarifyReposition);
   _clarifyAnchorRange = null;
+  _clarifyAnchorSpan = null;
   _clarifyState.questionTs = null;
   _clarifyState.selected = '';
   _clarifyState.question = '';
@@ -3472,9 +3511,14 @@ function _sendClarify() {
     const span = document.createElement('span');
     span.className = 'chat-clarify-anchor';
     _clarifyAnchorRange.surroundContents(span);
+    // r4: keep a reference so _clarifyReposition can re-read the bbox
+    // on subsequent scrolls (the Range may get invalidated by the
+    // surroundContents mutation; the span is the durable anchor).
+    _clarifyAnchorSpan = span;
   } catch {
     /* range spans node boundaries — skip the visual marker, the
-       message itself still ships */
+       message itself still ships. Scroll-follow falls back to the
+       Range (still usable in most browsers post-mutation). */
   }
   // r4: ship via sendChatMessage with meta.kind='clarify' instead of
   // injecting into #chat-input + firing the chat-form submit. Reasons:
