@@ -139,6 +139,34 @@ function _matchingInputFor(toolName, toolInput) {
   return '';
 }
 
+// fr-85 r7 (round 2): hard-cap the clarify-popover reply so it can't
+// overflow the small floating panel. The soft prompt nudge alone
+// wasn't reliable (model kept returning paragraphs), so this is the
+// guaranteed backstop applied to the WS payload before it reaches the
+// popover. The full text still lands in rec.chat (audit trail); only
+// the popover display is capped.
+//
+//   maxSentences — keep at most this many sentence-terminated chunks.
+//   maxChars     — backstop for a runaway single sentence with no
+//                  terminators (truncate on a word boundary + ellipsis).
+function _capClarifyReply(text, maxSentences = 3, maxChars = 600) {
+  let t = String(text == null ? '' : text).trim();
+  if (!t) return '';
+  // Sentence cap: a "sentence" is a run of non-terminator chars ending
+  // in . ! or ? (plus any trailing quotes/brackets), followed by space
+  // or end-of-string. Newlines count as soft breaks too so a bulleted
+  // multi-line reply collapses to its first few lines.
+  const sentences = t.match(/[^.!?\n]*[.!?\n]+["')\]]*\s*/g);
+  if (sentences && sentences.length > maxSentences) {
+    t = sentences.slice(0, maxSentences).join('').trim();
+  }
+  // Char backstop (covers a runaway sentence with no terminator).
+  if (t.length > maxChars) {
+    t = t.slice(0, maxChars).replace(/\s+\S*$/, '').trim() + '…';
+  }
+  return t;
+}
+
 class AgentSession extends EventEmitter {
   constructor(sessionId, opts = {}) {
     super();
@@ -701,7 +729,10 @@ class AgentSession extends EventEmitter {
         try {
           this.emit('clarify-reply', {
             questionTs: this._pendingClarify.questionTs,
-            text: String(this._pendingClarify.replyText || '').trim(),
+            // r7 r2: hard-cap to ≤ 3 sentences so the popover never
+            // fills with a wall of text (the prompt nudge alone wasn't
+            // enough). Full text is preserved in rec.chat for audit.
+            text: _capClarifyReply(this._pendingClarify.replyText),
             ts: new Date().toISOString(),
           });
         } catch (err) {
@@ -1436,4 +1467,4 @@ function spawnAgent(sessionId, opts = {}) {
   return new AgentSession(sessionId, opts);
 }
 
-module.exports = { AgentSession, spawnAgent };
+module.exports = { AgentSession, spawnAgent, _capClarifyReply };

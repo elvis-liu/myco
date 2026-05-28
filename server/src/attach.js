@@ -1495,11 +1495,14 @@ function handleChatMessage(sessionId, session, user, text, opts = {}) {
     };
     // r7 (fr-85): the popover is a tight floating panel — multi-
     // paragraph essays don't fit. Wrap the user's question with a
-    // brevity nudge so claude replies in 1-3 short sentences. The
-    // wrap is invisible to the user (clarify rows are filtered from
-    // chat render; the popover preview shows the SELECTED text, not
-    // the question), so it's a purely LLM-facing instruction.
-    message.text = `[clarify — please answer concisely in 1-3 short sentences] ${text}`;
+    // forceful brevity instruction. The wrap is invisible to the user
+    // (clarify rows are filtered from chat render; the popover preview
+    // shows the SELECTED text, not the question), so it's a purely
+    // LLM-facing instruction. r7 r2: the model kept ignoring the soft
+    // nudge, so the wording is now a hard MAX and the server also
+    // truncates the reply to ≤ 3 sentences in agent-session.js
+    // (_capClarifyReply) as a guaranteed backstop.
+    message.text = `[Clarification request — answer in 2-3 sentences MAX. Be terse: no preamble, no restating the question, no bullet lists, no headings. Plain prose only.] ${text}`;
   }
   // [run:<type>#<id>] marker: the chat-pane's ▶ Run button on a
   // plan item produces this prefix. Stash {type, id} on the

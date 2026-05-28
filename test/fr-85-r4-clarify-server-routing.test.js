@@ -173,10 +173,11 @@ t('attach.js: r7 — clarify branch wraps message.text with a brevity preamble b
   assert.ok(idx > -1, 'handleChatMessage must be defined');
   const win = ATTACH.slice(idx, idx + 6000);
   // The brevity instruction must be applied to message.text inside
-  // the clarify branch. We anchor on "concise" / "short sentences"
-  // so the test doesn't pin a specific wording.
-  assert.ok(/message\.text\s*=[\s\S]{0,400}(concise|short sentences|brief)/i.test(win),
-    'r7: clarify branch must rewrite message.text with a brevity instruction (concise / short sentences / brief)');
+  // the clarify branch. We anchor on any brevity wording (r7 r2
+  // strengthened this to "2-3 sentences MAX / terse") so the test
+  // doesn't pin one exact phrasing.
+  assert.ok(/message\.text\s*=[\s\S]{0,400}(concise|short sentences|sentences MAX|terse|brief)/i.test(win),
+    'r7: clarify branch must rewrite message.text with a brevity instruction (concise / terse / N sentences MAX)');
   // The user's original text must be embedded in the wrapped string —
   // we don't want to lose what they actually asked.
   assert.ok(/message\.text\s*=[\s\S]{0,400}(\$\{text\}|`\s*\$\{|\+\s*text\b)/.test(win),

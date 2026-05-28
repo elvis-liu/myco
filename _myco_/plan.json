@@ -3534,6 +3534,12 @@
             "kind": "run-summary",
             "runStartedAt": "2026-05-27T23:29:50.365Z"
           }
+        },
+        {
+          "id": "fr85r7b-6d81d80c450d",
+          "user": "claude",
+          "text": "✓ r7 round 2: clarify reply now HARD-capped short (soft prompt nudge wasn't enough). attach.js prompt strengthened to \"2-3 sentences MAX, terse, no preamble/bullets\". agent-session.js _capClarifyReply() truncates the WS payload to ≤3 sentences (+600-char backstop) before the popover sees it; rec.chat keeps full text for audit. Test: test/fr-85-r7-clarify-concise.test.js (7 guards incl. behavioral cap tests). Sweep 104/104.",
+          "ts": "2026-05-28T03:42:43.334Z"
         }
       ],
       "meta": {
@@ -3669,5 +3675,5 @@
       "description": "**Problem:** Turn-result rows are rendered explicitly, adding visual noise that prior requests asked to suppress.\n**Expected:** Turn result is folded into the adjacent chrome batch and surfaced only when that batch is expanded.\n**Actual:** Turn result renders as its own standalone entry alongside the chrome batch."
     }
   ],
-  "updatedAt": "2026-05-28T02:41:29.957Z"
+  "updatedAt": "2026-05-28T03:42:43.334Z"
 }
