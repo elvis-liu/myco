@@ -7845,3 +7845,10 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
    just keeps the hover affordance consistent (the diagram-specific
    tone is subtle: same as Speak when present). */
 .composer-btn-diagram { /* relies on .composer-btn cascade — no extra rules needed */ }
+
+/* bug-39: KaTeX display math — let wide equations scroll horizontally
+   instead of overflowing the chat bubble / card width. Inline math
+   inherits the surrounding line. */
+.katex-display{overflow-x:auto;overflow-y:hidden;padding:2px 0;margin:6px 0;}
+.katex{font-size:1.02em;}
+.chat-msg .katex-display,.agent-card-md .katex-display,.cc-a .katex-display{max-width:100%;}
