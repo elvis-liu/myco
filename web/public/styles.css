@@ -1620,8 +1620,12 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   z-index: 30;
   overflow: hidden;
 }
-/* Center the conversation column on wide screens; max-width keeps long
-   lines readable and the chevron-collapse cards from sprawling. */
+/* Chat fills the full pane width on wide screens (user request:
+   "the chat pane should be allowed to be as wide as the screen").
+   Previously the conversation column was centered at max-width: 880px
+   for line-length readability; that cap is now relaxed to none so the
+   chat uses the entire available width. The width:100% + auto margins
+   remain harmless no-ops at max-width: none. */
 @media (min-width: 901px) {
   #chatpane.chat-main-view #chat-messages,
   #chatpane.chat-main-view #chat-form,
@@ -1629,7 +1633,7 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   #chatpane.chat-main-view #chat-autocomplete,
   #chatpane.chat-main-view #chat-empty {
     width: 100%;
-    max-width: 880px;
+    max-width: none;
     margin-left: auto;
     margin-right: auto;
   }
