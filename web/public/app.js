@@ -3600,7 +3600,7 @@ function _clarifyRenderBusy() {
   const replyEl = _clarifyReplyEl();
   if (!replyEl) return;
   replyEl.className = 'chat-clarify-reply is-busy';
-  replyEl.textContent = 'claude is thinking…';
+  replyEl.textContent = 'myco is thinking…';
   // Disable the input + send button while the reply is in flight to
   // prevent accidental double-submits.
   const pop = document.getElementById('chat-clarify-popover');
@@ -4619,7 +4619,7 @@ function renderChatMessage(m, isActiveMenu) {
   const seqAttr = seq != null ? ` data-seq="${seq}"` : '';
   const tsAttr = m.ts ? ` data-ts="${escHtml(m.ts)}"` : '';
   return `<div class="${cls}"${rowAttrs}${seqAttr}${tsAttr}>
-    <div class="chat-meta"><span class="chat-user">${escHtml(m.user || '?')}</span><span class="chat-ts">${escHtml(ts)}</span></div>
+    <div class="chat-meta"><span class="chat-user">${escHtml(m.user === 'claude' ? 'myco' : (m.user || '?'))}</span><span class="chat-ts">${escHtml(ts)}</span></div>
     ${textHtml}
     ${optsHtml}
   </div>`;
@@ -5528,7 +5528,7 @@ function _appendAgentEvent(ev) {
     // immediately below (assistant_text is in AGENT_DEFAULT_EXPANDED,
     // so the body is visible without a click). The 120-char first-line
     // preview was redundant with the body underneath.
-    head.innerHTML += `<span class="agent-card-kind agent-card-claude">claude</span>`;
+    head.innerHTML += `<span class="agent-card-kind agent-card-claude">myco</span>`;
     body.className += ' agent-card-md';
     body.innerHTML = renderMd(ev.text || '');
     card.dataset.assistantText = ev.text || '';   // seed merge accumulator
@@ -10617,7 +10617,7 @@ function renderClaudeCard(message, questionMessage) {
   const header = document.createElement('div');
   header.className = 'cc-anchor';
   header.innerHTML =
-    `<span>💬 Claude · ${escHtml(anchorTxt)}</span><span class="cc-spacer"></span>` +
+    `<span>💬 myco · ${escHtml(anchorTxt)}</span><span class="cc-spacer"></span>` +
     `<button class="cc-collapse" title="Collapse">⌃</button>` +
     `<button class="cc-delete" title="Delete">✕</button>`;
   card.appendChild(header);
@@ -10647,7 +10647,7 @@ function renderClaudeCard(message, questionMessage) {
     card.classList.toggle('collapsed');
   });
   header.querySelector('.cc-delete').addEventListener('click', () => {
-    if (!confirm('Delete this Claude reply?')) return;
+    if (!confirm('Delete this myco reply?')) return;
     deleteClaudeCard(message.id).catch(() => {});
   });
   return card;
@@ -10660,7 +10660,7 @@ function renderPendingCard(pending) {
     ? `lines ${pending.anchor.startLine}–${pending.anchor.endLine}`
     : 'whole file';
   card.innerHTML =
-    `<div class="cc-anchor"><span>💬 Claude · ${escHtml(anchorTxt)}</span></div>` +
+    `<div class="cc-anchor"><span>💬 myco · ${escHtml(anchorTxt)}</span></div>` +
     `<div class="cc-q">${escHtml(pending.question)}</div>` +
     `<div class="cc-a">Thinking…</div>`;
   return card;
