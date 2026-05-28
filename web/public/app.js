@@ -5379,6 +5379,28 @@ function _appendAgentEvent(ev) {
     // writes some text get their own block, not retroactively
     // merged into the pre-text batch.
     const prev = pane.lastElementChild;
+    // bug-38: turn_result must NEVER start its own chrome batch. The
+    // reply text already lives in the claude bubble (assistant_text
+    // card) and the live status strip + token meter already signal
+    // turn completion. If the prev DOM child is the chrome batch
+    // holding this turn's tool calls, fold turn_result into it (and
+    // attach the outcome chip there) so it's reachable on expand. If
+    // prev is anything else (assistant_text, chat-msg, empty pane),
+    // drop the DOM render entirely — pre-fix this path created a
+    // fresh chrome batch whose collapsed head was "■ done · $0.04...",
+    // i.e. the redundant standalone "turn-result row" the user wants
+    // hidden. Short-circuit before the seq-consecutive check so this
+    // rule applies regardless of whether the seq run was broken.
+    if (ev.type === 'turn_result') {
+      if (prev && prev.dataset && prev.dataset.evType === '_chrome_batch') {
+        _appendToChromeBatch(prev, ev, ts);
+        if (typeof ev.seq === 'number') prev.dataset.lastSeq = String(ev.seq);
+        _attachTurnOutcomeChip(prev, ev);
+        scrollChatToLatest();
+      }
+      _enforceChatHistoryCap();
+      return;
+    }
     let batch;
     // 2026-05-17 user rule: "group msg of the same type only if they
     // have consecutive seq # and of the same type". For chrome
@@ -6171,9 +6193,18 @@ function _appendToChromeBatch(card, ev, ts) {
   // signature so a follow-up event of a different type swaps it
   // correctly.
   _bumpToolResultAggregator(card, ev);
-  card.dataset.chromeBatchSig = _chromeShortLabelSig(ev);
-  const summaryEl = card.querySelector('.agent-chrome-last');
-  if (summaryEl) summaryEl.textContent = _chromeBatchHeadLabel(card, ev);
+  // bug-38: do NOT update the head label / signature when the
+  // incoming event is turn_result. The batch's outcome chip already
+  // shows "✓ <duration> <tokens>"; relabeling the head to
+  // "■ done · $0.04..." would overwrite "▸ ✏ Edit · file.js" (the
+  // last meaningful action this turn) and re-introduce the same
+  // redundant "turn-result row" we're trying to hide. Body row still
+  // appends so the result is reachable when the batch is expanded.
+  if (ev.type !== 'turn_result') {
+    card.dataset.chromeBatchSig = _chromeShortLabelSig(ev);
+    const summaryEl = card.querySelector('.agent-chrome-last');
+    if (summaryEl) summaryEl.textContent = _chromeBatchHeadLabel(card, ev);
+  }
   const body = card.querySelector('.agent-chrome-body');
   if (body) body.appendChild(_chromeEventLine(ev, ts));
 }

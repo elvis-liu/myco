@@ -3589,7 +3589,7 @@
       "id": "bug-37",
       "text": "Stop button stays active after session aborts with no ongoing activity",
       "layer": "Bug",
-      "done": true,
+      "done": false,
       "addedAt": "2026-05-27T23:36:12.030Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -3604,10 +3604,14 @@
           "ts": "2026-05-27T23:37:35.840Z"
         },
         {
-          "id": "bug37cl-c22a77c7cfd9",
+          "id": "8038f21e111f",
           "user": "claude",
-          "text": "✓ fix: 3 corner cases closed in web/public/app.js — (1) iteration_aborted now retires the strip (was: server emits on every abort path but no follow-up turn_result); (2) WS t:\"exit\" routes through iteration_aborted (was: only wrote to xterm); (3) _retireClaudeTyping now clears kind+line (was: only awaitingClaude → stale label kept Stop visible past 30s idle). Test: test/bug-37-stop-button-state.test.js — 3 static guards, all green. Full sweep 102/102.",
-          "ts": "2026-05-27T23:44:04.671Z"
+          "text": "✓ success · 415.4s · $5.6236 · 29↓/13179↑\n\n**bug-37 closed** on `main` (`c20cf51`). No deploy per rule.\n\n**3 corner cases the code wasn't handling:**\n\n| # | Path | Before | After |\n|---|------|--------|-------|\n| 1 | `iteration_aborted` event (every server abort path: user-Stop, kill-mid-stream, stream-closed, AbortError) | Stop stayed — client only retired on `turn_result`/`fatal` | Explicit handler clears kind+line+status, no grace period |\n| 2 | WS `{t:'exit'}` frame (reaper-kill / SDK exit) | Only wrote to xterm | Routed through `iteration_aborted` handler |\n| 3 | `_retireClaudeTyping` (30s idle fallback) | Cleared `awaitingClaude` only; stale `kind`+`line` kept Stop visible | Now nulls `claudeStatusKind`, `claudeStatusLine`, `claudeStatus` too |\n\nTest `test/bug-37-stop-button-state.test.js` (3 guards, red→green). Sweep **10…",
+          "ts": "2026-05-27T23:44:44.783Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-27T23:37:49.122Z"
+          }
         }
       ],
       "meta": {
@@ -3615,8 +3619,49 @@
         "originalText": "sometimes the stop button is not greyed out even when there is no activity for a long time. The session does say 'aborted'",
         "rewritten": true
       },
-      "description": "**Problem:** Users can click a Stop button that has no work to stop, creating confusion about session state.\n**Expected:** Stop button is greyed out/disabled once the session is idle or marked `aborted`.\n**Actual:** Stop button remains enabled for long idle periods even though the session status shows `aborted`."
+      "description": "**Problem:** Users can click a Stop button that has no work to stop, creating confusion about session state.\n**Expected:** Stop button is greyed out/disabled once the session is idle or marked `aborted`.\n**Actual:** Stop button remains enabled for long idle periods even though the session status shows `aborted`.",
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-27T23:44:44.783Z",
+          "startedAt": "2026-05-27T23:37:49.122Z",
+          "summary": "415.4s · 29→13179 tok",
+          "result": "**bug-37 closed** on `main` (`c20cf51`). No deploy per rule.\n\n**3 corner cases the code wasn't handling:**\n\n| # | Path | Before | After |\n|---|------|--------|-------|\n| 1 | `iteration_aborted` event (every server abort path: user-Stop, kill-mid-stream, stream-closed, AbortError) | Stop stayed — client only retired on `turn_result`/`fatal` | Explicit handler clears kind+line+status, no grace period |\n| 2 | WS `{t:'exit'}` frame (reaper-kill / SDK exit) | Only wrote to xterm | Routed through `iteration_aborted` handler |\n| 3 | `_retireClaudeTyping` (30s idle fallback) | Cleared `awaitingClaude` only; stale `kind`+`line` kept Stop visible | Now nulls `claudeStatusKind`, `claudeStatusLine`, `claudeStatus` too |\n\nTest `test/bug-37-stop-button-state.test.js` (3 guards, red→green). Sweep **102/102**. Cache buster `app.js v254→v255`.\n\nSay **\"deploy\"** to ship."
+        }
+      ]
+    },
+    {
+      "id": "bug-38",
+      "text": "Hide explicit turn-result row by merging into adjacent expandable chrome batch",
+      "layer": "Bug",
+      "done": true,
+      "addedAt": "2026-05-28T00:12:54.190Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "f64554e0dbeb",
+          "user": "kkrazy",
+          "text": "The result is shown already with the 'claude' bubble",
+          "ts": "2026-05-28T00:16:26.597Z"
+        },
+        {
+          "id": "bug38cl-bf501b933b61",
+          "user": "claude",
+          "text": "✓ fix: turn_result no longer creates a standalone DOM row. _appendAgentEvent short-circuits in the chrome branch — folds turn_result into the prev chrome batch (with outcome chip) when adjacent, drops the DOM render otherwise (claude bubble + live status strip already signal completion). _appendToChromeBatch skips the head relabel for turn_result so the batch keeps showing the last meaningful action. Test: test/bug-38-turn-result-merge.test.js — 3 static guards, all green. Sweep 103/103.",
+          "ts": "2026-05-28T00:23:29.702Z"
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "there were previous request to show the turn result explicitly, hide it by merging it with the adjacent chrome batch which can be expanded if needed",
+        "rewritten": true
+      },
+      "description": "**Problem:** Turn-result rows are rendered explicitly, adding visual noise that prior requests asked to suppress.\n**Expected:** Turn result is folded into the adjacent chrome batch and surfaced only when that batch is expanded.\n**Actual:** Turn result renders as its own standalone entry alongside the chrome batch."
     }
   ],
-  "updatedAt": "2026-05-27T23:44:04.671Z"
+  "updatedAt": "2026-05-28T00:23:29.702Z"
 }
