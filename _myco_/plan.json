@@ -3540,6 +3540,12 @@
           "user": "claude",
           "text": "✓ r7 round 2: clarify reply now HARD-capped short (soft prompt nudge wasn't enough). attach.js prompt strengthened to \"2-3 sentences MAX, terse, no preamble/bullets\". agent-session.js _capClarifyReply() truncates the WS payload to ≤3 sentences (+600-char backstop) before the popover sees it; rec.chat keeps full text for audit. Test: test/fr-85-r7-clarify-concise.test.js (7 guards incl. behavioral cap tests). Sweep 104/104.",
           "ts": "2026-05-28T03:42:43.334Z"
+        },
+        {
+          "id": "fr85r7c-229c9cdcc1db",
+          "user": "claude",
+          "text": "✓ r7 r3: removed server-side truncation (_capClarifyReply) per user request — it was cutting replies mid-thought. The clarify reply now ships in full; the strengthened attach.js prompt wrap (2-3 sentences MAX, terse) is the only brevity mechanism. Deleted test/fr-85-r7-clarify-concise.test.js; prompt-wrap coverage stays in test/fr-85-r4-clarify-server-routing.test.js. Sweep 103/103.",
+          "ts": "2026-05-28T03:49:49.119Z"
         }
       ],
       "meta": {
@@ -3675,5 +3681,5 @@
       "description": "**Problem:** Turn-result rows are rendered explicitly, adding visual noise that prior requests asked to suppress.\n**Expected:** Turn result is folded into the adjacent chrome batch and surfaced only when that batch is expanded.\n**Actual:** Turn result renders as its own standalone entry alongside the chrome batch."
     }
   ],
-  "updatedAt": "2026-05-28T03:42:43.334Z"
+  "updatedAt": "2026-05-28T03:49:49.119Z"
 }
