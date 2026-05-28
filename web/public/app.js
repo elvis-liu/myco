@@ -5140,13 +5140,14 @@ const AGENT_CHROME_TYPES = new Set([
   // bug-25: unknown_event REMOVED from chrome — _appendAgentEvent
   // short-circuits it before classification (see top-of-function
   // block). Listing it here would be dead code.
-  // bug-23: tool_result REMOVED from chrome — it now renders as a
-  // claude-style message bubble (its own top-level card) rather
-  // than folding into the chrome batch with tool_use + hook_allow.
-  // The user wanted "the result to show in the message bubble"
-  // since the result is what claude actually saw from the tool;
-  // the chrome batch still groups the call + hook + meta so the
-  // surrounding noise stays compact.
+  // bug-38 r2: tool_result is BACK in chrome (reverses bug-23). The
+  // user re-evaluated on the live site — the raw tool output (e.g. a
+  // WebSearch results JSON dump) rendering as its own standalone
+  // bubble is noise, because claude's narration bubble already
+  // summarizes "the result". So tool_result folds into the
+  // collapsible chrome batch with tool_use + hook_allow; the raw
+  // content stays reachable when the batch is expanded.
+  'tool_result',
   // turn_result folds in too — its `result` text payload is usually
   // a duplicate of claude's last assistant_text block (the SDK
   // appends the same content as the "final answer"). The cost +
@@ -5547,14 +5548,11 @@ function _appendAgentEvent(ev) {
     head.innerHTML += `<span class="agent-card-kind agent-card-tool">${escHtml(icon)} ${escHtml(ev.name)}</span>
       <code class="agent-card-summary agent-tool-summary">${escHtml(summary)}</code>`;
     body.innerHTML = `<pre class="agent-card-tool-input">${escHtml(JSON.stringify(ev.input, null, 2))}</pre>`;
-  } else if (ev.type === 'tool_result') {
-    const len = (ev.content || '').length;
-    const icon = ev.isError ? '⚠' : '✓';
-    head.innerHTML += `<span class="agent-card-kind agent-card-result${ev.isError ? ' agent-card-error' : ''}">${icon} result</span>
-      <span class="agent-card-summary agent-mute">${len} bytes · for=<code>${escHtml((ev.tool_use_id || '').slice(-8))}</code></span>`;
-    // Errors get auto-expanded so the user sees the failure inline.
-    if (ev.isError) card.classList.add('agent-card-force-expand');
-    body.innerHTML = `<pre class="agent-tool-result-preview">${escHtml(ev.content || '')}</pre>`;
+  // bug-38 r2: the standalone tool_result bubble branch was removed.
+  // tool_result is back in AGENT_CHROME_TYPES, so it early-returns
+  // through the chrome-batch path above and never reaches this
+  // fresh-card render. The chrome batch's _chromeEventLine /
+  // _chromeEventDetails build the per-result row + expandable content.
   } else if (ev.type === 'turn_result') {
     const cost = ev.totalCostUsd != null ? '$' + ev.totalCostUsd.toFixed(4) : '$?';
     const u = ev.usage || {};

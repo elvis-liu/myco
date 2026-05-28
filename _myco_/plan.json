@@ -3653,6 +3653,12 @@
           "user": "claude",
           "text": "✓ fix: turn_result no longer creates a standalone DOM row. _appendAgentEvent short-circuits in the chrome branch — folds turn_result into the prev chrome batch (with outcome chip) when adjacent, drops the DOM render otherwise (claude bubble + live status strip already signal completion). _appendToChromeBatch skips the head relabel for turn_result so the batch keeps showing the last meaningful action. Test: test/bug-38-turn-result-merge.test.js — 3 static guards, all green. Sweep 103/103.",
           "ts": "2026-05-28T00:23:29.702Z"
+        },
+        {
+          "id": "bug38r2-a05bdecd4507",
+          "user": "claude",
+          "text": "✓ r2: live-site repro showed the standalone cards were tool_results (raw WebSearch JSON), not turn_results. Per user choice, folded tool_result back into the collapsible chrome batch (reverses bug-23) — added tool_result to AGENT_CHROME_TYPES, removed the standalone bubble render branch. Only claude's summary bubble stays visible; raw result reachable on expand. Superseded test/bug-23-tool-result-bubble.test.js with test/bug-38-r2-tool-result-fold.test.js. Sweep 103/103.",
+          "ts": "2026-05-28T02:41:29.957Z"
         }
       ],
       "meta": {
@@ -3663,5 +3669,5 @@
       "description": "**Problem:** Turn-result rows are rendered explicitly, adding visual noise that prior requests asked to suppress.\n**Expected:** Turn result is folded into the adjacent chrome batch and surfaced only when that batch is expanded.\n**Actual:** Turn result renders as its own standalone entry alongside the chrome batch."
     }
   ],
-  "updatedAt": "2026-05-28T00:23:29.702Z"
+  "updatedAt": "2026-05-28T02:41:29.957Z"
 }
