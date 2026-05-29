@@ -2517,6 +2517,20 @@ test_chat_window() {
   # is NOT on the list (negative guard against a careless refactor
   # adding it back).
   node_test_result test/fr-45-sdkopts-lint.test.js "test/fr-45-sdkopts-lint.test.js (13 cases)"
+  # bug-40 (user-reported): special chars in a prompt (LaTeX / unicode)
+  # 400 the NEXT turn with "thinking or redacted_thinking blocks in the
+  # latest assistant message cannot be modified". Root cause: the fr-55
+  # lean-ctx sidecar's autonomous compaction-sync REWRITES the Anthropic
+  # transcript JSONL (observed 59 MB → 305 KB + .jsonl.bak.<ts> backups),
+  # breaking the immutability the API enforces on thinking blocks — every
+  # resume then reloads the poisoned transcript and 400s, wedging the
+  # session. Fix: (1) prevention — spawn lean-ctx with LEAN_CTX_AUTONOMY=
+  # false so it stops rewriting the transcript (ctx_* tools still work);
+  # (2) recovery — _isThinkingBlockError(err) classifies the 400 and the
+  # init- AND stream-error branches of _ensureIteration treat it as a
+  # poisoned resume (clear sdkSessionId, redeliver the in-flight turn,
+  # retry fresh), mirroring fr-44's resume-failure fallback.
+  node_test_result test/bug-40-thinking-block-resume.test.js "test/bug-40-thinking-block-resume.test.js (16 cases)"
   # fr-46: enable edit on plan items (body text + comments) — owner+admin
   # only. Adds PATCH /sessions/:id/artifact/item and PATCH
   # /sessions/:id/artifact/comment routes in artifacts.js, both gated on
