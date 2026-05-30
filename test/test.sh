@@ -2455,6 +2455,14 @@ test_chat_window() {
   # the .blocking class, and that ONLY the close→reconnect call site
   # passes blocking=true (initial-connect sites keep the lighter pill).
   node_test_result test/fr-88-ws-reconnect-blocking-modal.test.js "test/fr-88-ws-reconnect-blocking-modal.test.js (11 cases)"
+  # fr-88r (regression): "Stuck on connecting" — user-reported symptom
+  # caused by fr-87's tightened WS gate (403 on upgrade for unauthorized
+  # users) interacting with fr-88's blocking modal to produce an
+  # unrecoverable retry loop. Fix: track wsEverOpened per WS instance
+  # plus a consecutiveHandshakeFailures counter in the outer connect()
+  # closure; after 3 close-before-open events stop retrying and show a
+  # non-blocking error overlay so the user can pick another session.
+  node_test_result test/fr-88r-handshake-failure-stops-retry.test.js "test/fr-88r-handshake-failure-stops-retry.test.js (10 cases)"
   # fr-38: per-session strict-mode gate. When `/strict on`, claude-
   # bound chat messages MUST include a [run:plan#<id>] marker (the
   # user's affirmation that the turn is backed by an approved td/fr/

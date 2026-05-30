@@ -1331,12 +1331,30 @@ function openSession(id, opts = {}) {
   const qs = _buildAttachQuery(isShared);
   let reconnectDelay = 1000;
   const maxDelay = 15000;
+  // fr-88r: counts WS attempts where the upgrade handshake never
+  // completed (close fires with no preceding open). Pre-fr-88r the
+  // close handler would unconditionally re-attempt forever; combined
+  // with the fr-88 blocking modal that produced an unrecoverable
+  // "Reconnecting…" state when fr-87's stricter WS gate rejected the
+  // user with HTTP 403 at the upgrade. Three attempts is enough to
+  // rule out transient network glitches (mobile wake, brief WiFi
+  // drop) and tip into "permanent failure, give up + show the user".
+  // Reset on a successful open so a later transient drop doesn't
+  // inherit prior handshake failures.
+  let consecutiveHandshakeFailures = 0;
+  const MAX_HANDSHAKE_FAILURES = 3;
 
   function connect() {
     const ws = new WebSocket(`${proto}://${location.host}/attach/${encodeURIComponent(id)}${qs}`);
     state.ws = ws;
+    // fr-88r: per-WS-instance flag set in onopen, read in onclose to
+    // distinguish a transient post-open drop (true) from a handshake
+    // failure (false).
+    let wsEverOpened = false;
 
     ws.addEventListener('open', () => {
+      wsEverOpened = true;
+      consecutiveHandshakeFailures = 0;
       reconnectDelay = 1000;
       hideConnOverlay();
       _flushOutboundChat();                      // any chat sends queued during reconnect
@@ -1465,6 +1483,27 @@ function openSession(id, opts = {}) {
 
     ws.addEventListener('close', () => {
       if (state.activeId !== id) return; // switched session OR error cleared activeId
+      // fr-88r: distinguish handshake failure (close-before-open) from
+      // a transient post-open drop. The handshake-failure path is what
+      // produced the "stuck on connecting" symptom — fr-87's stricter
+      // WS gate rejects unauthorized users with HTTP 403 at the
+      // upgrade, so the WS close fires with no preceding open, and the
+      // old loop infinite-retried into fr-88's blocking modal. Bail
+      // after MAX_HANDSHAKE_FAILURES so the user gets a clear, non-
+      // blocking error instead of a perpetually-spinning overlay.
+      if (!wsEverOpened) {
+        consecutiveHandshakeFailures++;
+        if (consecutiveHandshakeFailures >= MAX_HANDSHAKE_FAILURES) {
+          showConnOverlay(
+            'Cannot connect',
+            'error',
+            'Access denied, or the session is unavailable. Pick another session or reload.',
+            false,                                  // NOT blocking — user must be able to click another session
+          );
+          state.activeId = null;                    // disable the setInterval(refreshSessions) reopen path
+          return;
+        }
+      }
       // fr-88: pass blocking=true so the user gets a full-viewport
       // dimmed modal during the reconnect window (instead of the
       // floating pill used on initial connect). Cleared on the next
