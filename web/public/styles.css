@@ -154,9 +154,18 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   cursor: pointer;
 }
 #btn-spawn { background: var(--accent); color: #000; font-size: 1.2rem; font-weight: 600; }
-#btn-spawn:active, #btn-collapse:active, #btn-manual:active, #btn-admin:active { transform: scale(.92); }
-#btn-manual:hover, #btn-admin:hover { background: rgba(255, 255, 255, .08); }
-#btn-manual .sidebar-icon-svg, #btn-admin .sidebar-icon-svg {
+/* fr-87 r3 (bug-44 regression fix): #btn-config (added by bug-44 to
+   the sidebar header for mobile Config-modal access) needs the SAME
+   icon-sizing + hover + active rules as #btn-manual and #btn-admin.
+   The bug-44 fix only touched the HTML + JS; without #btn-config in
+   the CSS selector below, the user-cog SVG renders at unspecified
+   width/height and collapses to a thin sliver — that sliver is the
+   "vertical bar right beside the config icon" the user reported.
+   Future restyles touching these rules: KEEP #btn-config in the
+   selector — removing it re-introduces the bug. */
+#btn-spawn:active, #btn-collapse:active, #btn-manual:active, #btn-admin:active, #btn-config:active { transform: scale(.92); }
+#btn-manual:hover, #btn-admin:hover, #btn-config:hover { background: rgba(255, 255, 255, .08); }
+#btn-manual .sidebar-icon-svg, #btn-admin .sidebar-icon-svg, #btn-config .sidebar-icon-svg {
   width: 18px;
   height: 18px;
   display: block;
@@ -1108,6 +1117,41 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   padding: 6px 10px;
   border: 1px solid rgba(255, 138, 138, .4);
   border-radius: 6px;
+}
+
+/* fr-87 r3: Config modal mobile responsive layout for the user-
+   facing PATs section. On ≤600px viewports:
+   · #config-dialog padding tightens (less wasted edge real estate)
+   · .config-pat-form stacks vertically (the desktop
+     grid-template-columns: 90px 1fr 1fr is too cramped on a 360px
+     phone — provider select + owner + repo all need their own row)
+   · .config-pat-row label allowed to wrap (a long
+     github/owner/repo#alias label would otherwise crowd the masked
+     value + actions; here we let it span the full row and the value
+     + actions wrap to a second flex row)
+   The admin section (Server env config) intentionally keeps its
+   vertical .config-admin-field stack as-is — it was already
+   responsive by virtue of its flex-direction:column shape. */
+@media (max-width: 600px) {
+  #config-dialog {
+    padding: 16px;
+    gap: 14px;
+  }
+  .config-pat-form {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .config-pat-form #config-pat-token,
+  .config-pat-form #config-pat-save {
+    grid-column: auto;
+  }
+  .config-pat-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .config-pat-label {
+    word-break: break-all;
+  }
 }
 
 /* fr-87 r2: admin merge — system-wide settings section inside the

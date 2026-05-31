@@ -2539,6 +2539,15 @@ test_chat_window() {
   # parallel entry. Static guards lock structure + ordering + ID
   # uniqueness + endpoint wiring.
   node_test_result test/fr-87-r2-admin-merge.test.js "test/fr-87-r2-admin-merge.test.js (9 cases)"
+  # fr-87 r3: bug-44 CSS regression + mobile-friendly Config modal.
+  # The bug-44 fix added #btn-config to the sidebar header HTML but
+  # the CSS sizing/hover/active rules keyed only on #btn-manual +
+  # #btn-admin — the user-cog SVG rendered without dimensions and
+  # collapsed to a thin sliver (the user's "vertical bar"). Fix
+  # extends each rule to include #btn-config. Plus @media
+  # (max-width:600px) for #config-dialog/.config-pat-form/.config-
+  # pat-row so the PAT section is usable on a 360px phone.
+  node_test_result test/fr-87-r3-mobile-config.test.js "test/fr-87-r3-mobile-config.test.js (7 cases)"
   # fr-38: per-session strict-mode gate. When `/strict on`, claude-
   # bound chat messages MUST include a [run:plan#<id>] marker (the
   # user's affirmation that the turn is backed by an approved td/fr/
