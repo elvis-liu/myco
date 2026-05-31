@@ -3799,7 +3799,107 @@
         "rewritten": true
       },
       "description": "**Problem:** Users can't enqueue fr/td/bug items while the queue is paused, forcing them to resume before submitting.\n**Expected:** Submissions of fr/td/bug are always accepted into the queue regardless of pause state; resuming the queue kicks off processing of any queued items.\n**Actual:** Submission is blocked while the queue is paused."
+    },
+    {
+      "id": "fr-87",
+      "text": "Allow regular users to access config page with user-scoped settings only",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-05-31T09:20:32.885Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "762a461fffc4",
+          "user": "kkrazy",
+          "text": "User pat should be part of the config",
+          "ts": "2026-05-31T09:22:40.234Z"
+        },
+        {
+          "id": "c6d42800b60e",
+          "user": "claude",
+          "text": "✓ success · 663.0s · $13.7802 · 45↓/34865↑\n\n## fr-87 (config page) landed — `a41e18c`\n\n```\nfeat(fr-87): Config page MVP — let regular users manage their own PATs\n 7 files changed, 845 insertions(+), 3 deletions(-)\n```\n\n### What the user sees\n\n**Click the `@username` chip in the top-right status bar** → Config modal opens.\n\nThe modal shows:\n- **Personal access tokens** section\n  - Per-provider user-level rows (github + gitee), each showing `••••XXXX` or `(none)` with Set / Delete buttons\n  - Per-repo rows (one per stored entry), each labeled `github/owner/repo` or `github/owner/repo#alias`, with Set / Delete buttons\n  - \"Add a per-repo PAT\" form at the bottom (provider, owner, repo, alias, token input)\n- **Account** section\n  - Sign Out button (relocated from the legacy chip-click `confirm()` prompt)\n\nToken values are **never** sh…",
+          "ts": "2026-05-31T09:33:47.763Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-31T09:22:42.590Z"
+          }
+        },
+        {
+          "id": "31e778aeb809",
+          "user": "claude",
+          "text": "✓ success · 52.3s · $14.1945 · 6↓/3569↑\n\nTwo different stories for the two providers. Short answer:\n\n| Provider | Need to register an OAuth app? | What you'd register / where |\n|---|---|---|\n| **GitHub** | **Yes**, IF you want new users to be able to **log in to myco** | GitHub Settings → Developer settings → OAuth Apps → New OAuth App |\n| **Gitee** | **No** | Gitee has no OAuth flow in myco — Gitee PATs are set manually per-repo via the new Config page (or `/setpat`) |\n\n## Why GitHub needs an OAuth App\n\nLooking at `server/src/index.js` + `auth.js`:\n\n- The **myco login** path is `GET /auth/github/start` → redirects to `https://github.com/login/oauth/authorize?client_id=<MYCO_GH_CLIENT_ID>&…`\n- That route returns **HTTP 500** when `MYCO_GH_CLIENT_ID` isn't set — that's the warning you've seen on every deploy (`OAuth not configu…",
+          "ts": "2026-05-31T09:57:35.420Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-05-31T09:22:42.569Z"
+          }
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "The config page should be available to regular user too but limit to user only config instead of system wide config",
+        "rewritten": true
+      },
+      "description": "**Problem:** Regular users cannot access the config page, blocking them from managing their own preferences.\n**Expected:** Config page is available to regular users, exposing only user-scoped config.\n**Actual:** Config page is gated such that regular users cannot reach it; system-wide config is the only surface.\n**Context:** Must hide/strip system-wide config controls for non-admin users while keeping them for privileged roles.",
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-05-31T09:33:47.763Z",
+          "startedAt": "2026-05-31T09:22:42.590Z",
+          "summary": "663.0s · 45→34865 tok",
+          "result": "## fr-87 (config page) landed — `a41e18c`\n\n```\nfeat(fr-87): Config page MVP — let regular users manage their own PATs\n 7 files changed, 845 insertions(+), 3 deletions(-)\n```\n\n### What the user sees\n\n**Click the `@username` chip in the top-right status bar** → Config modal opens.\n\nThe modal shows:\n- **Personal access tokens** section\n  - Per-provider user-level rows (github + gitee), each showing `••••XXXX` or `(none)` with Set / Delete buttons\n  - Per-repo rows (one per stored entry), each labeled `github/owner/repo` or `github/owner/repo#alias`, with Set / Delete buttons\n  - \"Add a per-repo PAT\" form at the bottom (provider, owner, repo, alias, token input)\n- **Account** section\n  - Sign Out button (relocated from the legacy chip-click `confirm()` prompt)\n\nToken values are **never** shipped to the client — only `last4` + `present:bool`.\n\n### Security contract locked in tests\n\nThe 17-case regression test explicitly asserts:\n- `maskToken` returns only `{present, last4}` — no `raw`/`token`/`value` field\n- `listAllPats` output JSON-serialized **never** contains any substring of any raw token (`SECRET` marker test)\n- `GET /config/pats` handler **never** calls `getToken` (which returns raw values)\n- All 5 routes require auth\n- A comment in `index.js` explicitly names fr-87 + the never-leak invariant so future \"simplifications\" don't reintroduce a leak\n\n### Local state\n\n- HEAD = `a41e18c` (1 commit ahead of origin)\n- Unstaged: only the `_myco_/plan.json` drift from the `[run:plan#fr-87]` dispatch\n\n### Open follow-ups (your call)\n\n1. Push `a41e18c` to origin? (Same `GIT_ASKPASS` pattern; PAT still in chat — please rotate when done.)\n2. Deploy to `myco.labxnow.ai`? (Tarball + `--skip-tests` local-mode-on-host like the last two deploys.)\n3. `memory: sync` for the plan.json drift?\n\nPer CLAUDE.md §0 I'm holding for explicit \"deploy\" before touching prod."
+        },
+        {
+          "status": "success",
+          "ts": "2026-05-31T09:57:35.420Z",
+          "startedAt": "2026-05-31T09:22:42.569Z",
+          "summary": "52.3s · 6→3569 tok",
+          "result": "Two different stories for the two providers. Short answer:\n\n| Provider | Need to register an OAuth app? | What you'd register / where |\n|---|---|---|\n| **GitHub** | **Yes**, IF you want new users to be able to **log in to myco** | GitHub Settings → Developer settings → OAuth Apps → New OAuth App |\n| **Gitee** | **No** | Gitee has no OAuth flow in myco — Gitee PATs are set manually per-repo via the new Config page (or `/setpat`) |\n\n## Why GitHub needs an OAuth App\n\nLooking at `server/src/index.js` + `auth.js`:\n\n- The **myco login** path is `GET /auth/github/start` → redirects to `https://github.com/login/oauth/authorize?client_id=<MYCO_GH_CLIENT_ID>&…`\n- That route returns **HTTP 500** when `MYCO_GH_CLIENT_ID` isn't set — that's the warning you've seen on every deploy (`OAuth not configured (missing in .env: MYCO_GH_CLIENT_ID …)`)\n- Without that env var, new users can't authenticate to myco itself. The only people who can log in are users whose tokens are already in `auth-sessions.json` from a *prior* OAuth setup that ran somewhere\n- After a successful GitHub OAuth login, the callback **auto-mirrors the user's GitHub access_token into `/data/git-tokens.json`** at the user-level `github` slot — so the user gets a fallback PAT for free. Per-repo PATs from the Config page just override that for specific repos.\n\nSo the GitHub OAuth App is doing two jobs at once:\n1. **Authentication** — gates who can use myco at all (combined with `allowed-github-users.txt`)\n2. **User-level GitHub PAT auto-issuance** — populates the GitHub fallback token so `/feature`, `/bug`, claude's git tool, etc. can clone/push private repos without forcing every user to `/setpat`\n\n## Exact steps to register a GitHub OAuth App\n\nIf you want to wire login for `myco.labxnow.ai`:\n\n1. Go to **https://github.com/settings/developers** → **OAuth Apps** → **New OAuth App** (this is a personal/user OAuth App — for an org-owned app, use the org's `Settings → Developer settings → OAuth Apps` instead)\n2. Fill in:\n"
+        }
+      ]
+    },
+    {
+      "id": "bug-43",
+      "text": "HUD and \"critic: gemini\" button overflow on mobile, crowding text input",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-31T09:26:41.729Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the HUD is too wide for mobile. Also the 'critic: gemini' button is too wide chewing up text input area on mobile",
+        "rewritten": true
+      },
+      "description": "**Problem:** On mobile, the HUD is too wide and the \"critic: gemini\" button takes up space that should belong to the text input area.\n**Expected:** HUD fits within the mobile viewport; \"critic: gemini\" button is sized so the text input retains usable width.\n**Actual:** HUD overflows horizontally and the oversized \"critic: gemini\" button chews into the text input area."
+    },
+    {
+      "id": "bug-44",
+      "text": "Config page not visible on mobile until a session is opened",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-05-31T10:06:37.468Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "The config page doesnt show up on mobile, but show up when i click on a session",
+        "rewritten": true
+      },
+      "description": "**Problem:** On mobile, the config page is inaccessible from the default view.\n**Expected:** Config page should be reachable on mobile without needing to open a session first.\n**Actual:** Config page is hidden on mobile and only appears after clicking into a session."
     }
   ],
-  "updatedAt": "2026-05-31T01:08:36.695Z"
+  "updatedAt": "2026-05-31T10:06:43.164Z"
 }
