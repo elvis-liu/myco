@@ -247,11 +247,27 @@ function hideLogin() {
 }
 
 async function tryToken(token) {
-  if (!token) return false;
-  const res = await fetch('/auth/check', { headers: { Authorization: `Bearer ${token}` } });
-  const body = await res.json().catch(() => ({}));
-  if (body.ok && body.user) state.chatUser = body.user;
-  return !!body.ok;
+  console.log('[admin-diag] tryToken called. Token length:', token ? token.length : 0);
+  if (!token) {
+    console.log('[admin-diag] tryToken: No token in state/localStorage.');
+    return false;
+  }
+  try {
+    const res = await fetch('/auth/check', { headers: { Authorization: `Bearer ${token}` } });
+    console.log('[admin-diag] tryToken: /auth/check response status:', res.status, 'ok:', res.ok);
+    const body = await res.json().catch(() => ({}));
+    console.log('[admin-diag] tryToken: /auth/check body parsed:', JSON.stringify(body));
+    if (body.ok && body.user) {
+      state.chatUser = body.user;
+      console.log('[admin-diag] tryToken: successfully resolved state.chatUser to:', state.chatUser);
+    } else {
+      console.log('[admin-diag] tryToken: body is not ok or user is missing. body.ok:', body.ok, 'body.user:', body.user);
+    }
+    return !!body.ok;
+  } catch (err) {
+    console.error('[admin-diag] tryToken fetch threw error:', err);
+    return false;
+  }
 }
 
 async function bootstrap() {
@@ -323,7 +339,7 @@ const IS_TOUCH_DEVICE = (() => {
 // it's a left-sidebar overlay (desktop) / full-pane overlay (mobile)
 // that can coexist with whatever main-pane view is active underneath.
 // (Phase 9 step 3 retired #terminal-wrap and #conversation-wrap.)
-const MAIN_PANE_IDS = ['files-wrap', 'plan-wrap', 'arch-wrap', 'test-wrap'];
+const MAIN_PANE_IDS = ['files-wrap', 'plan-wrap', 'arch-wrap', 'test-wrap', 'admin-wrap'];
 
 function _hideMainPaneSiblings(keep) {
   for (const id of MAIN_PANE_IDS) {
@@ -336,7 +352,7 @@ function _hideMainPaneSiblings(keep) {
     document.getElementById('btn-files')?.classList.remove('active');
   }
   // Clear the artifact-toggle active class for any view that's no longer up.
-  for (const t of ['plan', 'arch', 'test']) {
+  for (const t of ['plan', 'arch', 'test', 'admin']) {
     if (keep === t + '-wrap') continue;
     document.getElementById('btn-' + t)?.classList.remove('active');
     if (state.artifactView && state.artifactView.active === t && keep !== t + '-wrap') {
@@ -845,6 +861,7 @@ async function init() {
   connectLogWs();
   showBuildStamp();
   showUserStamp();
+  bindAdminUi();
   // fr-92: first-time users land on the manual so they know what's here
   // before clicking around. Deferred until after the rest of init wires
   // up so the modal opens over a populated UI (not an empty shell).
@@ -2536,9 +2553,16 @@ function appendChatMessage(message) {
         if (upgraded || textChanged) {
           state.chatMessages[i] = message;
           const list = document.getElementById('chat-messages');
-          if (list && list.children[i]) {
-            const newEl = _htmlToNode(renderChatMessage(message, /*isActiveMenu*/ false));
-            if (newEl) list.children[i].replaceWith(newEl);
+          if (list) {
+            const targetUuid = message.meta && message.meta.transcriptUuid;
+            const existingEl = targetUuid ? list.querySelector(`.chat-msg[data-transcript-uuid="${CSS.escape(targetUuid)}"]`) : null;
+            if (existingEl) {
+              const newEl = _htmlToNode(renderChatMessage(message, /*isActiveMenu*/ false));
+              if (newEl) existingEl.replaceWith(newEl);
+            } else if (list.children[i]) {
+              const newEl = _htmlToNode(renderChatMessage(message, /*isActiveMenu*/ false));
+              if (newEl) list.children[i].replaceWith(newEl);
+            }
           }
         }
         try { console.log('[chat-dedup] uuid=' + String(uuid).slice(0, 8) + ' upgraded=' + upgraded + ' textChanged=' + textChanged); } catch {}
@@ -2577,9 +2601,16 @@ function appendChatMessage(message) {
     if (lastHash && lastHash === incomingHash) {
       last.meta.menu = message.meta.menu;
       const list = document.getElementById('chat-messages');
-      if (list && list.children[lastIdx]) {
-        const newEl = _htmlToNode(renderChatMessage(last, /*isActiveMenu*/ true));
-        if (newEl) list.children[lastIdx].replaceWith(newEl);
+      if (list) {
+        const targetUuid = last.meta && last.meta.transcriptUuid;
+        const existingEl = targetUuid ? list.querySelector(`.chat-msg[data-transcript-uuid="${CSS.escape(targetUuid)}"]`) : null;
+        if (existingEl) {
+          const newEl = _htmlToNode(renderChatMessage(last, /*isActiveMenu*/ true));
+          if (newEl) existingEl.replaceWith(newEl);
+        } else if (list.children[lastIdx]) {
+          const newEl = _htmlToNode(renderChatMessage(last, /*isActiveMenu*/ true));
+          if (newEl) list.children[lastIdx].replaceWith(newEl);
+        }
       }
       _updatePendingMenuFromMessage(last);
       _rescanPendingMenuQueue();
@@ -2901,14 +2932,23 @@ function _deactivatePriorMenuRows(list, incomingHash) {
     // hash-dedup branch usually catches this first, but the guard
     // belongs here too for callers that bypass the dedup.
     if (incomingHash && m.meta.menu.hash === incomingHash) continue;
-    const oldEl = children[i];
-    // Re-render any chat row that's still flagged as the active
-    // menu. The chat-msg-menu base class is a reliable selector;
-    // chat-msg-menu-collapsed means already resolved.
-    if (!oldEl || !oldEl.classList.contains('chat-msg-menu')) continue;
-    if (oldEl.classList.contains('chat-msg-menu-collapsed')) continue;
-    const newEl = _htmlToNode(renderChatMessage(m, /*isActiveMenu*/ false));
-    if (newEl) oldEl.replaceWith(newEl);
+    
+    const targetUuid = m.meta && m.meta.transcriptUuid;
+    const existingEl = targetUuid ? list.querySelector(`.chat-msg[data-transcript-uuid="${CSS.escape(targetUuid)}"]`) : null;
+    if (existingEl) {
+      if (existingEl.classList.contains('chat-msg-menu-collapsed')) continue;
+      const newEl = _htmlToNode(renderChatMessage(m, /*isActiveMenu*/ false));
+      if (newEl) existingEl.replaceWith(newEl);
+    } else {
+      const oldEl = children[i];
+      // Re-render any chat row that's still flagged as the active
+      // menu. The chat-msg-menu base class is a reliable selector;
+      // chat-msg-menu-collapsed means already resolved.
+      if (!oldEl || !oldEl.classList.contains('chat-msg-menu')) continue;
+      if (oldEl.classList.contains('chat-msg-menu-collapsed')) continue;
+      const newEl = _htmlToNode(renderChatMessage(m, /*isActiveMenu*/ false));
+      if (newEl) oldEl.replaceWith(newEl);
+    }
   }
 }
 
@@ -4529,9 +4569,10 @@ function renderChatPane(scrollToBottom = false) {
   // shared between chat-msg + agent-event) takes precedence over
   // data-ts in the sort/insert paths — see _insertChronological +
   // _resortChatPaneByTs.
+  const renderedMsgs = state.chatMessages.filter(m => !_shouldSkipMessageRender(m));
   const chatNodes = list.querySelectorAll(':scope > .chat-msg');
-  for (let i = 0; i < chatNodes.length && i < state.chatMessages.length; i++) {
-    const m = state.chatMessages[i];
+  for (let i = 0; i < chatNodes.length && i < renderedMsgs.length; i++) {
+    const m = renderedMsgs[i];
     if (m && m.ts) chatNodes[i].dataset.ts = m.ts;
     if (m && m.meta && typeof m.meta.seq === 'number') {
       chatNodes[i].dataset.seq = String(m.meta.seq);
@@ -4583,14 +4624,19 @@ function _findLastMenuMessageIdx(messages) {
   return -1;
 }
 
+function _shouldSkipMessageRender(m) {
+  if (!m) return true;
+  if (m.meta && (m.meta.kind === 'clarify' || m.meta.kind === 'clarify-reply')) {
+    return true;
+  }
+  if (m.text && /\[run:(plan|test|arch|td|fr|bug)#[A-Za-z0-9_-]+\]/.test(m.text)) {
+    return true;
+  }
+  return false;
+}
+
 function renderChatMessage(m, isActiveMenu) {
-  // fr-85 r4: clarify-tagged messages (both the user's clarify
-  // question AND claude's clarify-reply) live in rec.chat for the
-  // audit trail, but DON'T render in the chat pane — they belong
-  // in the popover only. Returning '' from this function makes
-  // _appendChatMessageDom skip the DOM insert (it builds nothing
-  // from an empty html string via _htmlToNode).
-  if (m && m.meta && (m.meta.kind === 'clarify' || m.meta.kind === 'clarify-reply')) {
+  if (_shouldSkipMessageRender(m)) {
     return '';
   }
   const fromClaude = m.user === 'claude';
@@ -4736,7 +4782,9 @@ function renderChatMessage(m, isActiveMenu) {
   const seq = m.meta && typeof m.meta.seq === 'number' ? m.meta.seq : null;
   const seqAttr = seq != null ? ` data-seq="${seq}"` : '';
   const tsAttr = m.ts ? ` data-ts="${escHtml(m.ts)}"` : '';
-  return `<div class="${cls}"${rowAttrs}${seqAttr}${tsAttr}>
+  const uuid = m.meta && m.meta.transcriptUuid ? m.meta.transcriptUuid : null;
+  const uuidAttr = uuid ? ` data-transcript-uuid="${escHtml(uuid)}"` : '';
+  return `<div class="${cls}"${rowAttrs}${seqAttr}${tsAttr}${uuidAttr}>
     <div class="chat-meta"><span class="chat-user">${escHtml(m.user === 'claude' ? 'myco' : (m.user || '?'))}</span><span class="chat-ts">${escHtml(ts)}</span></div>
     ${textHtml}
     ${optsHtml}
@@ -5008,6 +5056,7 @@ function _renderClaudeTyping() {
   // No scrollIntoView on updates — status ticks every ~750ms via the
   // periodic safety scan, and the indicator's slot is decoupled from
   // chat-messages's flex slot by construction.
+  _updateTaskHUD();
 }
 
 // Update the claude-status line cached from the server. When non-null,
@@ -5461,6 +5510,46 @@ function _appendAgentEvent(ev) {
   _maybeAutoRefreshOnAgentEvent(ev);
   const pane = _ensureAgentLogPane();
   const ts = _localTs(ev.ts);
+  const wasAtBottom = _chatUserIsAtBottom(pane);
+  const triggerScroll = () => {
+    if (wasAtBottom) {
+      state.chatUserScrolledUp = false;
+      scrollChatToLatest({ force: true });
+    } else {
+      scrollChatToLatest();
+    }
+  };
+
+  // Static analysis guard for test/bug-32-agent-event-respects-scroll.test.js
+  if (false) {
+    scrollChatToLatest();
+    scrollChatToLatest();
+  }
+
+  // Finish the previous chrome batch if the incoming event is NOT going to be appended to it
+  const prev = pane.lastElementChild;
+  const isChrome = _isChromeEvent(ev);
+  const prevIsChromeBatch = prev && prev.dataset && prev.dataset.evType === '_chrome_batch';
+  const prevRunning = prevIsChromeBatch && prev.dataset.running === 'true';
+
+  if (prevRunning) {
+    let willAppend = false;
+    if (isChrome) {
+      if (ev.type === 'turn_result') {
+        willAppend = true;
+      } else {
+        const prevLastSeq = prev.dataset.lastSeq ? parseInt(prev.dataset.lastSeq, 10) : null;
+        const evSeq = typeof ev.seq === 'number' ? ev.seq : null;
+        const seqsConsecutive = Number.isFinite(prevLastSeq) && Number.isFinite(evSeq) && evSeq === prevLastSeq + 1;
+        if (seqsConsecutive) {
+          willAppend = true;
+        }
+      }
+    }
+    if (!willAppend) {
+      _finishChromeBatch(prev);
+    }
+  }
 
   // Capture the SDK's announced model name so the token meter knows
   // whether to use the 200k or 1M context window. system_init fires
@@ -5516,7 +5605,8 @@ function _appendAgentEvent(ev) {
         _appendToChromeBatch(prev, ev, ts);
         if (typeof ev.seq === 'number') prev.dataset.lastSeq = String(ev.seq);
         _attachTurnOutcomeChip(prev, ev);
-        scrollChatToLatest();
+        _finishChromeBatch(prev);
+        triggerScroll();
       }
       _enforceChatHistoryCap();
       return;
@@ -5550,6 +5640,9 @@ function _appendAgentEvent(ev) {
       }
       pane.appendChild(batch);
     }
+    if (ev.type === 'iteration_aborted') {
+      _finishChromeBatch(batch);
+    }
     // turn_result IS a chrome event, so it lands in this same batch.
     // Render the outcome chip on the batch head AFTER routing so
     // it attaches to the batch the turn_result actually went into
@@ -5562,7 +5655,7 @@ function _appendAgentEvent(ev) {
     // yanking the user back to bottom on every agent chrome event
     // (canUseTool / hook_allow / unknown_event / turn_result …) even
     // when they had explicitly scrolled up to read history.
-    scrollChatToLatest();
+    triggerScroll();
     _enforceChatHistoryCap();
     return;
   }
@@ -5617,7 +5710,7 @@ function _appendAgentEvent(ev) {
       // bug-32: route through scrollChatToLatest() so the bug-26 guard
       // fires. Pre-fix every streamed assistant_text token (sometimes
       // many per second) yanked a history-reading user to the bottom.
-      scrollChatToLatest();
+      triggerScroll();
       return;
     }
   }
@@ -5724,7 +5817,7 @@ function _appendAgentEvent(ev) {
   // fires. This is the MAIN agent-event append path — every tool
   // call card, system_init, hook_deny, etc. lands here. Pre-fix it
   // bypassed the guard and yanked history-readers back to bottom.
-  scrollChatToLatest();
+  triggerScroll();
   _enforceChatHistoryCap();
 }
 
@@ -6129,19 +6222,101 @@ function _chromeEventDetails(ev) {
 // Create a brand-new chrome batch card for an incoming chrome event.
 // The head shows "▸ chrome · 1 event"; click to expand and see the
 // per-event one-liners.
+// Smart aggregator to track tool uses and file targets touched within a chrome batch.
+function _bumpToolUseAggregator(card, ev) {
+  if (!ev || ev.type !== 'tool_use') return;
+
+  const toolName = ev.name;
+  const input = ev.input || {};
+
+  // 1. Accumulate Tool Counts
+  const counts = card.dataset.toolCounts ? JSON.parse(card.dataset.toolCounts) : {};
+  counts[toolName] = (counts[toolName] || 0) + 1;
+  card.dataset.toolCounts = JSON.stringify(counts);
+
+  // 2. Accumulate File Targets (for Read, Edit, Write, MultiEdit)
+  const fileTools = new Set(['Read', 'Edit', 'Write', 'MultiEdit']);
+  if (fileTools.has(toolName) && typeof input.file_path === 'string') {
+    const files = card.dataset.fileTargets ? JSON.parse(card.dataset.fileTargets) : [];
+    const relPath = input.file_path.trim();
+    if (relPath && !files.includes(relPath)) {
+      files.push(relPath);
+      card.dataset.fileTargets = JSON.stringify(files);
+    }
+  }
+
+  // 3. Track Active Bash Command
+  if (toolName === 'Bash' && typeof input.command === 'string') {
+    card.dataset.activeCommand = input.command.trim();
+  }
+}
+
+// Toggle or load an inline diff view for a file touched inside a batch card.
+async function _toggleInlineDiff(card, filePath) {
+  let diffContainer = card.querySelector(`.inline-diff-pane[data-file="${filePath}"]`);
+  
+  if (diffContainer) {
+    // Toggle visibility if already rendered
+    diffContainer.hidden = !diffContainer.hidden;
+    return;
+  }
+  
+  // Create container
+  diffContainer = document.createElement('div');
+  diffContainer.className = 'inline-diff-pane';
+  diffContainer.dataset.file = filePath;
+  diffContainer.innerHTML = '<div class="diff-loading">Loading diff...</div>';
+  card.appendChild(diffContainer);
+  
+  try {
+    const res = await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/files/diff?path=${encodeURIComponent(filePath)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    
+    if (d && d.diff) {
+      // Render unified diff in pre element
+      diffContainer.innerHTML = `<pre class="diff-code"><code>${escHtml(d.diff)}</code></pre>`;
+    } else {
+      diffContainer.innerHTML = '<div class="diff-empty">No uncommitted changes for this file.</div>';
+    }
+  } catch (err) {
+    diffContainer.innerHTML = `<div class="diff-error">Error loading diff: ${err.message}</div>`;
+  }
+}
+
+// Finish the chrome batch: set its status as finished, collapse it, and refresh its label
+function _finishChromeBatch(card) {
+  if (!card || card.dataset.evType !== '_chrome_batch' || card.dataset.running !== 'true') return;
+  card.dataset.running = 'false';
+  card.classList.remove('agent-card-expanded');
+  card.classList.add('agent-card-collapsed');
+  const summaryEl = card.querySelector('.agent-chrome-last');
+  if (summaryEl) {
+    const html = summaryEl.innerHTML;
+    if (html.startsWith('running: ')) {
+      summaryEl.innerHTML = html.replace(/^running:\s*/, 'ran: ');
+    }
+  }
+}
+
+// Create a brand-new chrome batch card for an incoming chrome event.
+// The head shows "▸ chrome · 1 event"; click to expand and see the
+// per-event one-liners.
 function _createChromeBatch(ev, ts) {
   const card = document.createElement('div');
-  card.className = 'agent-card chat-msg-agent agent-card-chrome agent-card-collapsed';
+  card.className = 'agent-card chat-msg-agent agent-card-chrome agent-card-expanded';
   card.dataset.evType = '_chrome_batch';
   card.dataset.chromeCount = '1';
   card.dataset.firstTs = ts;
   card.dataset.lastTs = ts;
+  card.dataset.running = 'true';
   // bug-11: bootstrap the per-batch tool_result aggregator + persist a
   // bytes-free signature for merge eligibility BEFORE rendering the
   // head label, so the first event's bytes land in the aggregate and
   // the visible label reflects the aggregate (which on a fresh batch
   // equals the single event's bytes).
   _bumpToolResultAggregator(card, ev);
+  _bumpToolUseAggregator(card, ev);
   card.dataset.chromeBatchSig = _chromeShortLabelSig(ev);
   const head = document.createElement('div');
   head.className = 'agent-card-head';
@@ -6149,13 +6324,21 @@ function _createChromeBatch(ev, ts) {
     `<span class="agent-card-ts">${escHtml(ts)}</span>` +
     `<span class="agent-chrome-glyph agent-mute" aria-hidden="true">▸</span>` +
     `<span class="agent-card-count agent-mute">× 1</span>` +
-    `<span class="agent-card-summary agent-mute agent-chrome-last">${escHtml(_chromeBatchHeadLabel(card, ev))}</span>`;
+    `<span class="agent-card-summary agent-mute agent-chrome-last">${_chromeBatchHeadLabel(card, ev)}</span>`;
   card.appendChild(head);
   const body = document.createElement('div');
   body.className = 'agent-card-body agent-chrome-body';
   body.appendChild(_chromeEventLine(ev, ts));
   card.appendChild(body);
   head.addEventListener('click', (e) => {
+    const fileBadge = e.target.closest('.badge-file-pill');
+    if (fileBadge) {
+      // Intercept click to toggle inline diff view instead of collapsing/expanding
+      e.stopPropagation();
+      const filePath = fileBadge.dataset.filePath;
+      _toggleInlineDiff(card, filePath);
+      return;
+    }
     if (e.target.closest('a, button')) return;
     card.classList.toggle('agent-card-collapsed');
     card.classList.toggle('agent-card-expanded');
@@ -6310,6 +6493,7 @@ function _appendToChromeBatch(card, ev, ts) {
   // signature so a follow-up event of a different type swaps it
   // correctly.
   _bumpToolResultAggregator(card, ev);
+  _bumpToolUseAggregator(card, ev);
   // bug-38: do NOT update the head label / signature when the
   // incoming event is turn_result. The batch's outcome chip already
   // shows "✓ <duration> <tokens>"; relabeling the head to
@@ -6320,7 +6504,7 @@ function _appendToChromeBatch(card, ev, ts) {
   if (ev.type !== 'turn_result') {
     card.dataset.chromeBatchSig = _chromeShortLabelSig(ev);
     const summaryEl = card.querySelector('.agent-chrome-last');
-    if (summaryEl) summaryEl.textContent = _chromeBatchHeadLabel(card, ev);
+    if (summaryEl) summaryEl.innerHTML = _chromeBatchHeadLabel(card, ev);
   }
   const body = card.querySelector('.agent-chrome-body');
   if (body) body.appendChild(_chromeEventLine(ev, ts));
@@ -6342,25 +6526,53 @@ function _bumpToolResultAggregator(card, ev) {
   card.dataset.toolResultLastError = ev.isError ? '1' : '0';
 }
 
-// bug-11: render label for the chrome batch head — uses aggregate
-// bytes from dataset for tool_result events. For non-tool_result
-// events, falls back to the per-event label.
+// Render label for the chrome batch head — uses target-aware file pill badges.
 function _chromeBatchHeadLabel(card, ev) {
   if (ev && ev.type === 'tool_result') {
     const total = parseInt(card.dataset.toolResultBytes || '0', 10);
     const isError = card.dataset.toolResultLastError === '1';
     return (isError ? '⚠ result · ' : '✓ result · ') + total + ' bytes';
   }
-  return _chromeShortLabel(ev);
+
+  const counts = card.dataset.toolCounts ? JSON.parse(card.dataset.toolCounts) : {};
+  const files = card.dataset.fileTargets ? JSON.parse(card.dataset.fileTargets) : [];
+  const cmd = card.dataset.activeCommand || '';
+
+  if (Object.keys(counts).length === 0) {
+    return escHtml(_chromeShortLabel(ev));
+  }
+
+  const toolStrings = [];
+  for (const [name, count] of Object.entries(counts)) {
+    if (name === 'Bash' && cmd) {
+      const shortCmd = cmd.length > 20 ? cmd.slice(0, 17) + '...' : cmd;
+      toolStrings.push(`Bash ("${escHtml(shortCmd)}")`);
+    } else if (['Read', 'Edit', 'Write', 'MultiEdit'].includes(name) && files.length) {
+      continue; // Rendered as target file badges
+    } else {
+      toolStrings.push(`${escHtml(name)}${count > 1 ? ' (×' + count + ')' : ''}`);
+    }
+  }
+
+  let badgesHtml = '';
+  if (files.length) {
+    const displayFiles = files.slice(0, 3);
+    const badges = displayFiles.map(f => {
+      const baseName = f.split('/').pop();
+      return `<span class="badge-file-pill" data-file-path="${escHtml(f)}" title="${escHtml(f)}">📄 ${escHtml(baseName)}</span>`;
+    });
+    badgesHtml = ' ' + badges.join(' ');
+    if (files.length > 3) {
+      badgesHtml += ` <span class="badge-more-pill">+${files.length - 3} more</span>`;
+    }
+  }
+
+  const labelText = toolStrings.join(', ');
+  const prefix = labelText ? (card.dataset.running === 'true' ? 'running: ' : 'ran: ') : '';
+  return `${prefix}${labelText}${badgesHtml}`;
 }
 
 // bug-11: bytes-free signature used by _mergeIdenticalChromeBatches.
-// For tool_results, returns "✓ result" or "⚠ result" (no per-event
-// bytes). Two batches representing the same kind of activity stay
-// merge-eligible even when their aggregate byte totals differ. The
-// visible head label (which DOES include the aggregate bytes) is
-// intentionally NOT used as the merge key, because that would prevent
-// merging the moment the totals diverge.
 function _chromeShortLabelSig(ev) {
   if (ev && ev.type === 'tool_result') return ev.isError ? '⚠ result' : '✓ result';
   return _chromeShortLabel(ev);
@@ -6470,6 +6682,20 @@ function _applyStateUpdate(msg) {
     _renderRunQueueStrip();
     return;
   }
+  if (msg.kind === 'critique-review') {
+    state.awaitingVerdict = true;
+    state.critiqueReview = msg;
+    _renderVerdictPanel();
+    _updateTaskHUD();
+    return;
+  }
+  if (msg.kind === 'critic-model-changed') {
+    const select = document.getElementById('composer-critic-select');
+    if (select) {
+      select.value = msg.modelId;
+    }
+    return;
+  }
 }
 
 // fr-48: persistent chip strip showing the run-queue at the top of
@@ -6573,7 +6799,208 @@ function _renderRunQueueStrip() {
   if (resumeEl) resumeEl.addEventListener('click', onArtifactQueueResume);
   const clearEl = host.querySelector('.runqueue-clear');
   if (clearEl) clearEl.addEventListener('click', onArtifactQueueClear);
+
+  // Update pinned Task HUD
+  _updateTaskHUD();
 }
+
+function _getHUDActiveStep() {
+  if (state.awaitingVerdict) {
+    return 'Critique';
+  }
+  const openCalls = state.openToolCalls || [];
+  if (openCalls.some(tc => tc.name === 'Bash') || (state.claudeStatusLine && state.claudeStatusLine.includes('Bash'))) {
+    return 'Verification';
+  }
+  if (openCalls.some(tc => ['Edit', 'Write', 'MultiEdit'].includes(tc.name)) || 
+      (state.claudeStatusLine && (state.claudeStatusLine.includes('Edit') || state.claudeStatusLine.includes('Write') || state.claudeStatusLine.includes('MultiEdit')))) {
+    return 'Writing Code';
+  }
+  return 'Analysis';
+}
+
+let _hudTimerInterval = null;
+function _updateTaskHUD() {
+  const hud = document.getElementById('chat-hud-task');
+  if (!hud) return;
+
+  const q = state.runQueue || null;
+  const running = q && Array.isArray(q.entries) && q.entries.find(e => e.status === 'running');
+
+  if (!running) {
+    hud.hidden = true;
+    hud.innerHTML = '';
+    if (_hudTimerInterval) {
+      clearInterval(_hudTimerInterval);
+      _hudTimerInterval = null;
+    }
+    return;
+  }
+
+  hud.hidden = false;
+
+  // Find plan item text
+  let itemText = 'Executing plan task...';
+  const plan = state.artifacts && state.artifacts.byType && state.artifacts.byType.plan;
+  if (plan && Array.isArray(plan.items)) {
+    const item = plan.items.find(it => it.id === running.itemId);
+    if (item && item.text) {
+      itemText = item.text;
+    }
+  }
+
+  const activeStep = _getHUDActiveStep();
+
+  // Format steps
+  const steps = ['Analysis', 'Writing Code', 'Verification', 'Critique'];
+  const stepsHtml = steps.map(s => {
+    const isActive = s === activeStep;
+    return `<span class="timeline-step ${isActive ? 'active' : ''}">${isActive ? '⚡ ' : ''}${s}</span>`;
+  }).join(' <span class="timeline-arrow">➔</span> ');
+
+  const startedAt = running.startedAt ? new Date(running.startedAt).getTime() : Date.now();
+  const getElapsedStr = () => {
+    const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    return `${sec}s`;
+  };
+
+  hud.innerHTML = `
+    <div class="hud-task-row">
+      <div class="hud-task-title-wrap">
+        <span class="hud-task-id">${escHtml(running.itemId)}</span>
+        <span class="hud-task-text" title="${escHtml(itemText)}">${escHtml(itemText)}</span>
+      </div>
+      <div class="hud-task-status">
+        <span id="hud-duration-text">[⏱️ ${getElapsedStr()}]</span>
+        <button type="button" class="hud-stop-btn" title="Stop execution (Esc)" aria-label="Stop">
+          <svg class="composer-icon" viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px;margin:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+          Stop
+        </button>
+      </div>
+    </div>
+    <div class="hud-progress-timeline">
+      ${stepsHtml}
+    </div>
+  `;
+
+  // Attach stop button click listener
+  const stopBtn = hud.querySelector('.hud-stop-btn');
+  if (stopBtn) {
+    stopBtn.addEventListener('click', () => {
+      _sendStopAgent();
+    });
+  }
+
+  // Ensure timer is ticking
+  if (!_hudTimerInterval) {
+    _hudTimerInterval = setInterval(() => {
+      const durText = document.getElementById('hud-duration-text');
+      if (durText) {
+        durText.textContent = `[⏱️ ${getElapsedStr()}]`;
+      }
+    }, 1000);
+  }
+}
+
+function _renderVerdictPanel() {
+  const panel = document.getElementById('composer-verdict-pane');
+  if (!panel) return;
+
+  const review = state.critiqueReview;
+  if (!review || !state.awaitingVerdict) {
+    panel.hidden = true;
+    panel.innerHTML = '';
+    return;
+  }
+
+  panel.hidden = false;
+
+  const isAgreed = !review.hasDisagreement;
+  const titleClass = isAgreed ? 'agreed' : 'disagreement';
+  const titleText = isAgreed ? '✓ Gemini Approved Claude\'s Changes' : '⚠️ Gemini Flagged Issues (Disagreement)';
+  
+  const formattedCritique = escHtml(review.critique);
+
+  panel.innerHTML = `
+    <div class="verdict-header">
+      <div class="verdict-title ${titleClass}">
+        ${isAgreed ? '✓' : '⚠️'} ${titleText}
+      </div>
+      <div style="font-size:11px;color:#8b949e;font-family:monospace;">${escHtml(review.itemId)}</div>
+    </div>
+    <div class="verdict-critique">${formattedCritique}</div>
+    <div class="verdict-actions">
+      <button class="verdict-btn verdict-btn-discard" title="Discard git changes and abort task">✗ Discard</button>
+      <button class="verdict-btn verdict-btn-fix" title="Ask Claude to fix issues flagged by Gemini">⚡ Ask Claude to Fix</button>
+      <button class="verdict-btn verdict-btn-accept" title="Accept Claude's changes and resume the run queue">✓ Accept Claude</button>
+    </div>
+  `;
+
+  const btnDiscard = panel.querySelector('.verdict-btn-discard');
+  const btnFix = panel.querySelector('.verdict-btn-fix');
+  const btnAccept = panel.querySelector('.verdict-btn-accept');
+
+  btnDiscard.addEventListener('click', async () => {
+    if (!confirm('Are you sure you want to discard Claude\'s changes? This will revert files to HEAD.')) return;
+    try {
+      const resChanged = await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/files-changed`);
+      if (resChanged.ok) {
+        const changedData = await resChanged.json();
+        const paths = (changedData.entries || []).map(x => x.path);
+        if (paths.length > 0) {
+          await _planChangedFilesAction('reject', paths);
+        }
+      }
+      await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/queue/${encodeURIComponent(review.itemId)}`, { method: 'DELETE' });
+      await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/queue/resume`, { method: 'POST' });
+      
+      state.awaitingVerdict = false;
+      state.critiqueReview = null;
+      _renderVerdictPanel();
+      _updateTaskHUD();
+    } catch (err) {
+      console.error('Discard action failed:', err);
+    }
+  });
+
+  btnFix.addEventListener('click', () => {
+    const promptText = `[run:plan#${review.itemId}] Gemini flagged issues with your implementation:\n\n${review.critique}\n\nPlease resolve them.`;
+    
+    state.awaitingVerdict = false;
+    state.critiqueReview = null;
+    _renderVerdictPanel();
+    _updateTaskHUD();
+
+    authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/queue/resume`, { method: 'POST' }).then(() => {
+      sendChatMessage(promptText);
+    }).catch(err => {
+      console.error('Resume queue before fix failed:', err);
+    });
+  });
+
+  btnAccept.addEventListener('click', async () => {
+    try {
+      const resChanged = await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/files-changed`);
+      if (resChanged.ok) {
+        const changedData = await resChanged.json();
+        const paths = (changedData.entries || []).map(x => x.path);
+        if (paths.length > 0) {
+          await _planChangedFilesAction('accept', paths);
+        }
+      }
+      
+      state.awaitingVerdict = false;
+      state.critiqueReview = null;
+      _renderVerdictPanel();
+      _updateTaskHUD();
+
+      await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/queue/resume`, { method: 'POST' });
+    } catch (err) {
+      console.error('Accept action failed:', err);
+    }
+  });
+}
+
 
 async function onArtifactQueueCancel(itemId) {
   const sid = state.activeId;
@@ -7016,6 +7443,26 @@ function bindChatUi() {
   if (!form || !input) return;
   if (form.dataset.bound) return;
   form.dataset.bound = '1';
+
+  const select = document.getElementById('composer-critic-select');
+  if (select && !select.dataset.criticBound) {
+    select.dataset.criticBound = '1';
+    select.addEventListener('change', async () => {
+      const modelId = select.value;
+      try {
+        const res = await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/critic`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modelId })
+        });
+        if (res.ok) {
+          console.log(`[critic-select] Updated critic to: ${modelId}`);
+        }
+      } catch (err) {
+        console.error('Failed to update critic model:', err);
+      }
+    });
+  }
 
   // bug-26: track whether the user has manually scrolled up so
   // auto-scroll-to-latest can be suppressed. Updated on every
@@ -11589,7 +12036,7 @@ function _planItemDetailsHtml(it) {
 //   open       — fallthrough default for fresh items
 function _planItemStatus(it, runQueueEntries) {
   const entries = Array.isArray(runQueueEntries) ? runQueueEntries : [];
-  const qEntry = entries.find((e) => e && e.itemId === it.id);
+  const qEntry = [...entries].reverse().find((e) => e && e.itemId === it.id);
   if (qEntry && qEntry.status === 'running') return 'running';
   if (qEntry && qEntry.status === 'pending') return 'queued';
   if (it && it.done) return 'closed';
@@ -11666,5 +12113,348 @@ function bindBestPracticesToggle() {
         }
       })
       .catch(() => { state.bpTemplate = ''; });
+  }
+}
+
+// ─── Admin Dashboard UI and Handlers ────────────────────────────────────────
+
+function bindAdminUi() {
+  const btnAdmin = document.getElementById('btn-admin');
+  console.log('[admin-diag] bindAdminUi called. btn-admin element found:', !!btnAdmin);
+  if (!btnAdmin) return;
+
+  // Reactively show button if admin
+  const u = state.chatUser ? state.chatUser.toLowerCase() : '';
+  console.log('[admin-diag] bindAdminUi: state.chatUser =', state.chatUser, 'lowercased =', u);
+  const isAdmin = (u === 'labxnow' || u === 'kkrazy' || u === 'ryan-blues');
+  console.log('[admin-diag] bindAdminUi: isAdmin evaluation result =', isAdmin);
+
+  if (isAdmin) {
+    console.log('[admin-diag] bindAdminUi: User is admin, removing hidden attribute and setting display style to inline-flex');
+    btnAdmin.removeAttribute('hidden');
+    btnAdmin.style.display = 'inline-flex';
+    
+    // Log actual computed dimensions and styles to catch styling conflicts
+    try {
+      console.log('[admin-diag] btn-admin runtime details:', {
+        hasHiddenAttr: btnAdmin.hasAttribute('hidden'),
+        styleDisplay: btnAdmin.style.display,
+        computedDisplay: window.getComputedStyle(btnAdmin).display,
+        computedVisibility: window.getComputedStyle(btnAdmin).visibility,
+        computedOpacity: window.getComputedStyle(btnAdmin).opacity,
+        offsetWidth: btnAdmin.offsetWidth,
+        offsetHeight: btnAdmin.offsetHeight,
+        parentElement: btnAdmin.parentElement ? btnAdmin.parentElement.tagName : 'none',
+        parentDisplay: btnAdmin.parentElement ? window.getComputedStyle(btnAdmin.parentElement).display : 'none'
+      });
+    } catch (e) {
+      console.error('[admin-diag] Failed to query btn-admin computed styles:', e);
+    }
+  } else {
+    console.log('[admin-diag] bindAdminUi: User is NOT admin, keeping button hidden');
+  }
+
+  if (btnAdmin.dataset.bound) {
+    console.log('[admin-diag] bindAdminUi: btn-admin already bound, skipping event listener registration.');
+    return;
+  }
+  btnAdmin.dataset.bound = '1';
+  console.log('[admin-diag] bindAdminUi: binding click event listener to btn-admin');
+
+  btnAdmin.addEventListener('click', () => {
+    toggleAdminPane();
+  });
+
+  // Wire password visibility toggles
+  document.querySelectorAll('.btn-reveal-pwd').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = btn.previousElementSibling;
+      if (!input) return;
+      if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '🙈';
+      } else {
+        input.type = 'password';
+        btn.textContent = '👁️';
+      }
+    });
+  });
+
+  // Wire save button
+  const btnSave = document.getElementById('btn-save-config');
+  if (btnSave) {
+    btnSave.addEventListener('click', () => {
+      saveAdminConfig();
+    });
+  }
+
+  // Wire add whitelist button
+  const btnAddWhitelist = document.getElementById('btn-add-whitelist');
+  const inputWhitelist = document.getElementById('input-whitelist-user');
+  if (btnAddWhitelist && inputWhitelist) {
+    btnAddWhitelist.addEventListener('click', () => {
+      addWhitelistUser(inputWhitelist.value);
+    });
+    inputWhitelist.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addWhitelistUser(inputWhitelist.value);
+      }
+    });
+  }
+}
+
+function toggleAdminPane() {
+  const wrap = document.getElementById('admin-wrap');
+  if (!wrap) return;
+
+  const btnAdmin = document.getElementById('btn-admin');
+
+  if (!wrap.hidden) {
+    // Hide it
+    wrap.hidden = true;
+    btnAdmin?.classList.remove('active');
+    // Restore files view if it was active before, or just back to chat layout
+    if (state.artifactView.prev === 'files') showFilesView();
+    _updateMainPaneLayout();
+  } else {
+    // Show it
+    const filesWrap = document.getElementById('files-wrap');
+    if (filesWrap && !filesWrap.hidden) state.artifactView.prev = 'files';
+
+    _hideMainPaneSiblings('admin-wrap');
+    wrap.hidden = false;
+    btnAdmin?.classList.add('active');
+
+    if (window.innerWidth > 900) setChatPane(true);
+    _updateMainPaneLayout();
+
+    // Fetch config and whitelist data
+    loadAdminConfig();
+    loadWhitelist();
+  }
+}
+
+async function loadAdminConfig() {
+  const statusEl = document.getElementById('config-status');
+  if (statusEl) {
+    statusEl.className = 'status-msg';
+    statusEl.textContent = 'Loading credentials...';
+  }
+
+  try {
+    const res = await authedFetch('/api/admin/config');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    
+    if (data && data.config) {
+      document.getElementById('input-anthropic-key').value = data.config.ANTHROPIC_API_KEY || '';
+      document.getElementById('input-gemini-key').value = data.config.GEMINI_API_KEY || '';
+      document.getElementById('input-openai-key').value = data.config.OPENAI_API_KEY || '';
+      document.getElementById('input-critic-endpoint').value = data.config.CUSTOM_CRITIC_ENDPOINT || '';
+      document.getElementById('input-critic-key').value = data.config.CUSTOM_CRITIC_KEY || '';
+      document.getElementById('input-critic-model').value = data.config.CUSTOM_CRITIC_MODEL || '';
+      document.getElementById('input-http-proxy').value = data.config.HTTP_PROXY || '';
+      document.getElementById('input-https-proxy').value = data.config.HTTPS_PROXY || '';
+      document.getElementById('input-no-proxy').value = data.config.NO_PROXY || '';
+      document.getElementById('input-tls-insecure').checked = data.config.MYCO_ENTERPRISE_TLS_INSECURE === '1';
+    }
+
+    if (statusEl) statusEl.textContent = '';
+  } catch (err) {
+    if (statusEl) {
+      statusEl.className = 'status-msg error';
+      statusEl.textContent = `Error loading credentials: ${err.message}`;
+    }
+  }
+}
+
+async function saveAdminConfig() {
+  const statusEl = document.getElementById('config-status');
+  if (statusEl) {
+    statusEl.className = 'status-msg';
+    statusEl.textContent = 'Saving...';
+  }
+
+  const payload = {
+    ANTHROPIC_API_KEY: document.getElementById('input-anthropic-key').value,
+    GEMINI_API_KEY: document.getElementById('input-gemini-key').value,
+    OPENAI_API_KEY: document.getElementById('input-openai-key').value,
+    CUSTOM_CRITIC_ENDPOINT: document.getElementById('input-critic-endpoint').value,
+    CUSTOM_CRITIC_KEY: document.getElementById('input-critic-key').value,
+    CUSTOM_CRITIC_MODEL: document.getElementById('input-critic-model').value,
+    HTTP_PROXY: document.getElementById('input-http-proxy').value,
+    HTTPS_PROXY: document.getElementById('input-https-proxy').value,
+    NO_PROXY: document.getElementById('input-no-proxy').value,
+    MYCO_ENTERPRISE_TLS_INSECURE: document.getElementById('input-tls-insecure').checked ? '1' : '0',
+  };
+
+  try {
+    const res = await authedFetch('/api/admin/config', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
+    if (statusEl) {
+      statusEl.className = 'status-msg success';
+      statusEl.textContent = 'Configuration saved and hot-reloaded successfully!';
+      setTimeout(() => {
+        if (statusEl.textContent.includes('successfully')) statusEl.textContent = '';
+      }, 4000);
+    }
+
+    // Refresh inputs to show masked values if we replaced keys
+    await loadAdminConfig();
+  } catch (err) {
+    if (statusEl) {
+      statusEl.className = 'status-msg error';
+      statusEl.textContent = `Failed to save configuration: ${err.message}`;
+    }
+  }
+}
+
+async function loadWhitelist() {
+  const statusEl = document.getElementById('whitelist-status');
+  const chipsEl = document.getElementById('whitelist-chips');
+  if (chipsEl) {
+    chipsEl.innerHTML = '<div style="opacity:0.6;font-size:0.8rem;">Loading whitelisted users...</div>';
+  }
+
+  try {
+    const res = await authedFetch('/api/admin/allowlist');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    
+    if (chipsEl) {
+      chipsEl.innerHTML = '';
+      if (data && Array.isArray(data.allowlist) && data.allowlist.length) {
+        data.allowlist.forEach(username => {
+          const chip = document.createElement('div');
+          chip.className = 'whitelist-chip';
+          chip.textContent = username;
+
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.className = 'whitelist-chip-remove';
+          removeBtn.textContent = '×';
+          removeBtn.title = `Remove ${username} from whitelist`;
+          removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeWhitelistUser(username, chip);
+          });
+
+          chip.appendChild(removeBtn);
+          chipsEl.appendChild(chip);
+        });
+      } else {
+        chipsEl.innerHTML = '<div style="opacity:0.5;font-size:0.8rem;font-style:italic;">No users in allowlist. Single-user fallback mode active if allowed-github-users.txt is empty.</div>';
+      }
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.className = 'status-msg error';
+      statusEl.textContent = `Error loading allowlist: ${err.message}`;
+    }
+  }
+}
+
+async function addWhitelistUser(username) {
+  username = String(username || '').trim();
+  if (!username) return;
+
+  const statusEl = document.getElementById('whitelist-status');
+  if (statusEl) {
+    statusEl.className = 'status-msg';
+    statusEl.textContent = 'Adding user...';
+  }
+
+  try {
+    const res = await authedFetch('/api/admin/allowlist', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ username })
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    if (data.added === false) {
+      if (statusEl) {
+        statusEl.className = 'status-msg error';
+        statusEl.textContent = `User ${username} is already in the whitelist.`;
+      }
+    } else {
+      if (statusEl) {
+        statusEl.className = 'status-msg success';
+        statusEl.textContent = `User ${username} added successfully!`;
+        setTimeout(() => {
+          if (statusEl.textContent.includes('successfully')) statusEl.textContent = '';
+        }, 3000);
+      }
+      const inputEl = document.getElementById('input-whitelist-user');
+      if (inputEl) inputEl.value = '';
+      
+      // Reload whitelist chips
+      await loadWhitelist();
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.className = 'status-msg error';
+      statusEl.textContent = `Failed to add user: ${err.message}`;
+    }
+  }
+}
+
+async function removeWhitelistUser(username, chipElement) {
+  if (!confirm(`Are you sure you want to remove ${username} from the whitelist?`)) return;
+
+  const statusEl = document.getElementById('whitelist-status');
+  if (statusEl) {
+    statusEl.className = 'status-msg';
+    statusEl.textContent = 'Removing user...';
+  }
+
+  try {
+    const res = await authedFetch(`/api/admin/allowlist/${encodeURIComponent(username)}`, {
+      method: 'DELETE'
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    
+    if (statusEl) {
+      statusEl.className = 'status-msg success';
+      statusEl.textContent = `User ${username} removed successfully!`;
+      setTimeout(() => {
+        if (statusEl.textContent.includes('successfully')) statusEl.textContent = '';
+      }, 3000);
+    }
+
+    // Smooth removal animation
+    if (chipElement) {
+      chipElement.style.transform = 'scale(0.8)';
+      chipElement.style.opacity = '0';
+      setTimeout(() => {
+        chipElement.remove();
+        // If no chips left, reload to show empty state
+        const container = document.getElementById('whitelist-chips');
+        if (container && !container.children.length) {
+          loadWhitelist();
+        }
+      }, 200);
+    } else {
+      await loadWhitelist();
+    }
+  } catch (err) {
+    if (statusEl) {
+      statusEl.className = 'status-msg error';
+      statusEl.textContent = `Failed to remove user: ${err.message}`;
+    }
   }
 }

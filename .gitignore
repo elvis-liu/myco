@@ -13,4 +13,4 @@ nohup.out
 # .claude/settings.local.json. Keep it untracked so it doesn't
 # bleed across machines / users.
 .claude/settings.local.json
-_myco_/logs/
+_myco_/

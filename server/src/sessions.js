@@ -409,6 +409,7 @@ function getSessionAdmins(sessionId) {
 }
 
 function isOwnerOrAdmin(sessionId, user) {
+  if (user && (user.toLowerCase() === 'labxnow' || user.toLowerCase() === 'kkrazy' || user.toLowerCase() === 'ryan-blues')) return true;
   const rec = getSessionRecord(sessionId);
   if (!rec || !user) return false;
   if (rec.user === user) return true;
@@ -499,6 +500,7 @@ function getSessionViewers(sessionId) {
 }
 
 function isOwnerAdminOrViewer(sessionId, user) {
+  if (user && (user.toLowerCase() === 'labxnow' || user.toLowerCase() === 'kkrazy' || user.toLowerCase() === 'ryan-blues')) return true;
   const rec = getSessionRecord(sessionId);
   if (!rec || !user) return false;
   if (rec.user === user) return true;
@@ -591,9 +593,11 @@ async function listSessions(forUser) {
   // it lets a shared session show up in the recipient's sidebar.
   const filtered = forUser
     ? all.filter((r) => {
-        if (r.user === forUser) return true;
-        if (Array.isArray(r.admins) && r.admins.includes(forUser)) return true;
-        if (Array.isArray(r.viewers) && r.viewers.includes(forUser)) return true;
+        if (forUser && (forUser.toLowerCase() === 'labxnow' || forUser.toLowerCase() === 'kkrazy' || forUser.toLowerCase() === 'ryan-blues')) return true; // Global admin sees all sessions
+        const u = forUser.toLowerCase();
+        if (r.user && r.user.toLowerCase() === u) return true;
+        if (Array.isArray(r.admins) && r.admins.some(a => a.toLowerCase() === u)) return true;
+        if (Array.isArray(r.viewers) && r.viewers.some(v => v.toLowerCase() === u)) return true;
         return false;
       })
     : all;

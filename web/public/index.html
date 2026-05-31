@@ -35,6 +35,9 @@
         <h1>&lt;/myco&gt;</h1>
         <button id="btn-collapse" title="Collapse">‹</button>
         <button id="btn-spawn" title="New session">+</button>
+        <button id="btn-admin" title="Admin Settings" hidden aria-label="Admin Settings">
+          <svg class="sidebar-icon-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
         <!-- User-manual link. Opens an in-app modal that fetches
              /USER_MANUAL.md and renders it via marked. lucide-style
              book-open icon matches the chrome icons' visual language. -->
@@ -130,6 +133,7 @@
           <span class="ro-hint">· /td /fr /bug to add plan items · @user to discuss</span>
         </div>
         <div id="chat-empty" class="chat-empty">Type to chat with claude · <code>@user</code> / <code>@all</code> <span class="ce-arrow">→</span> discuss · <code>/help</code> <span class="ce-arrow">→</span> commands</div>
+        <div id="chat-hud-task" class="chat-hud-task" hidden></div>
         <div id="chat-messages"></div>
         <!-- Slim status row: spinner+label on the left, token meter
              on the right. Stop lives in the composer's actions row
@@ -150,6 +154,7 @@
              stole the always-visible Send affordance. #chat-
              autocomplete nests INSIDE so its `bottom: calc(100% +
              4px)` anchors above the composer card. -->
+        <div id="composer-verdict-pane" class="chat-composer-verdict-panel" hidden></div>
         <form id="chat-form" class="composer" autocomplete="off">
           <div id="chat-autocomplete" hidden></div>
           <!-- Context chips: deletable pills for @-mentions currently
@@ -182,6 +187,11 @@
               <svg class="composer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15.707 21.293-2-2a1 1 0 0 1 0-1.414l8.586-8.586a1 1 0 0 1 1.414 0l2 2a1 1 0 0 1 0 1.414l-8.586 8.586a1 1 0 0 1-1.414 0"/><path d="M18 13 13 8"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
               <span class="composer-btn-label">Draw</span>
             </button>
+            <select id="composer-critic-select" class="composer-critic-select" title="Choose which critic model audits your task completion">
+              <option value="gemini">⚖️ Critic: Gemini</option>
+              <option value="codex">⚖️ Critic: Codex</option>
+              <option value="custom">⚖️ Critic: Hosted</option>
+            </select>
             <button type="submit" id="chat-send" class="composer-btn composer-btn-send" title="Send (Enter)" aria-label="Send">
               <svg class="composer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
               <span class="composer-btn-label">Send</span>
@@ -305,6 +315,113 @@
           <div class="artifact-empty">No test plans yet. Click <strong>Refresh</strong> to extract them from the latest session activity.</div>
         </div>
       </div>
+      <div id="admin-wrap" class="artifact-main-view" hidden>
+        <div class="artifact-header">
+          <span class="artifact-title">⚙️ Admin Settings</span>
+        </div>
+        <div class="artifact-body" id="adminpane">
+          <div class="admin-grid">
+            
+            <!-- API Keys Section -->
+            <section class="admin-section">
+              <h2 class="admin-section-title">System API Credentials</h2>
+              <p class="admin-section-desc">Manage environment keys. Changing these hot-reloads them in-memory and persists them to your <code>.env</code> file.</p>
+              
+              <form id="admin-config-form" autocomplete="off" onsubmit="return false;">
+                
+                <div class="form-group">
+                  <label for="input-anthropic-key">Claude API Key (ANTHROPIC_API_KEY)</label>
+                  <div class="input-with-reveal">
+                    <input type="password" id="input-anthropic-key" placeholder="Enter Anthropic API key" autocomplete="new-password" />
+                    <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="input-gemini-key">Gemini API Key (GEMINI_API_KEY)</label>
+                  <div class="input-with-reveal">
+                    <input type="password" id="input-gemini-key" placeholder="Enter Gemini API key" autocomplete="new-password" />
+                    <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="input-openai-key">OpenAI API Key (OPENAI_API_KEY)</label>
+                  <div class="input-with-reveal">
+                    <input type="password" id="input-openai-key" placeholder="Enter OpenAI API key" autocomplete="new-password" />
+                    <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="input-critic-endpoint">Custom Critic Endpoint (CUSTOM_CRITIC_ENDPOINT)</label>
+                  <input type="text" id="input-critic-endpoint" placeholder="e.g. http://localhost:11434/v1" />
+                </div>
+
+                <div class="form-group">
+                  <label for="input-critic-key">Custom Critic API Key (CUSTOM_CRITIC_KEY)</label>
+                  <div class="input-with-reveal">
+                    <input type="password" id="input-critic-key" placeholder="Enter Custom Critic key" autocomplete="new-password" />
+                    <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="input-critic-model">Custom Critic Model (CUSTOM_CRITIC_MODEL)</label>
+                  <input type="text" id="input-critic-model" placeholder="e.g. llama3" />
+                </div>
+
+                <h3 class="admin-section-subtitle" style="margin-top: 24px; margin-bottom: 16px; font-size: .95rem; font-weight: 600; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 6px; letter-spacing: 0.05em;">ENTERPRISE PROXY SETTINGS</h3>
+
+                <div class="form-group">
+                  <label for="input-http-proxy">HTTP Proxy URL (HTTP_PROXY)</label>
+                  <input type="text" id="input-http-proxy" placeholder="e.g. http://10.0.0.1:8080 or http://user:pass@proxy.example.com:8080" />
+                </div>
+
+                <div class="form-group">
+                  <label for="input-https-proxy">HTTPS Proxy URL (HTTPS_PROXY)</label>
+                  <input type="text" id="input-https-proxy" placeholder="e.g. http://user:pass@proxy.example.com:8080" />
+                </div>
+
+                <div class="form-group">
+                  <label for="input-no-proxy">No Proxy Hosts (NO_PROXY)</label>
+                  <input type="text" id="input-no-proxy" placeholder="e.g. 127.0.0.1,localhost,local,.local" />
+                </div>
+
+                <div class="form-group" style="display: flex; align-items: center; gap: 8px; margin-top: 16px; margin-bottom: 16px;">
+                  <input type="checkbox" id="input-tls-insecure" value="1" style="width: auto; margin: 0; cursor: pointer;" />
+                  <label for="input-tls-insecure" style="margin: 0; cursor: pointer; font-weight: 500; font-size: 0.85rem; color: var(--text-muted);">Enable TLS Insecure Mode (disables Node + Git SSL checks)</label>
+                </div>
+
+                <div class="form-actions">
+                  <button type="button" id="btn-save-config" class="btn-primary">Save Changes</button>
+                  <span id="config-status" class="status-msg"></span>
+                </div>
+              </form>
+            </section>
+
+            <!-- Whitelisted Users Section -->
+            <section class="admin-section">
+              <h2 class="admin-section-title">GitHub User Whitelist</h2>
+              <p class="admin-section-desc">Manage users authorized to access the system. Changes are committed to <code>allowed-github-users.txt</code> instantly.</p>
+              
+              <div class="whitelist-input-group">
+                <input type="text" id="input-whitelist-user" placeholder="Enter GitHub username" />
+                <button type="button" id="btn-add-whitelist" class="btn-secondary">Add User</button>
+              </div>
+              <span id="whitelist-status" class="status-msg"></span>
+
+              <div class="whitelist-chips-container">
+                <div class="chips-title">Whitelisted Users</div>
+                <div id="whitelist-chips" class="whitelist-chips">
+                  <!-- Dynamic chips added here -->
+                </div>
+              </div>
+            </section>
+
+          </div>
+        </div>
+      </div>
       <div id="files-wrap" hidden>
         <div id="files-tree-pane">
           <header id="files-header">
@@ -409,12 +526,11 @@
       </a>
       <div class="login-divider"><span>or use a Personal Access Token</span></div>
       <form id="login-pat-form" autocomplete="off">
-        <input id="login-pat" type="password" placeholder="ghp_… or github_pat_…" autocomplete="off" spellcheck="false" />
+        <input id="login-pat" type="password" placeholder="GitHub token (ghp_…) or Gitee token…" autocomplete="off" spellcheck="false" />
         <button id="login-pat-submit" type="submit">Sign in with token</button>
       </form>
       <p class="login-hint login-fineprint">
-        <a href="https://github.com/settings/tokens/new?scopes=repo,read:user&amp;description=myco" target="_blank" rel="noopener">Create a token</a>
-        with <code>repo</code> + <code>read:user</code> scope. The same token is used for <code>/feature</code> and <code>/bug</code>.
+        Create a <a href="https://github.com/settings/tokens/new?scopes=repo,read:user&amp;description=myco" target="_blank" rel="noopener">GitHub PAT</a> (scopes: <code>repo</code>, <code>read:user</code>) or a <a href="https://gitee.com/profile/personal_access_tokens" target="_blank" rel="noopener">Gitee PAT</a> (scope: <code>issues</code>). The token is stashed for <code>/feature</code> and <code>/bug</code>.
       </p>
       <div id="login-error" hidden></div>
     </div>

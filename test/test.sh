@@ -42,10 +42,17 @@ die()     { FAIL=$((FAIL+1)); echo "  ✗ FATAL: $1"; exit 1; }
 section() { printf "\n── %s ──\n" "$*"; }
 
 free_port() {
-  # Node-based port discovery (was python3, but python3 isn't always
-  # installed on lean containers — Alpine without `apk add python3`).
-  # Node is already a hard dep for the suite, so this is more portable.
-  node -e "const s = require('net').createServer(); s.listen(0, () => { console.log(s.address().port); s.close(); });"
+  # Node-based port discovery. Falls back to python or a random high port
+  # if node is not on the host's PATH.
+  if have_node; then
+    node -e "const s = require('net').createServer(); s.listen(0, () => { console.log(s.address().port); s.close(); });"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "import socket; s = socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
+  elif command -v python >/dev/null 2>&1; then
+    python -c "import socket; s = socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
+  else
+    echo $(( 10000 + RANDOM % 50000 ))
+  fi
 }
 
 # Some checks need a host-side node binary (`node -e "require(...)"`). The
@@ -3344,7 +3351,7 @@ EOF
 
   # sessions.json: pre-seeded session that should appear post-restart.
   cat > "$PERSIST_DIR/sessions.json" <<EOF
-{"sessions":{"$PERSIST_SID":{"id":"$PERSIST_SID","user":"alice","cwd":"persist-test","absCwd":"/wks/alice/persist-test","claudeSessionId":null,"createdAt":"2026-01-01T00:00:00.000Z"}},"dismissed":[]}
+{"sessions":{"$PERSIST_SID":{"id":"$PERSIST_SID","user":"alice","cwd":"persist-test","absCwd":"/wks/alice/persist-test","claudeSessionId":null,"createdAt":"2026-01-01T00:00:00.000Z","admins":["bob"],"viewers":[]}},"dismissed":[]}
 EOF
 
   # .claude.json + .claude/ — entrypoint should migrate these into /root
@@ -3502,6 +3509,20 @@ test_pat_login_flow() {
     echo "$body" | grep -q '"ok":true' && pass "PAT login: minted token authenticates" \
       || fail "PAT login: minted token authenticates (got: $body)"
   fi
+
+  # Positive (Gitee): posting a Gitee PAT for an allowlisted login mints a session.
+  body=$(curl -s -X POST "http://127.0.0.1:$PERSIST_PORT/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"token":"test-gitee-token-bob"}' 2>/dev/null)
+  echo "$body" | grep -q '"ok":true' && pass "PAT login: bob (Gitee allowlisted) → ok" \
+    || fail "PAT login: bob (Gitee allowlisted) → ok (got: $body)"
+  echo "$body" | grep -q '"login":"bob"' && pass "PAT login: Gitee returns user.login" \
+    || fail "PAT login: Gitee returns user.login (got: $body)"
+
+  # Verify stashed Gitee token in git-tokens.json on the server/container.
+  docker exec "$PERSIST_NAME" cat /data/git-tokens.json | grep -q '"gitee": "test-gitee-token-bob"' \
+    && pass "PAT login: Gitee token stashed in git-tokens.json" \
+    || fail "PAT login: Gitee token NOT stashed (got git-tokens.json)"
 
   # Negative: PAT for a non-allowlisted login → 403 with hint.
   code=$(curl -s -o /tmp/myco-pat-eve -w '%{http_code}' -X POST \

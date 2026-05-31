@@ -208,6 +208,31 @@ function shareTokenInfo(tok) {
 
 function revokeShareTokensForSession() {}
 
+function addUserToAllowlist(login) {
+  const safe = sanitize(login);
+  if (!safe) return false;
+  const current = loadAllowlist();
+  if (current.has(safe)) return false;
+  _ensureDir();
+  let existing = '';
+  try { existing = fs.readFileSync(ALLOWLIST_FILE, 'utf8'); } catch {}
+  const separator = (existing && !existing.endsWith('\n')) ? '\n' : '';
+  fs.appendFileSync(ALLOWLIST_FILE, `${separator}${safe}\n`);
+  return true;
+}
+
+function removeUserFromAllowlist(login) {
+  const safe = sanitize(login);
+  if (!safe) return false;
+  const current = loadAllowlist();
+  if (!current.has(safe)) return false;
+  current.delete(safe);
+  _ensureDir();
+  const lines = Array.from(current).join('\n') + '\n';
+  fs.writeFileSync(ALLOWLIST_FILE, lines);
+  return true;
+}
+
 // Eager-load on first require so route handlers see persisted sessions
 // without waiting for a request.
 _ensureLoaded();
@@ -226,4 +251,6 @@ module.exports = {
   shareTokenInfo,
   revokeShareTokensForSession,
   sanitize,
+  addUserToAllowlist,
+  removeUserFromAllowlist,
 };

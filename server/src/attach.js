@@ -178,6 +178,56 @@ function _registerExternalSession(sessionId, session) {
         }
       }
       if (ev.type === 'turn_result') {
+        const rec = sessionsMod.getSessionRecord(sessionId);
+        if (ev.subtype === 'success' && active && active.itemId && rec && rec.absCwd) {
+          // Gated Critique workflow execution
+          (async () => {
+            try {
+              const { listChangedFiles, readDiff } = require('./files');
+              const changedInfo = await listChangedFiles(rec.absCwd);
+              if (changedInfo && Array.isArray(changedInfo.entries) && changedInfo.entries.length > 0) {
+                let fullDiff = '';
+                for (const entry of changedInfo.entries) {
+                  const d = await readDiff(rec.absCwd, entry.path);
+                  if (d && d.diff) {
+                    fullDiff += `\n--- File: ${entry.path} ---\n${d.diff}\n`;
+                  }
+                }
+                
+                if (fullDiff.trim()) {
+                  console.log(`[critique-gate] Plan item ${active.itemId} completed. Invoking Gemini Critique...`);
+                  // Stamp the outcome
+                  _stampPlanItemRunOutcome(sessionId, active.itemId, ev, active.startedAt);
+                  // Trigger Gemini critique
+                  const planArtifact = rec.artifacts && rec.artifacts.plan;
+                  const item = planArtifact && Array.isArray(planArtifact.items) && planArtifact.items.find(it => it.id === active.itemId);
+                  if (item) {
+                    const { triggerGeminiCritique } = require('./critique');
+                    await triggerGeminiCritique(sessionId, session, item, fullDiff, ev.result || '');
+                    return;
+                  }
+                }
+              }
+            } catch (err) {
+              console.error('[critique-gate] Error during critique generation:', err.message);
+            }
+            
+            // Fallback: if no files changed or critique couldn't run, stamp and advance
+            try {
+              _stampPlanItemRunOutcome(sessionId, active.itemId, ev, active.startedAt);
+            } catch (err) {
+              console.error('[plan-run] stamp outcome failed:', err.message);
+            }
+            try {
+              _advanceRunQueue(sessionId, session, active.itemId, ev);
+            } catch (err) {
+              console.error('[runQueue] auto-advance failed:', err.message);
+            }
+          })();
+          session._activeRunItem = null;
+          return;
+        }
+
         try {
           _stampPlanItemRunOutcome(sessionId, active.itemId, ev, active.startedAt);
         } catch (err) {
@@ -1225,6 +1275,12 @@ function _sendAttachSnapshot(session, ws) {
     const sessionId = session.sessionId;
     const rec = sessionsMod.getSessionRecord(sessionId);
     if (!rec) return;
+    
+    // Broadcast active critic model state on connection
+    if (rec.criticModel) {
+      ws.send(JSON.stringify({ t: 'state-update', kind: 'critic-model-changed', modelId: rec.criticModel }));
+    }
+
     const artifacts = {};
     for (const type of ['plan', 'test', 'arch']) {
       const fromFile = getArtifactsMod().__test.readArtifactFromFile(rec, type);

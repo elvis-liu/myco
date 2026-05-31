@@ -685,6 +685,25 @@ class AgentSession extends EventEmitter {
     if (this._msgQueue) {
       try { this._msgQueue.close(); } catch {}
     }
+    // Recovery for stuck-running runQueue entries (e.g. across container restarts):
+    try {
+      if (!this._activeRunItem) {
+        const sessionsMod = require('./sessions');
+        const runQueue = require('./runQueue');
+        const rec = sessionsMod.getSessionRecord(this.sessionId);
+        if (rec && Array.isArray(rec.runQueue)) {
+          const running = rec.runQueue.find(e => e.status === 'running');
+          if (running) {
+            console.log(`[interrupt] auto-finishing stuck running queue item: ${running.itemId}`);
+            runQueue.markFinished(rec, running.itemId, false); // marks failed + pauses queue
+            sessionsMod.saveStore();
+            this.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[interrupt] runQueue unstick failed:', err.message);
+    }
   }
 
   // Normalise SDK events into the flatter shape the WS frame ships.

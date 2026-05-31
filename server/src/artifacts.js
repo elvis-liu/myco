@@ -957,6 +957,25 @@ function register(app, deps) {
     }
     res.json({ ok: true, state: runQueue.getQueueState(ctx.rec) });
   });
+
+  // POST /sessions/:id/critic — save active critic model
+  app.post('/sessions/:id/critic', (req, res) => {
+    const ctx = fileApiPreamble(req, res, 'viewer');
+    if (!ctx) return;
+    const user = reqUser(req, ctx);
+    if (!isOwnerOrAdmin(ctx.id, user)) {
+      return res.status(403).json({ error: 'critic configuration requires owner or admin' });
+    }
+    const { modelId } = req.body || {};
+    ctx.rec.criticModel = modelId || 'gemini';
+    saveStore();
+    
+    const session = getPtySession(ctx.id);
+    if (session) {
+      session.emit('state-update', { kind: 'critic-model-changed', modelId: ctx.rec.criticModel });
+    }
+    res.json({ ok: true, modelId: ctx.rec.criticModel });
+  });
 }
 
 module.exports = {
