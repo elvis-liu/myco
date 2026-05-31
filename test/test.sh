@@ -2511,6 +2511,15 @@ test_chat_window() {
   # Security invariant locked in tests: GET response shape is
   # metadata-only (present + last4), never raw value.
   node_test_result test/fr-87-config-page-pats.test.js "test/fr-87-config-page-pats.test.js (17 cases)"
+  # bug-43: mobile HUD + critic-select overflow. User-reported as
+  # "HUD too wide on mobile and 'critic: gemini' button takes space
+  # that should belong to the text input". Pure-CSS fix:
+  # @media (max-width:600px) caps .composer-critic-select to 90px,
+  # makes .hud-task-text max-width viewport-aware, and tightens
+  # .chat-hud-task padding. Static-grep guards verify those rules
+  # exist + cite bug-43 so a future restyle doesn't silently lose
+  # the fix.
+  node_test_result test/bug-43-mobile-hud-critic-overflow.test.js "test/bug-43-mobile-hud-critic-overflow.test.js (5 cases)"
   # fr-38: per-session strict-mode gate. When `/strict on`, claude-
   # bound chat messages MUST include a [run:plan#<id>] marker (the
   # user's affirmation that the turn is backed by an approved td/fr/

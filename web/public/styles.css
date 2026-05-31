@@ -8177,6 +8177,37 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
   border-color: #ff7b72;
 }
 
+/* bug-43: mobile overrides for the HUD + critic-select. On narrow
+   viewports (≤600px) two things crowd the chat input: (1) the
+   unconditional `.hud-task-text { max-width: 400px }` above pushes
+   the HUD's flex row past viewport width, producing horizontal
+   overflow; (2) the `<select id="composer-critic-select">` sizes to
+   fit its longest option label (~120px for "⚖️ Critic: Gemini"),
+   eating space the textarea needs. Fix:
+     · cap .composer-critic-select to 90px on mobile (still tappable;
+       the visible option text ellipsis-clips, the dropdown's option
+       list is rendered by the browser at full width so the user can
+       still read + pick)
+     · replace .hud-task-text's max-width with a viewport-aware
+       calc() so the text shrinks before pushing the row past viewport
+     · tighten .chat-hud-task padding from 12px 16px to 8px 10px so
+       the HUD has more horizontal room for the content it carries
+   Future restyles touching these rules: keep the @media block
+   intact — removing it re-introduces the bug. */
+@media (max-width: 600px) {
+  .composer-critic-select {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hud-task-text {
+    max-width: calc(100vw - 140px);   /* accounts for HUD padding + status pill */
+  }
+  .chat-hud-task {
+    padding: 8px 10px;
+  }
+}
+
 /* Verdict Overlay Panel in Chat Compose */
 .chat-composer-verdict-panel {
   background: hsla(240, 10%, 8%, 0.98);
