@@ -2558,6 +2558,16 @@ test_chat_window() {
   # inside the modal renders). Standalone #admin-wrap pane is
   # orphaned but its markup is kept for now.
   node_test_result test/fr-87-r4-single-config-icon.test.js "test/fr-87-r4-single-config-icon.test.js (7 cases)"
+  # fr-26: git commits authored by the session owner's GitHub identity.
+  # Resolves {login, githubId} from auth-sessions.json → noreply email
+  # form (<githubId>+<login>@users.noreply.github.com), injected as
+  # GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL / GIT_COMMITTER_NAME /
+  # GIT_COMMITTER_EMAIL into the SDK env. Env vars trump .git/config,
+  # so every git invocation by the agent's Bash tool — including in
+  # cloned subdirs — gets the right attribution. Locks the pure
+  # buildIdentity logic (4 cases) + auth.profileByLogin export +
+  # agent-session.js static-grep guards for the env-injection wiring.
+  node_test_result test/fr-26-git-author-identity.test.js "test/fr-26-git-author-identity.test.js (10 cases)"
   # fr-38: per-session strict-mode gate. When `/strict on`, claude-
   # bound chat messages MUST include a [run:plan#<id>] marker (the
   # user's affirmation that the turn is backed by an approved td/fr/

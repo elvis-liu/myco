@@ -146,6 +146,12 @@ class AgentSession extends EventEmitter {
     this.mode = 'agent';
     this.alive = true;
     this.cwd = opts.cwd || process.cwd();
+    // fr-26: session owner's login. Resolves the git author identity
+    // (GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL etc.) injected into the SDK
+    // env block below. Passed through by sessions.spawnSession +
+    // ensureLiveSession from record.user. Optional — falls through to
+    // no git env override when missing (default identity wins).
+    this.user = opts.user || null;
     this.cols = opts.cols || 120;                // for resize compat (no-op semantically)
     this.rows = opts.rows || 30;
 
@@ -285,9 +291,51 @@ class AgentSession extends EventEmitter {
         this._pendingPrePush = null;
       }
 
+      // fr-26: git author identity for the session owner. Resolves
+      // {name, email} from this.user → auth.profileByLogin →
+      // git-identity.buildIdentity, then injects
+      // GIT_AUTHOR_NAME / GIT_AUTHOR_EMAIL /
+      // GIT_COMMITTER_NAME / GIT_COMMITTER_EMAIL into the SDK env
+      // (top-level sdkOpts.env, alongside the lean-ctx mcpServer's
+      // own CTX_PROJECT_ROOT + LEAN_CTX_AUTONOMY block). The SDK
+      // forwards these to the claude-code child process, which means
+      // every `git commit` the agent's Bash tool runs is attributed
+      // to the user who spawned this session — including commits in
+      // cloned subdirs, because env vars trump .git/config.
+      // Returns null when the user has no githubId on file (caller
+      // gates on truthy → skip the env override; git falls back to
+      // .gitconfig or "Unknown <unknown@example.com>"). Failure to
+      // resolve must NOT block session spawn — auth-sessions can be
+      // empty in local dev, and we still want the agent to run.
+      let gitEnv = null;
+      try {
+        if (this.user) {
+          const auth = require('./auth');
+          const { buildIdentity } = require('./git-identity');
+          const profile = auth.profileByLogin(this.user);
+          const id = profile ? buildIdentity(profile) : null;
+          if (id) {
+            gitEnv = {
+              GIT_AUTHOR_NAME: id.name,
+              GIT_AUTHOR_EMAIL: id.email,
+              GIT_COMMITTER_NAME: id.name,
+              GIT_COMMITTER_EMAIL: id.email,
+            };
+          }
+        }
+      } catch (err) {
+        console.error(`[fr-26] git identity resolve failed for user=${this.user}: ${err.message}`);
+      }
+
       const sdkOpts = {
         cwd: this.cwd,
         permissionMode: 'default',
+        // fr-26: top-level env passed to the spawned claude-code
+        // child process. Inherits process.env first so the SDK still
+        // sees ANTHROPIC_API_KEY / PATH / etc., then overlays
+        // GIT_AUTHOR_* / GIT_COMMITTER_* when the session owner has a
+        // resolvable GitHub identity (see gitEnv block above).
+        env: { ...process.env, ...(gitEnv || {}) },
         // bug-14 round 2 (the 1c7ae4c WS-frame fix was correct but
         // insufficient): the SDK's documented option is `abortController`
         // (an AbortController instance), NOT `abortSignal` (an AbortSignal).

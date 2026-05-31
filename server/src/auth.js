@@ -127,6 +127,27 @@ function profileFromToken(tok) {
   return { login: info.login, githubId: info.githubId, name: info.name, avatarUrl: info.avatarUrl };
 }
 
+// fr-26: lookup the most-recent session profile for a login. Returns
+// { login, githubId, name } or null. Used by agent-session.js to seed
+// GIT_AUTHOR_* / GIT_COMMITTER_* env from the session OWNER's identity
+// without needing their token (the AgentSession doesn't carry it). We
+// pick the entry with the latest expiresAt so a fresh login wins over
+// a stale one.
+function profileByLogin(login) {
+  if (!login) return null;
+  _ensureLoaded();
+  const safe = sanitize(login);
+  if (!safe) return null;
+  let best = null;
+  for (const info of AUTH_SESSIONS.values()) {
+    if (!info || info.login !== safe) continue;
+    if (info.expiresAt && info.expiresAt < Date.now()) continue;
+    if (!best || (info.expiresAt || 0) > (best.expiresAt || 0)) best = info;
+  }
+  if (!best) return null;
+  return { login: best.login, githubId: best.githubId, name: best.name };
+}
+
 // All GitHub logins that have ever logged in (deduped, sorted). Used by the
 // chat input's `@`-mention autocomplete. Combined with the allowlist by
 // /users in index.js so admins-listed-but-never-logged-in users still appear.
@@ -242,6 +263,7 @@ module.exports = {
   userFromToken,
   userFromRequest,
   profileFromToken,
+  profileByLogin,
   listUsernames,
   mintSession,
   revokeSession,

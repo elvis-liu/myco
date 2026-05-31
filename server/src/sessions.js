@@ -683,7 +683,9 @@ async function spawnSession(rawCwd, user = 'default', opts = {}) {
   injectBestPracticesIntoClaudeMd(absCwd);
 
   const { spawnAgent } = require('./agent-session');
-  const session = spawnAgent(id, { cwd: absCwd, cols, rows });
+  // fr-26: pass session owner so AgentSession can resolve GitHub
+  // identity → GIT_AUTHOR_* / GIT_COMMITTER_* env for the SDK.
+  const session = spawnAgent(id, { cwd: absCwd, cols, rows, user });
   ptyMod._registerExternalSession(id, session);
   return { id, cwd: record.cwd, mode };
 }
@@ -778,6 +780,8 @@ async function ensureLiveSession(sessionId) {
   const session = spawnAgent(sessionId, {
     cwd: rec.absCwd,
     resumeSdkSessionId: rec.sdkSessionId || null,
+    // fr-26: re-seed git identity on respawn.
+    user: rec.user || null,
   });
   ptyMod._registerExternalSession(sessionId, session);
   console.log(`[ensureLive] respawned agent for ${sessionId} cwd=${rec.absCwd} resume=${rec.sdkSessionId || 'none'}`);

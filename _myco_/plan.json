@@ -1327,7 +1327,14 @@
         "rewriteRequested": "long",
         "originalText": "git commit to use current user github id so that the work is accountable. please add some design to this fr as you rewrite and adding to plan item list",
         "rewritten": true
-      }
+      },
+      "runs": [
+        {
+          "status": "completed",
+          "ts": "2026-05-31T22:14:18.582Z",
+          "summary": "Option A shipped. Resolver chain: sessions.spawnSession(user) → spawnAgent(id,{user}) → AgentSession stores this.user → _runIteration calls auth.profileByLogin(this.user) → git-identity.buildIdentity(profile) → sdkOpts.env carries GIT_AUTHOR_NAME/EMAIL + GIT_COMMITTER_NAME/EMAIL. Email is the noreply form <githubId>+<login>@users.noreply.github.com; name falls back to login (Option B real-name fetch deferred). Env vars trump .git/config so cloned subdirs are covered too. Falls open when user has no githubId (default git identity wins; session still spawns). Wiring: server/src/git-identity.js (new), server/src/auth.js (+profileByLogin export), server/src/agent-session.js (+this.user + sdkOpts.env block + fr-26 marker comment), server/src/sessions.js (passes user through both spawnAgent sites). Tests: test/fr-26-git-author-identity.test.js (10 cases, all green) wired into test/test.sh. Adjacent suites stayed green: fr-87 r2/r3/r4, fr-87 PATs, fr-45 sdkopts-lint, bug-44, strict-mode-gate, auth/session test families. Full ./test/test.sh aborted on busybox grep -P (pre-existing host limitation, not a fr-26 regression). Not yet committed/pushed — awaiting user direction."
+        }
+      ]
     },
     {
       "id": "bug-14",
@@ -3912,7 +3919,24 @@
         "rewritten": true
       },
       "description": "**Problem:** On mobile, the config page is inaccessible from the default view.\n**Expected:** Config page should be reachable on mobile without needing to open a session first.\n**Actual:** Config page is hidden on mobile and only appears after clicking into a session."
+    },
+    {
+      "id": "td-32",
+      "text": "Add security check to prevent login tokens from being exposed to LLM",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-05-31T22:18:14.864Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "security check to ensure login tokens are never exposed to llm",
+        "rewritten": true
+      },
+      "description": "**Problem:** Login tokens could leak into LLM context, creating a credential exposure risk.\n**Expected:** A security check that guarantees login tokens are never passed to or visible by the LLM.\n**Actual:** No such guard exists; tokens may flow into prompts/context without detection."
     }
   ],
-  "updatedAt": "2026-05-31T10:06:43.164Z"
+  "updatedAt": "2026-05-31T22:18:20.846Z"
 }
