@@ -52,75 +52,78 @@ console.log('── bug-44: mobile Config entry (sidebar-header button) ──')
 
 // ── index.html: button declared inside the sidebar header ──
 
-t('index.html declares #btn-config as a sidebar-header button', () => {
+// bug-44 contract: "Config page must be reachable from the mobile
+// home view (sidebar header) without opening a session first." The
+// IMPLEMENTATION of that contract moved across rounds:
+//   · bug-44 original (commit be3eb91): #btn-config (user-cog)
+//   · fr-87 r4 (commit TBD): #btn-config retired; gear #btn-admin
+//     is now the single Config icon (per user request to merge the
+//     user-config and admin-config icons).
+// The contract is unchanged; the guards below track the current
+// shape (#btn-admin in the sidebar header, click opens Config modal,
+// visibility gated on auth).
+
+t('index.html declares a sidebar-header Config affordance (post-r4: #btn-admin)', () => {
   const html = _read('web/public/index.html');
-  // Find the sidebar element + its header block.
   const sidebarAt = html.indexOf('<aside id="sidebar">');
   assert.ok(sidebarAt > 0, 'index.html must declare <aside id="sidebar">');
   const headerStart = html.indexOf('<header>', sidebarAt);
   const headerEnd = html.indexOf('</header>', headerStart);
   assert.ok(headerStart > 0 && headerEnd > headerStart, 'sidebar must contain a <header>…</header> block');
   const headerBody = html.slice(headerStart, headerEnd);
-  assert.ok(/id\s*=\s*['"]btn-config['"]/.test(headerBody),
-    '#btn-config must live INSIDE the sidebar header — that puts it at the top of the mobile home view, one tap from anywhere.');
+  // Either #btn-admin (post-fr-87 r4 single icon) OR #btn-config
+  // (legacy bug-44 shape). The contract is "an icon in the sidebar
+  // header opens Config" — selector specifics moved across rounds.
+  assert.ok(/id\s*=\s*['"]btn-admin['"]/.test(headerBody) || /id\s*=\s*['"]btn-config['"]/.test(headerBody),
+    'sidebar header must contain a Config-icon button (#btn-admin post-fr-87 r4, or legacy #btn-config) — that puts the affordance at the top of the mobile home view, one tap from anywhere.');
 });
 
-t('#btn-config has an icon child + aria-label + title (a11y + restyle resilience)', () => {
+t('the Config-icon button has an icon child + aria-label + title (a11y + restyle resilience)', () => {
   const html = _read('web/public/index.html');
-  const btnAt = html.indexOf('id="btn-config"');
-  assert.ok(btnAt > 0);
-  // The button declaration runs through the closing > then any inner
-  // content + </button>. Grab a generous slice.
+  // Find whichever button id is the live Config affordance.
+  const btnIdMatch = html.match(/id="(btn-admin|btn-config)"/);
+  assert.ok(btnIdMatch, 'one of #btn-admin or #btn-config must exist in index.html as the Config-icon button');
+  const btnAt = html.indexOf(btnIdMatch[0]);
   const sliceStart = html.lastIndexOf('<button', btnAt);
   const sliceEnd = html.indexOf('</button>', btnAt);
   const slice = html.slice(sliceStart, sliceEnd);
   assert.ok(/aria-label\s*=/.test(slice),
-    '#btn-config must carry an aria-label for screen readers');
+    'the Config-icon button must carry an aria-label for screen readers');
   assert.ok(/title\s*=/.test(slice),
-    '#btn-config must carry a title tooltip so the click affordance is discoverable on hover (desktop) + long-press (mobile)');
+    'the Config-icon button must carry a title tooltip so the click affordance is discoverable on hover + long-press');
   assert.ok(/<svg\b/.test(slice),
-    '#btn-config must contain an SVG icon child (matches the sidebar-icon-svg pattern used by btn-admin + btn-manual)');
+    'the Config-icon button must contain an SVG icon child (matches the sidebar-icon-svg pattern)');
 });
 
-// ── app.js: click handler routes to openConfigModal ──
-
-t('app.js binds #btn-config click to openConfigModal()', () => {
+t('app.js binds the Config-icon click to openConfigModal()', () => {
   const src = _read('web/public/app.js');
-  // The binding can live anywhere — look for a getElementById('btn-config')
-  // (or btn-config dataset use) paired with an addEventListener('click', …
-  // → openConfigModal).
-  const lookupAt = src.indexOf("getElementById('btn-config')");
-  const altAt = src.indexOf('"btn-config"');
-  assert.ok(lookupAt > 0 || altAt > 0,
-    'app.js must reference #btn-config (via getElementById or dataset lookup) to wire its click handler');
-  // Window around the lookup must contain both a click handler AND
-  // a call to openConfigModal.
-  const start = Math.max(lookupAt, altAt);
-  const window = src.slice(Math.max(0, start - 200), start + 800);
-  assert.ok(/openConfigModal/.test(window),
-    '#btn-config click handler must call openConfigModal() — the same entry point fr-87 wired to the @login chip');
+  // Find the SOMEWHERE in app.js that wires a click on the Config
+  // icon → openConfigModal. We accept either btn-admin OR btn-config
+  // as the selector.
+  const adminClick = src.match(/btn-admin[\s\S]{0,2000}addEventListener\s*\(\s*['"]click['"][\s\S]{0,500}openConfigModal/);
+  const configClick = src.match(/btn-config[\s\S]{0,2000}addEventListener\s*\(\s*['"]click['"][\s\S]{0,500}openConfigModal/);
+  assert.ok(adminClick || configClick,
+    'app.js must wire a click handler on the Config-icon button (#btn-admin or #btn-config) that calls openConfigModal()');
 });
 
-t('#btn-config visibility is gated on auth (mirrors showUserStamp pattern)', () => {
+t('the Config-icon visibility is gated on auth (state.chatUser)', () => {
   const src = _read('web/public/app.js');
-  // Either btn-config is hidden by default in HTML and revealed once
-  // chatUser is set, OR the show/hide is decided in JS. We accept
-  // either shape but require some auth gate so unauth\'d users don\'t
-  // see a button that 401s on click.
-  const lookupAt = src.indexOf("getElementById('btn-config')");
-  const window = src.slice(Math.max(0, lookupAt - 200), lookupAt + 1200);
-  assert.ok(/state\.chatUser|chatUser/.test(window) || /hidden\s*=\s*!state\.chatUser/.test(window) || /btn-config[^]*hidden/.test(_read('web/public/index.html')),
-    '#btn-config show/hide must be tied to state.chatUser so unauth\'d users don\'t see a dead button (the Config endpoints all require auth and would 401).');
+  // The visibility logic must reference state.chatUser somewhere
+  // adjacent to the Config-icon binding. We're tolerant about which
+  // button id is used.
+  const adminGate = /btn-admin[\s\S]{0,2000}state\.chatUser/.test(src);
+  const configGate = /btn-config[\s\S]{0,2000}state\.chatUser/.test(src);
+  assert.ok(adminGate || configGate,
+    'Config-icon visibility must be tied to state.chatUser so unauth\'d users don\'t see a dead button (the Config endpoints all require auth and would 401).');
 });
 
-// ── bug-44 marker comment so future restyles preserve the affordance ──
-
-t('a comment naming bug-44 explains why #btn-config exists', () => {
+t('a comment naming bug-44 or fr-87 r4 explains why the sidebar-header Config affordance exists', () => {
   const html = _read('web/public/index.html');
-  const btnAt = html.indexOf('id="btn-config"');
-  const window = html.slice(Math.max(0, btnAt - 500), btnAt + 500);
-  assert.ok(/bug-44/.test(window),
-    'a comment in index.html must name bug-44 near #btn-config so a future restyle does not silently drop the sidebar-header Config affordance and re-bury Config under the @login chip in #status-bar.');
+  // Either bug-44 (original) OR fr-87 r4 (current shape) must be
+  // named near the Config-icon button — the marker survives future
+  // restyles so a refactor doesn\'t silently drop the affordance.
+  assert.ok(/bug-44|fr-87\s*r4/i.test(html),
+    'a comment in index.html must name bug-44 or fr-87 r4 near the sidebar-header Config affordance so a future restyle does not silently drop it and re-bury Config under the @login chip in #status-bar.');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

@@ -923,22 +923,9 @@ function showUserStamp() {
       openConfigModal();
     });
   }
-  // bug-44: sidebar-header Config button. Same auth gate as the chip
-  // (state.chatUser is set) and same click target (openConfigModal).
-  // Lives at the TOP of the mobile home view so users don't have to
-  // scroll to the status-bar at the bottom to find Config. Hidden
-  // until auth so unauth'd users don't see a button that 401s.
-  const btnCfg = document.getElementById('btn-config');
-  if (btnCfg) {
-    btnCfg.hidden = !state.chatUser;
-    if (state.chatUser && !btnCfg.dataset.configBound) {
-      btnCfg.dataset.configBound = '1';
-      btnCfg.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openConfigModal();
-      });
-    }
-  }
+  // fr-87 r4: the legacy user-cog icon that bug-44 added was removed.
+  // The gear icon (#btn-admin) is now the single Config affordance —
+  // its show/hide + click wiring lives in bindAdminUi.
 }
 
 // fr-87: Config modal — per-user PAT management + sign-out. Fetches
@@ -12494,49 +12481,39 @@ function bindBestPracticesToggle() {
 
 function bindAdminUi() {
   const btnAdmin = document.getElementById('btn-admin');
-  console.log('[admin-diag] bindAdminUi called. btn-admin element found:', !!btnAdmin);
   if (!btnAdmin) return;
 
-  // Reactively show button if admin
-  const u = state.chatUser ? state.chatUser.toLowerCase() : '';
-  console.log('[admin-diag] bindAdminUi: state.chatUser =', state.chatUser, 'lowercased =', u);
-  const isAdmin = (u === 'labxnow' || u === 'kkrazy' || u === 'ryan-blues');
-  console.log('[admin-diag] bindAdminUi: isAdmin evaluation result =', isAdmin);
-
-  if (isAdmin) {
-    console.log('[admin-diag] bindAdminUi: User is admin, removing hidden attribute and setting display style to inline-flex');
+  // fr-87 r4: gear icon is THE single Config affordance.
+  //
+  // Pre-r4: gate was a hardcoded login-list isAdmin check (labxnow |
+  // kkrazy | ryan-blues), and click opened the standalone admin pane
+  // (#admin-wrap). Non-admin users never saw the icon, and the user-
+  // facing Config modal was reached via a separate #btn-config (user-
+  // cog) icon — confusing duplication.
+  //
+  // Post-r4: visibility is gated on auth (state.chatUser) — any
+  // authenticated user sees the gear because clicking it opens the
+  // unified Config modal, which has user-scoped PATs for everyone +
+  // an admin section that the SERVER-side requireAdmin gate (in
+  // _refreshConfigAdmin's GET /api/admin/config probe) reveals only
+  // to actual admins. So the gear's visibility is liberal; the
+  // admin-only contents stay protected at the modal-section level.
+  if (state.chatUser) {
     btnAdmin.removeAttribute('hidden');
     btnAdmin.style.display = 'inline-flex';
-    
-    // Log actual computed dimensions and styles to catch styling conflicts
-    try {
-      console.log('[admin-diag] btn-admin runtime details:', {
-        hasHiddenAttr: btnAdmin.hasAttribute('hidden'),
-        styleDisplay: btnAdmin.style.display,
-        computedDisplay: window.getComputedStyle(btnAdmin).display,
-        computedVisibility: window.getComputedStyle(btnAdmin).visibility,
-        computedOpacity: window.getComputedStyle(btnAdmin).opacity,
-        offsetWidth: btnAdmin.offsetWidth,
-        offsetHeight: btnAdmin.offsetHeight,
-        parentElement: btnAdmin.parentElement ? btnAdmin.parentElement.tagName : 'none',
-        parentDisplay: btnAdmin.parentElement ? window.getComputedStyle(btnAdmin.parentElement).display : 'none'
-      });
-    } catch (e) {
-      console.error('[admin-diag] Failed to query btn-admin computed styles:', e);
-    }
   } else {
-    console.log('[admin-diag] bindAdminUi: User is NOT admin, keeping button hidden');
+    btnAdmin.hidden = true;
+    btnAdmin.style.display = '';
   }
 
-  if (btnAdmin.dataset.bound) {
-    console.log('[admin-diag] bindAdminUi: btn-admin already bound, skipping event listener registration.');
-    return;
-  }
+  if (btnAdmin.dataset.bound) return;
   btnAdmin.dataset.bound = '1';
-  console.log('[admin-diag] bindAdminUi: binding click event listener to btn-admin');
 
   btnAdmin.addEventListener('click', () => {
-    toggleAdminPane();
+    // fr-87 r4: gear opens the unified Config modal. The standalone
+    // #admin-wrap pane is now orphaned — markup remains but no UI
+    // entry points to it; future cleanup can yank it.
+    openConfigModal();
   });
 
   // Wire password visibility toggles

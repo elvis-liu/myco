@@ -2548,6 +2548,16 @@ test_chat_window() {
   # (max-width:600px) for #config-dialog/.config-pat-form/.config-
   # pat-row so the PAT section is usable on a 360px phone.
   node_test_result test/fr-87-r3-mobile-config.test.js "test/fr-87-r3-mobile-config.test.js (7 cases)"
+  # fr-87 r4: single Config icon. The user-cog #btn-config (added by
+  # bug-44) was removed; the gear icon (#btn-admin) is repurposed as
+  # THE Config affordance — click opens the unified Config modal
+  # (PATs for everyone + admin merge for admins), visible to any
+  # authed user. Hardcoded admin login-list gate moved from the
+  # client-side btn-admin visibility into the server's /api/admin/
+  # config 200/403 probe (which decides whether the admin SECTION
+  # inside the modal renders). Standalone #admin-wrap pane is
+  # orphaned but its markup is kept for now.
+  node_test_result test/fr-87-r4-single-config-icon.test.js "test/fr-87-r4-single-config-icon.test.js (7 cases)"
   # fr-38: per-session strict-mode gate. When `/strict on`, claude-
   # bound chat messages MUST include a [run:plan#<id>] marker (the
   # user's affirmation that the turn is backed by an approved td/fr/
