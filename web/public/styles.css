@@ -3854,16 +3854,22 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
    collapsed buttons exactly. */
 .composer.composer-has-content .composer-critic-select {
   width: 24px;
-  height: 24px;
+  min-width: 24px;
   max-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
   padding: 4px;
   overflow: hidden;
   text-overflow: clip;
   /* r7: kill the select's native 1px border + drop the
      appearance to avoid the browser-chrome chevron eating
      into the icon's 16×16 slot (the option-list still opens
-     on click via the underlying <select>; only the closed
-     visual is collapsed). */
+     on click via the underlying select; only the closed
+     visual is collapsed).
+     r8: min/max-width + min/max-height defenses so the mobile
+     @media max-width: 600px rule's max-width 90px on the
+     critic-select cannot widen us back. */
   border: 0;
   appearance: none;
   -webkit-appearance: none;
@@ -3881,20 +3887,51 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 .composer.composer-has-content .composer-actions {
   min-width: 0;
 }
-/* fr-88 r4-r7: r3's `padding: 0 10px` made buttons 36px wide
+/* fr-88 r4-r8: r3's `padding: 0 10px` made buttons 36px wide
    (still 20px wider than the 16px icon) and the base `height:
    34px` kept them tall. r4 dropped to 24×24 square hugging the
    icon. r6 added the width:24 lock + base 90×34 lock. r7 zeros
    borders on variants in collapsed state — measured with JSDOM
    that Mic + Stop carry 1px borders (dashed + solid), eating 2px
    of content area, so their 16px icon overflows the 14px content
-   region while Draw + Send (border 0) sit flush. Visible result:
-   Mic/Stop icons looked 1px larger than Draw/Send. Zeroing the
-   border in collapsed state equalises content area at 16px
-   exactly across all four variants. */
+   region while Draw + Send (border 0) sit flush. r8 fixes the
+   real-browser mobile rendering: the @media (max-width: 900px)
+   block at the top of styles.css sets `.composer-btn { min-width:
+   80px; height: 44px; padding: 0 16px }`. Width:24 from this
+   rule won the cascade, but min-width:80 from the mobile rule
+   was the ONLY min-width declaration, so the computed width
+   resolved to max(24, 80) = 80 on mobile viewports. r8 declares
+   min-width: 24px AND max-width: 24px AND min-height/max-height
+   so mobile can't pump the dimensions back up. */
 .composer.composer-has-content .composer-btn {
   width: 24px;
+  min-width: 24px;
+  max-width: 24px;
   height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  padding: 4px;
+}
+/* fr-88 r8: ID-based collapse override. The mobile @media block
+   has `#chat-send { min-width: 56px; min-height: 40px }` —
+   specificity 0,1,0,0 — which BEATS my class-chain
+   `.composer.composer-has-content .composer-btn` (0,0,3,0). So
+   Send was rendering at 56×40 even with the class rule. Use
+   `#chat-form.composer.composer-has-content #<id>` (0,1,2,1)
+   to outrank every per-id mobile override for all four buttons.
+   Belt-and-suspenders against any future per-id mobile rules
+   we don't anticipate. */
+#chat-form.composer.composer-has-content #claude-stop,
+#chat-form.composer.composer-has-content #chat-mic,
+#chat-form.composer.composer-has-content #chat-diagram,
+#chat-form.composer.composer-has-content #chat-send,
+#chat-form.composer.composer-has-content #composer-critic-select {
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
   padding: 4px;
 }
 /* fr-88 r7: even with explicit width: 24px + box-sizing: border-

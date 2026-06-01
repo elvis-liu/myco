@@ -426,6 +426,75 @@ t('fr-88 r7: .composer-critic-select locks to 24×24 in collapsed state (matches
     '.composer-critic-select collapsed rule must declare appearance: none so the native dropdown chevron doesn\'t eat into the 16×16 icon slot (fr-88 r7).');
 });
 
+// ── fr-88 r8: mobile @media rules with higher specificity ──
+//
+// User after r7: "the buttons in composer-actions are of different
+// width after shrink, some are of 80x24, 24x24, 56x24, the entire
+// composer-actions div width should be shrinked too"
+//
+// Root cause: r7 verified uniformity with JSDOM but JSDOM doesn't
+// honor @media (max-width:Npx) gating by default. On the user's
+// real mobile viewport, two @media (max-width:900px) rules from
+// the top of styles.css won the cascade:
+//   .composer-btn { min-width: 80px; height: 44px; padding: 0 16px }
+//   #chat-send    { min-width: 56px; min-height: 40px; font-size: 15px }
+// The first beats r7's `.composer.composer-has-content
+// .composer-btn` for min-width (r7 declared only `width`, not
+// `min-width`). The second beats every class-chain rule because
+// `#chat-send` ID specificity 0,1,0,0 > 0,0,3,0. Effective
+// computed widths on mobile: Stop/Mic/Draw = 80, Send = 56,
+// Critic = browser default. User saw the cascade I missed.
+//
+// r8 fixes both:
+//   (a) Class-chain collapse rule now sets explicit min/max
+//       width AND min/max height equal to the lock dimensions
+//       so the mobile .composer-btn min-width:80 can't bleed
+//       through.
+//   (b) Adds an ID-based override
+//       #chat-form.composer.composer-has-content #<id>
+//       (specificity 0,1,2,1) that outranks every per-id mobile
+//       rule (#chat-send 0,1,0,0 and any future siblings).
+
+t('fr-88 r8: class-chain collapse rule sets min/max width AND min/max height (defends against mobile .composer-btn min-width)', () => {
+  const css = _read('web/public/styles.css');
+  const re = /\.composer\.composer-has-content\s+\.composer-btn\s*\{([^}]*)\}/;
+  const m = css.match(re);
+  assert.ok(m, 'class-chain collapse rule must exist');
+  const body = m[1];
+  for (const prop of ['width', 'min-width', 'max-width', 'height', 'min-height', 'max-height']) {
+    const re2 = new RegExp(`${prop}:\\s*24px`);
+    assert.ok(re2.test(body),
+      `.composer.composer-has-content .composer-btn must declare ${prop}: 24px so mobile @media (max-width: 900px) rules .composer-btn { min-width: 80px } can't bleed through (fr-88 r8). Found body: ${body.slice(0, 200)}`);
+  }
+});
+
+t('fr-88 r8: ID-based collapse override exists for all 5 elements (beats #chat-send mobile rule)', () => {
+  const css = _read('web/public/styles.css');
+  // Find a rule whose selector contains ALL five IDs
+  // (#claude-stop, #chat-mic, #chat-diagram, #chat-send,
+  // #composer-critic-select) and at least one #chat-form scoping.
+  const ids = ['claude-stop', 'chat-mic', 'chat-diagram', 'chat-send', 'composer-critic-select'];
+  // Look for any rule body that follows a selector mentioning all
+  // five IDs.
+  const ruleRe = /([^{}]+)\{([^}]*)\}/g;
+  let found = null;
+  let m;
+  while ((m = ruleRe.exec(css))) {
+    const selector = m[1];
+    if (!/composer-has-content/.test(selector)) continue;
+    if (!ids.every(id => new RegExp(`#${id}\\b`).test(selector))) continue;
+    found = { selector, body: m[2] };
+    break;
+  }
+  assert.ok(found,
+    'styles.css must contain a rule whose selector includes #chat-form.composer.composer-has-content #<id> for all five composer elements (claude-stop, chat-mic, chat-diagram, chat-send, composer-critic-select) — needed to outrank #chat-send mobile rule (specificity 0,1,0,0) which sets min-width: 56px (fr-88 r8).');
+  const body = found.body;
+  for (const prop of ['width', 'min-width', 'max-width']) {
+    assert.ok(new RegExp(`${prop}:\\s*24px`).test(body),
+      `ID-based collapse override must declare ${prop}: 24px so #chat-send's per-id mobile min-width can't pump it back up. Found body: ${body.slice(0, 200)}`);
+  }
+});
+
 // ── marker comment ──
 
 t('a comment naming fr-88 sits NEAR the composer-has-content code so a future restyle finds the rationale (disambiguates from the pre-existing fr-88-r blocking-modal feature in app.js)', () => {
