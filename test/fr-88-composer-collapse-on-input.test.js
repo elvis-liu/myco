@@ -468,31 +468,101 @@ t('fr-88 r8: class-chain collapse rule sets min/max width AND min/max height (de
   }
 });
 
-t('fr-88 r8: ID-based collapse override exists for all 5 elements (beats #chat-send mobile rule)', () => {
-  const css = _read('web/public/styles.css');
-  // Find a rule whose selector contains ALL five IDs
-  // (#claude-stop, #chat-mic, #chat-diagram, #chat-send,
-  // #composer-critic-select) and at least one #chat-form scoping.
+t('fr-88 r8: ID-based collapse overrides exist for all 5 elements (beats #chat-send mobile rule). r9 may split Critic into its own rule.', () => {
+  let css = _read('web/public/styles.css');
+  // Strip CSS comments before scanning — comments anywhere in the
+  // file mention the id literals (e.g. "fr-88 r2 clamps
+  // #composer-critic-select to ~36px") and the naive regex would
+  // pick them up as if they were selectors.
+  css = css.replace(/\/\*[\s\S]*?\*\//g, '');
   const ids = ['claude-stop', 'chat-mic', 'chat-diagram', 'chat-send', 'composer-critic-select'];
-  // Look for any rule body that follows a selector mentioning all
-  // five IDs.
   const ruleRe = /([^{}]+)\{([^}]*)\}/g;
-  let found = null;
+  const seen = new Map();
   let m;
   while ((m = ruleRe.exec(css))) {
     const selector = m[1];
     if (!/composer-has-content/.test(selector)) continue;
-    if (!ids.every(id => new RegExp(`#${id}\\b`).test(selector))) continue;
-    found = { selector, body: m[2] };
-    break;
+    for (const id of ids) {
+      if (new RegExp(`#${id}\\b`).test(selector) && !seen.has(id)) {
+        seen.set(id, m[2]);
+      }
+    }
   }
-  assert.ok(found,
-    'styles.css must contain a rule whose selector includes #chat-form.composer.composer-has-content #<id> for all five composer elements (claude-stop, chat-mic, chat-diagram, chat-send, composer-critic-select) — needed to outrank #chat-send mobile rule (specificity 0,1,0,0) which sets min-width: 56px (fr-88 r8).');
-  const body = found.body;
-  for (const prop of ['width', 'min-width', 'max-width']) {
-    assert.ok(new RegExp(`${prop}:\\s*24px`).test(body),
-      `ID-based collapse override must declare ${prop}: 24px so #chat-send's per-id mobile min-width can't pump it back up. Found body: ${body.slice(0, 200)}`);
+  for (const id of ids) {
+    assert.ok(seen.has(id),
+      `ID #${id} must be referenced in at least one #chat-form.composer.composer-has-content #<id> selector so its per-id mobile rules can't bleed through (fr-88 r8/r9).`);
   }
+  for (const id of ids) {
+    const body = seen.get(id);
+    for (const prop of ['width', 'min-width', 'max-width']) {
+      assert.ok(new RegExp(`${prop}:\\s*24px`).test(body),
+        `ID-based collapse rule covering #${id} must declare ${prop}: 24px so #chat-send-style per-id mobile rules can't pump it back up. Found body: ${body.slice(0, 200)}`);
+    }
+  }
+});
+
+// ── fr-88 r9: Critic emoji visible at rest in collapsed state ──
+//
+// User after r8: "the critic icon is not visible by default, it
+// become visible after I click on it"
+//
+// Symptom: the ⚖️ emoji wasn't rendering until the user clicked
+// the select. Root cause: r7+r8 had `padding: 4px` on the Critic
+// select in collapsed state. With width: 24px + box-sizing:
+// border-box, the 4px padding eats 8px of horizontal space,
+// leaving a 16px content area. The ⚖️ emoji's rendered width at
+// the inherited font-size is ~18-20px — so the right edge of the
+// emoji overflows the content area, and some browsers skip the
+// initial paint entirely (especially with appearance: none) until
+// a user interaction triggers a re-render. r9 drops the Critic
+// select padding to 0 (separating it from the buttons that need
+// padding for icon centering) and pins font-size: 16px so the
+// emoji's width is predictable across viewport font-size scales.
+
+t('fr-88 r9: Critic select collapsed rule has padding: 0 (not 4px) so the ⚖️ emoji fits without clipping', () => {
+  const css = _read('web/public/styles.css');
+  // The class-chain rule must declare padding: 0 (and NOT a
+  // 4-pixel padding shorthand). Look at the LAST class-chain
+  // critic-select rule.
+  const re = /\.composer-has-content\s+\.composer-critic-select\s*\{([^}]*)\}/g;
+  let last;
+  let m;
+  while ((m = re.exec(css))) last = m;
+  assert.ok(last, '.composer-has-content .composer-critic-select rule must exist');
+  const body = last[1];
+  assert.ok(/padding:\s*0\b/.test(body),
+    '.composer-critic-select collapsed rule must declare padding: 0 (NOT 4px) so the 24px box gives the ⚖️ emoji the full 24px content area instead of a 16px slot the emoji overflows (fr-88 r9). Found body: ' + body.slice(0, 200));
+  assert.ok(!/padding:\s*4(px)?\b/.test(body),
+    '.composer-critic-select collapsed rule must NOT declare padding: 4px (was r7\'s value; r9 drops it).');
+});
+
+t('fr-88 r9: Critic select has explicit font-size: 16px + line-height: 1 (emoji width predictable across viewport scales)', () => {
+  const css = _read('web/public/styles.css');
+  const re = /\.composer-has-content\s+\.composer-critic-select\s*\{([^}]*)\}/g;
+  let last;
+  let m;
+  while ((m = re.exec(css))) last = m;
+  assert.ok(last);
+  const body = last[1];
+  assert.ok(/font-size:\s*16px/.test(body),
+    '.composer-critic-select collapsed rule must pin font-size: 16px so the emoji renders at a known width — mobile @media bumps body font-size, which without this pin would scale the emoji past the 24px box (fr-88 r9).');
+  assert.ok(/line-height:\s*1\b/.test(body),
+    '.composer-critic-select collapsed rule must pin line-height: 1 so vertical centering is deterministic at 24px height (fr-88 r9).');
+});
+
+t('fr-88 r9: ID-based Critic override has its own padding: 0 (not lumped with buttons\' padding: 4px)', () => {
+  const css = _read('web/public/styles.css');
+  // The r8 ID rule combined all 5 elements with padding: 4px.
+  // r9 splits the Critic select into its own rule with padding: 0.
+  // Find a rule whose selector is JUST the critic-select id-chain
+  // and check it sets padding: 0.
+  const re = /#chat-form\.composer\.composer-has-content\s+#composer-critic-select\s*\{([^}]*)\}/;
+  const m = css.match(re);
+  assert.ok(m,
+    'styles.css must contain a standalone ID-based rule `#chat-form.composer.composer-has-content #composer-critic-select` so the Critic select gets padding: 0 without forcing it on the buttons (fr-88 r9).');
+  const body = m[1];
+  assert.ok(/padding:\s*0\b/.test(body),
+    'standalone Critic ID-rule must declare padding: 0 (fr-88 r9). Found body: ' + body.slice(0, 200));
 });
 
 // ── marker comment ──

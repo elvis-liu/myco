@@ -3859,7 +3859,17 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   height: 24px;
   min-height: 24px;
   max-height: 24px;
-  padding: 4px;
+  /* fr-88 r9: zero padding (was four px). The Critic select shows
+     the selected option's text — currently "⚖️ Critic: Gemini" and
+     siblings. With width 24 + box-sizing border-box + padding of
+     four pixels, the content area was 16 px, but the ⚖️ emoji's
+     rendered width is ~18-20 px so the right edge of the emoji
+     got clipped. Browsers then skipped the initial render entirely
+     and only repainted after a click/focus interaction — user saw
+     the icon appear after they clicked the dropdown. Zero padding
+     gives the full 24 px content area which fits the emoji plus a
+     hair of margin. */
+  padding: 0;
   overflow: hidden;
   text-overflow: clip;
   /* r7: kill the select's native 1px border + drop the
@@ -3873,6 +3883,13 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   border: 0;
   appearance: none;
   -webkit-appearance: none;
+  /* r9: force a known font-size so the emoji's intrinsic width
+     is predictable across browser default scales (mobile @media
+     bumps body font-size; without this, the emoji could grow
+     beyond the 24px box and re-clip). */
+  font-size: 16px;
+  line-height: 1;
+  text-align: left;
 }
 /* fr-88 r3: even after r1/r2 hid the labels + kbd + clamped the
    Critic select, the buttons were still ~40px wide because
@@ -3924,8 +3941,7 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
 #chat-form.composer.composer-has-content #claude-stop,
 #chat-form.composer.composer-has-content #chat-mic,
 #chat-form.composer.composer-has-content #chat-diagram,
-#chat-form.composer.composer-has-content #chat-send,
-#chat-form.composer.composer-has-content #composer-critic-select {
+#chat-form.composer.composer-has-content #chat-send {
   width: 24px;
   min-width: 24px;
   max-width: 24px;
@@ -3933,6 +3949,21 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   min-height: 24px;
   max-height: 24px;
   padding: 4px;
+}
+/* fr-88 r9: Critic select gets its own ID-based dimension lock
+   without the padding: 4px the buttons need. The select shows the
+   ⚖️ emoji whose rendered width (~18-20px) needs the full 24px
+   content area — padding:4 squeezed it to a 16px slot that the
+   emoji overflowed, causing browsers to skip the initial paint
+   until first user interaction. */
+#chat-form.composer.composer-has-content #composer-critic-select {
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  max-height: 24px;
+  padding: 0;
 }
 /* fr-88 r7: even with explicit width: 24px + box-sizing: border-
    box, variant borders (Mic dashed, Stop solid) eat into content
