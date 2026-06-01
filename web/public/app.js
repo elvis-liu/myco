@@ -7247,7 +7247,7 @@ function _updateTaskHUD() {
              affordance discoverable / a11y-readable. -->
         <span id="hud-duration-text">${getElapsedStr()}</span>
         <button type="button" class="hud-stop-btn" title="Stop execution (Esc)" aria-label="Stop">
-          <svg class="composer-icon" viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px;margin:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+          <svg class="composer-icon" viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;margin:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
         </button>
       </div>
     </div>

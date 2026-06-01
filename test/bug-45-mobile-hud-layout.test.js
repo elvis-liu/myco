@@ -437,6 +437,68 @@ t('bug-45 r4: setInterval ticker also writes the bare time (no emoji/brackets)',
     'HUD timer ticker must still call getElapsedStr() so the time updates.');
 });
 
+// ── bug-45 round 7: HUD chip outer heights are deterministic + equal ──
+//
+// User: "The hud stop button height is still not the same as pill
+// button."
+//
+// Root cause: same padding (2px 8px) + same border (1px) + same
+// font-size (11px) on chips and Stop, BUT the chips' line-height
+// was "normal" (browser-computed ~14-17px depending on font) and
+// the Stop's flex height was driven by a 12×12 SVG. That gave
+// chips ~22px outer and Stop ~18-20px outer — visibly different.
+//
+// Fix: pin line-height: 14px on .hud-task-id + .timeline-step +
+// .hud-stop-btn so the line-box is identical, AND bump the Stop's
+// SVG from 12×12 to 14×14 so the icon fills the same 14px
+// line-box the chips' text fills. Both end up at 14 + 4 + 2 = 20px
+// outer, deterministically.
+
+t('bug-45 r7: .hud-task-id pins line-height: 14px (chip outer = 20px deterministic)', () => {
+  const css = _read('web/public/styles.css');
+  const m = css.match(/\n\.hud-task-id\s*\{([^}]*)\}/);
+  assert.ok(m, '.hud-task-id rule must exist');
+  assert.ok(/line-height:\s*14px/.test(m[1]),
+    '.hud-task-id must pin line-height: 14px (bug-45 r7) so chip outer height is deterministic — matches .timeline-step + .hud-stop-btn.');
+});
+
+t('bug-45 r7: .timeline-step pins line-height: 14px (chip outer = 20px deterministic)', () => {
+  const css = _read('web/public/styles.css');
+  const m = css.match(/\n\.timeline-step\s*\{([^}]*)\}/);
+  assert.ok(m, '.timeline-step rule must exist');
+  assert.ok(/line-height:\s*14px/.test(m[1]),
+    '.timeline-step must pin line-height: 14px (bug-45 r7) — shared HUD chip line-height.');
+});
+
+t('bug-45 r7: .hud-stop-btn pins line-height: 14px (matches chip outer height)', () => {
+  const css = _read('web/public/styles.css');
+  const m = css.match(/\n\.hud-stop-btn\s*\{([^}]*)\}/);
+  assert.ok(m, '.hud-stop-btn rule must exist');
+  assert.ok(/line-height:\s*14px/.test(m[1]),
+    '.hud-stop-btn must pin line-height: 14px (bug-45 r7) so the button outer height = 14px line-box + 4px padding + 2px border = 20px outer — matches the chips beside it.');
+});
+
+t('bug-45 r7: HUD Stop SVG is 14×14 (fills the 14px line-box; matches chip text content height)', () => {
+  const app = _read('web/public/app.js');
+  // Find the SVG inside the .hud-stop-btn render. Its inline style
+  // must declare width:14px and height:14px (bug-45 r7 bump from
+  // 12×12 — 12px was shorter than the 14px chip text content,
+  // leaving the button visibly shorter than the chips).
+  // Find the <button class="hud-stop-btn"> block + the SVG inside.
+  const btnMatch = app.match(/<button[^>]*class="hud-stop-btn"[^>]*>([\s\S]*?)<\/button>/);
+  assert.ok(btnMatch, '.hud-stop-btn render must include an SVG child');
+  const inner = btnMatch[1];
+  const svgMatch = inner.match(/<svg[^>]*style="([^"]*)"[^>]*>/);
+  assert.ok(svgMatch, '.hud-stop-btn SVG must declare an inline style');
+  const style = svgMatch[1];
+  assert.ok(/width:\s*14px/.test(style),
+    '.hud-stop-btn SVG inline width must be 14px (bug-45 r7) — bumped from 12px so the icon fills the 14px line-box matching the chips.');
+  assert.ok(/height:\s*14px/.test(style),
+    '.hud-stop-btn SVG inline height must be 14px (bug-45 r7).');
+  assert.ok(!/width:\s*12px/.test(style),
+    '.hud-stop-btn SVG must NOT carry the pre-r7 width: 12px (which left the button shorter than the chips).');
+});
+
 // ── marker comment ──
 
 t('a comment naming bug-45 explains the mobile HUD readability/tap-target/wrap fix', () => {

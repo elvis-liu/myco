@@ -8223,6 +8223,11 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
   font-size: 11px;
   font-weight: bold;
   font-family: var(--mono, monospace);
+  /* bug-45 r7: pin line-height so the badge's outer height is
+     deterministic (14px content + 4px padding + 2px border =
+     20px outer). Mirrors the .timeline-step + .hud-stop-btn
+     line-height below — all three render the same height. */
+  line-height: 14px;
 }
 
 .hud-task-text {
@@ -8267,6 +8272,8 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
   background: var(--bg-input, rgba(128, 128, 128, 0.15));
   border: 1px solid var(--border-soft, rgba(128, 128, 128, 0.25));
   white-space: nowrap;
+  /* bug-45 r7: shared HUD chip line-height (see .hud-task-id). */
+  line-height: 14px;
 }
 
 /* bug-45 r3: active variant follows the queue's status-tinted
@@ -8309,6 +8316,12 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
   align-items: center;
   gap: 4px;
   transition: all 0.15s ease;
+  /* bug-45 r7: same line-height as the HUD chip family so the
+     button's outer height matches them exactly (14px content +
+     4px padding + 2px border = 20px outer). Paired with the
+     14×14 SVG bump in app.js so the icon fills the line-box
+     instead of leaving the button shorter than the chips. */
+  line-height: 14px;
 }
 
 .hud-stop-btn:hover {
