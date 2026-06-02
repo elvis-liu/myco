@@ -1509,14 +1509,12 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
     max-width: 100%;
     height: auto;
   }
-  /* composer side-spacing (mobile): 12px lateral margin so the
-     composer card visibly floats away from the screen edges on
-     phones — matches the 16px desktop value scaled for narrower
-     viewports. Pre-fix this was 4px and the card felt edge-to-edge.
-     Composer-actions column still has room for the 80px buttons at
-     the 375px-screen lower bound (375 - 24 lateral = 351px for the
-     textarea + actions cluster). */
-  #chat-form.composer { margin-left: 12px; margin-right: 12px; }
+  /* composer side-spacing r4 (mobile): 4px lateral margin —
+     matches the desktop value (which now also sits at 4px to align
+     with the chat-messages 4px lateral padding). r1's 12px / r3's
+     12px were reported as "too big"; r4 brings both breakpoints
+     down to align with the chat-pane gutter. */
+  #chat-form.composer { margin-left: 4px; margin-right: 4px; }
 
   /* Composer buttons bump to 44px tall on mobile (Apple HIG finger
      target). Composer is taller naturally because the actions row
@@ -3642,14 +3640,13 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   border-top: 1px solid transparent;
   position: relative;
   flex: 0 0 auto;
-  /* composer side-spacing r3: 12px horizontal margin — matches the
-     mobile override below and keeps the spacing in the same range
-     as the chrome-button lateral offset (8px) + chat-messages
-     padding (4px). Pre-r1 this was 8px and looked edge-to-edge; r1
-     bumped to 16px which the user reported as "too big"; r3 settles
-     at 12px so the composer card visibly floats away from the chat
-     pane walls without dominating the layout. */
-  margin: 4px 12px calc(4px + var(--safe-bottom));
+  /* composer side-spacing r4: 4px horizontal margin — matches the
+     chat-messages padding (6px 4px) so the composer card aligns
+     visually with the messages list directly above it. r1 tried
+     16px (too big per user), r3 tried 12px (still too big per user);
+     r4 settles at 4px to align with the existing chat-pane gutter.
+     Mobile override below also drops to 4px for consistency. */
+  margin: 4px 4px calc(4px + var(--safe-bottom));
   background: var(--surface-2, #1a1f2a);
   border-radius: 12px;
   box-shadow: 0 0 0 1px var(--border, rgba(255, 255, 255, .08));
