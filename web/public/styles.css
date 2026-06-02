@@ -8860,11 +8860,15 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
   padding-right: 40px !important;
 }
 
-/* fr-91: Test button + inline status span for the admin API key
-   fields in the Config modal. Sits inline with the reveal button,
-   shows ✓ / ✗ inline next to the input on click. */
+/* fr-91 r2: Test button now sits BELOW the .input-with-reveal row
+   (not inside it). Pre-r2 the button was a flex child next to the
+   input, but `.form-group input { width: 100% }` claimed the entire
+   flex space and pushed the button off-screen. r2 puts the button
+   as a block-level sibling of .input-with-reveal inside .form-group,
+   so it sits on its own line under the input. The .test-key-status
+   span renders inline next to the button. */
 .btn-test-key {
-  margin-left: 8px;
+  margin-top: 6px;
   padding: 4px 10px;
   border-radius: 6px;
   background: var(--bg-input, rgba(128, 128, 128, 0.15));
@@ -8878,9 +8882,10 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
 .btn-test-key:disabled { opacity: 0.45; cursor: not-allowed; }
 .test-key-status {
   display: inline-block;
-  margin-top: 4px;
+  margin-left: 10px;
   font-size: 0.8rem;
   min-height: 1em;
+  vertical-align: middle;
 }
 .test-key-status.testing { color: #8b949e; }
 .test-key-status.ok      { color: #4caf82; }

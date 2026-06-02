@@ -361,8 +361,13 @@
                   <div class="input-with-reveal">
                     <input type="password" id="input-anthropic-key" placeholder="Enter Anthropic API key" autocomplete="new-password" />
                     <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
-                    <button type="button" id="btn-test-anthropic" class="btn-test-key" title="Probe Anthropic API">Test</button>
                   </div>
+                  <!-- fr-91 r2: Test button moved OUTSIDE .input-with-reveal.
+                       Pre-r2 the button sat inside the flex container next to
+                       the input, but `.form-group input { width: 100% }` (~line
+                       620 of styles.css) made the input claim all the flex
+                       space and pushed the button off-screen to the right. -->
+                  <button type="button" id="btn-test-anthropic" class="btn-test-key" title="Probe Anthropic API">Test</button>
                   <span id="test-status-anthropic" class="test-key-status"></span>
                 </div>
 
@@ -371,8 +376,8 @@
                   <div class="input-with-reveal">
                     <input type="password" id="input-gemini-key" placeholder="Enter Gemini API key" autocomplete="new-password" />
                     <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
-                    <button type="button" id="btn-test-gemini" class="btn-test-key" title="Probe Gemini API">Test</button>
                   </div>
+                  <button type="button" id="btn-test-gemini" class="btn-test-key" title="Probe Gemini API">Test</button>
                   <span id="test-status-gemini" class="test-key-status"></span>
                 </div>
 
@@ -381,8 +386,8 @@
                   <div class="input-with-reveal">
                     <input type="password" id="input-openai-key" placeholder="Enter OpenAI API key" autocomplete="new-password" />
                     <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
-                    <button type="button" id="btn-test-openai" class="btn-test-key" title="Probe OpenAI API">Test</button>
                   </div>
+                  <button type="button" id="btn-test-openai" class="btn-test-key" title="Probe OpenAI API">Test</button>
                   <span id="test-status-openai" class="test-key-status"></span>
                 </div>
 
@@ -396,8 +401,8 @@
                   <div class="input-with-reveal">
                     <input type="password" id="input-critic-key" placeholder="Enter Custom Critic key" autocomplete="new-password" />
                     <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
-                    <button type="button" id="btn-test-critic" class="btn-test-key" title="Probe Custom Critic endpoint">Test</button>
                   </div>
+                  <button type="button" id="btn-test-critic" class="btn-test-key" title="Probe Custom Critic endpoint">Test</button>
                   <span id="test-status-critic" class="test-key-status"></span>
                 </div>
 
