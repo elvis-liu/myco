@@ -4157,6 +4157,12 @@
           "user": "kkrazy",
           "text": "At the begining rotate the critic across all available models in a round robin manner until a good profiling is available for targeted dispatch",
           "ts": "2026-06-01T23:45:18.229Z"
+        },
+        {
+          "id": "249ea48b8d18",
+          "user": "labxnow",
+          "text": "Research and create an intial critic.md",
+          "ts": "2026-06-02T14:08:37.408Z"
         }
       ],
       "meta": {
@@ -4335,7 +4341,38 @@
           "summary": "Root cause: SDK emits `system` messages with task-lifecycle subtypes (task_started / task_progress / task_notification) carrying description + task_id + tool_use_id + status. server/src/agent-session.js _handleEvent had no branch for these and fell through to the unknown_event passthrough, which the client short-circuits with console.warn — so the user got no visible status during deploys, tool sequences, etc. (`[unknown_event] system {type:'system', subtype:'task_progress', description:'Deploy 533fbfe to mycodev', …}` printed to console, nothing in the chat pane). Architectural choice: promote at the server, not the client — single place that decides 'this is a known type' (high cohesion). Per @kkrazy's comment ('should make it as part of chrome batch to ensure ui cleaness'), the promotion routes into the existing chrome batch rather than a standalone bubble. Fix: (1) server: agent-session.js _handleEvent line ~927 adds a branch for `m.type === 'system' && m.subtype ∈ {task_started, task_progress, task_notification}` that emits `{type:'system_event', subtype, taskId, toolUseId, description, status, raw}`. Branch is narrow — future SDK system subtypes still hit unknown_event (= dev-visible warning) so additions aren't silently swallowed. Placement is BEFORE the unknown_event fallback. (2) client: web/public/app.js adds 'system_event' to AGENT_CHROME_TYPES so _isChromeEvent → true → folds into chrome batch with the same collapsing behavior as hook_allow / tool_result. Branches added to _chromeEventLine (expanded body row: icon ▶/·/✓ + subtype, summary = description + status) and _chromeShortLabel (live-status strip + collapsed batch head: '<subtype> · <description> · <status>'). Comment marker bug-48 in both files. Regression test: test/bug-48-system-event-chrome-batch.test.js (7 cases) — locks server-side emission + 3-subtype coverage + ordering vs. unknown_event, plus 3 client touch-points (chrome types set, _chromeEventLine branch, _chromeShortLabel branch) + bug-48 marker. Wired into test/test.sh after bug-47. Adjacent suites stay green: bug-25-unknown-event-suppress (7/7) — the unknown_event short-circuit still works for genuinely-unknown SDK types; bug-46, bug-47, fr-91, chat-persistence-contract, fr-43-rate-limit-retry, fr-45-sdkopts-lint, bug-40-thinking-block-resume — all green. Not yet committed/pushed/deployed — awaiting user direction."
         }
       ]
+    },
+    {
+      "id": "bug-49",
+      "text": "Replace plan-item trash button with close action; remove checkbox close path",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-02T13:57:48.569Z",
+      "addedBy": "labxnow",
+      "source": "user",
+      "voters": [
+        "labxnow"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "i dont see a checkbox to close a plan item. Also using a check box to close an item is.misleading. The trash button should be changed to a close button and close the item, the checkbox code should be removed if its still in the code base",
+        "rewritten": true
+      },
+      "description": "**Problem:** No visible checkbox to close a plan item, and using a checkbox to close is semantically misleading.\n**Expected:** The trash button should be repurposed (or replaced) as a \"close\" button that closes the plan item; any remaining checkbox-based close logic should be deleted.\n**Actual:** Checkbox affordance for closing is missing/confusing, and the trash icon does not map to a close action.\n**Context:** Remove dead checkbox close code from the codebase if still present.",
+      "runs": [
+        {
+          "status": "completed",
+          "ts": "2026-06-02T12:30:00.000Z",
+          "summary": "Root cause: pre-bug-49 plan items had TWO lifecycle buttons in the actions row — (1) .artifact-item-close (fr-47-era replacement for the legacy dual-purpose checkbox; toggles done via POST /artifact/mark, item stays in array with all history) and (2) .artifact-item-delete trash button (hard-delete via DELETE /artifact/item that filtered the item out entirely, losing votes/comments/run-history). User reported the trash icon as semantically wrong for what should be a close action, asked to remove any remaining checkbox close code. The dual-purpose checkbox was already retired in fr-47 (the CSS comment at styles.css:2464 spelled this out); the remaining stale checkbox-mention CSS comments were the only checkbox-era residue. Fix consolidates lifecycle onto ONE affordance: keep .artifact-item-close as-is (already correct), delete the trash button across all layers — (a) HTML: `<button class=\"artifact-item-delete\">` removed from renderItem in web/public/app.js; (b) JS: onArtifactItemDelete function removed, .artifact-item-delete event-wiring loop removed; (c) CSS: 7 .artifact-item-delete rules across styles.css removed (margin-auto right-edge alignment, action-row selector list entries, mobile @media tap-target entry, base pill chrome, :hover, svg sizing); (d) server: DELETE /sessions/:id/artifact/item route removed from artifacts.js (no remaining client caller — dead code per CLAUDE.md §1). Stale checkbox-mention comments in styles.css updated to reflect post-fr-47 reality. Regression test: test/bug-49-trash-becomes-close.test.js (9 cases) locks the delete symbols are gone + the close button + handler survive + bug-49 marker. Three EXISTING tests that locked the trash button's existence updated to reflect the new contract: bug-39-action-row-uniform-height (button list trimmed 8 → 7), fr-62-plan-item-mobile-tap-targets (ACTION_BUTTONS list 8 → 7 + behavior-pin count updated), fr-77-files-changed-diff (r18 regex anchor shifted to .artifact-item-edit, r19 pill-chrome test deleted entirely). Adjacent suites green: bug-39 (5/5), fr-62 (9/9), fr-77 (92/92), bug-49 (9/9). Wired into test/test.sh next to bug-48. Lifecycle contract: close = mark done (item stays); reopen = unmark; hard-delete no longer reachable from the UI. Not yet committed/pushed/deployed — awaiting user direction."
+        },
+        {
+          "status": "completed",
+          "ts": "2026-06-02T12:40:00.000Z",
+          "summary": "r1 (critique response): Gemini flagged 'potential data loss if hard-delete was an intended feature'. The critique misreads the data-flow direction — the removed trash button was the ONLY data-loss path the UI exposed (`artifact.items.filter(it => it.id !== itemId)` permanently dropped the item + every vote/comment/run-summary attached). The surviving close-via-mark path is the OPPOSITE: it sets `it.done = true` and leaves the record intact. Removing the trash button ELIMINATES the data-loss surface; it doesn't create one. The critique is also conditioned on 'IF hard-delete was an intended feature' — but the user's bug-49 dispatch was explicit: 'The trash button should be repurposed (or replaced) as a close button'. Hard-delete wasn't a separate intended feature, it was bug-49's specific removal target. No other route in server/src/ writes a similar `items.filter(...)` deletion against the plan/test artifacts (verified by git audit). Resolution: no code-behavior change — but the rationale comment block at the old route's location in server/src/artifacts.js was beefed up to address the data-loss-direction concern in-code, document the audit (sole hard-delete path), and pre-empt any future agent silently restoring the old route + UI button (the explicit failure mode bug-49 was filed against). If a legitimate admin-only hard-delete need surfaces later (GDPR purge, spam cleanup), the comment now spells out how to reintroduce it safely (isOwnerOrAdmin gate + explicit require=true query param). Regression test still 9/9 green after the comment beef-up. Awaiting user direction on commit/push/deploy."
+        }
+      ]
     }
   ],
-  "updatedAt": "2026-06-02T06:05:00.000Z"
+  "updatedAt": "2026-06-02T12:40:00.000Z"
 }

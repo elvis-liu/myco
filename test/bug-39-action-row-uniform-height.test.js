@@ -13,8 +13,11 @@
 //   - .artifact-item-run       button — "Implement" / "Fix" / "Do" label
 //   - .artifact-item-close     button — "Close" / "Reopen" label
 //   - .artifact-item-edit      font 11px,    padding 2px 10px, radius 4px
-//   - .artifact-item-delete    fixed 22x22px (font 1rem)
 // → visually staggered row.
+//
+// bug-49: .artifact-item-delete was removed from this list; the trash
+// button it described is gone (close-via-mark is now the sole
+// lifecycle affordance).
 //
 // Fix: a single rule sets min-height:22px + box-sizing:border-box +
 // display:inline-flex + align-items:center + line-height:1 across
@@ -68,7 +71,7 @@ t('styles.css: rule lists every action-row chip / button class', () => {
     'artifact-item-run',       // "do/fix/implement" button (layer-aware label)
     'artifact-item-close',     // "Close" / "Reopen" button
     'artifact-item-edit',      // "Edit" button
-    'artifact-item-delete',    // "×" button
+    // bug-49: 'artifact-item-delete' removed — the trash button is gone.
   ]) {
     assert.ok(new RegExp('\\.' + cls + '\\b').test(block),
       'unified-height selector list must include .' + cls);

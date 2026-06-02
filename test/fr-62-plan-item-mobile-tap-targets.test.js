@@ -64,12 +64,15 @@ t('fr-62 marker block exists in styles.css', () => {
 // Each plan-item action button must hit ≥44px on mobile
 // ──────────────────────────────────────────────────────────────────────
 
+// bug-49 dropped 'artifact-item-delete' from this list — the per-item
+// trash button is gone (the .artifact-item-close button is now the
+// sole lifecycle affordance for plan items, so no fr-62 mobile bump
+// is owed to a button that doesn't exist).
 const ACTION_BUTTONS = [
   'artifact-vote',
   'artifact-comment-toggle',
   'artifact-item-run',
   'artifact-item-close',
-  'artifact-item-delete',
   'artifact-item-edit',
   'artifact-comment-edit',
   'artifact-comment-delete',
@@ -144,12 +147,13 @@ t('behavior pin: 44px is the Apple HIG + Material minimum', () => {
     'Mobile tap targets must be ≥44px per Apple HIG (Human Interface Guidelines) + Material Design — see https://developer.apple.com/design/human-interface-guidelines/buttons + https://m3.material.io/foundations/accessible-design/accessibility-basics');
 });
 
-t('behavior pin: 8 action buttons listed (matches ACTION_BUTTONS count)', () => {
+t('behavior pin: 7 action buttons listed (matches ACTION_BUTTONS count, post-bug-49)', () => {
   // If a new button gets added to the plan-item action row, the
   // fr-62 block needs an update — this guard catches a missing
-  // entry by counting selectors against the known list.
-  assert.strictEqual(ACTION_BUTTONS.length, 8,
-    'fr-62 covers 8 plan-item action buttons. If a new button class is added to the action row, append it to ACTION_BUTTONS here AND to the fr-62 block in styles.css.');
+  // entry by counting selectors against the known list. Count
+  // dropped 8 → 7 in bug-49 (trash button removed).
+  assert.strictEqual(ACTION_BUTTONS.length, 7,
+    'fr-62 covers 7 plan-item action buttons after bug-49 dropped artifact-item-delete. If a new button class is added to the action row, append it to ACTION_BUTTONS here AND to the fr-62 block in styles.css.');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

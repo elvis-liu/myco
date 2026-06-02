@@ -637,10 +637,12 @@ t('styles.css: r17 accordion summary + body styles defined', () => {
 
 t('styles.css: r18 action-row buttons share a fixed height (no per-button drift)', () => {
   // Single selector list covering vote / comment-toggle / run /
-  // close / edit / delete must set height + min-height.
-  const re = /\.artifact-item-actions\s+\.artifact-vote[\s\S]{0,400}\.artifact-item-actions\s+\.artifact-item-delete\s*\{[\s\S]{0,400}height:\s*\d+px/;
+  // close / edit must set height + min-height. bug-49 removed the
+  // trash button so the selector list now ends at .artifact-item-edit
+  // instead of .artifact-item-delete; anchor accordingly.
+  const re = /\.artifact-item-actions\s+\.artifact-vote[\s\S]{0,400}\.artifact-item-actions\s+\.artifact-item-edit\s*\{[\s\S]{0,400}height:\s*\d+px/;
   assert.ok(re.test(CSS),
-    'r18 must declare a shared height for all action-row buttons');
+    'r18 must declare a shared height for all action-row buttons (post-bug-49 the trailing .artifact-item-delete is gone)');
 });
 
 t('styles.css: r19 comment-toggle (+ siblings) icons match chrome 18px family', () => {
@@ -652,26 +654,11 @@ t('styles.css: r19 comment-toggle (+ siblings) icons match chrome 18px family', 
     'action-row SVG icons must be 18px (chrome cluster family, post-r19)');
 });
 
-t('styles.css: r19 per-item delete adopts pill chrome matching comment-toggle', () => {
-  // The standalone .artifact-item-delete rule must use the same
-  // tinted-blue background + border + 6px radius + 2px 8px padding
-  // as .artifact-comment-toggle so the two buttons look like siblings.
-  // Anchor on the line-starting rule (the action-row override above
-  // is a different selector with .artifact-item-actions prefix).
-  const m = CSS.match(/\n\.artifact-item-delete\s*\{[\s\S]*?\n\}/);
-  assert.ok(m, '.artifact-item-delete base rule must exist');
-  const block = m[0];
-  assert.ok(/background:\s*rgba\(80,\s*120,\s*200/.test(block),
-    'delete must adopt the comment-toggle blue tint background');
-  assert.ok(/border:\s*1px solid rgba\(120,\s*160,\s*230/.test(block),
-    'delete must use the comment-toggle blue border color');
-  assert.ok(/border-radius:\s*6px/.test(block),
-    'delete must use 6px border-radius (pill, not 4px square)');
-  // SVG inside the per-item delete sized 18px to match.
-  const svgRule = CSS.match(/\.artifact-item-delete\s+svg\s*\{[\s\S]*?\n\}/);
-  assert.ok(svgRule && /width:\s*18px/.test(svgRule[0]),
-    'per-item delete SVG must be 18px to match comment-toggle');
-});
+// bug-49: the r19 "per-item delete adopts pill chrome matching
+// comment-toggle" test was removed — the .artifact-item-delete button
+// and its CSS base + :hover + svg rules were all deleted in bug-49
+// (the new test/bug-49-trash-becomes-close.test.js asserts they're
+// gone, which is now the contract).
 
 // ──────────────────────────────────────────────────────────────────────
 // fr-77 r14 / r15 / r16 — Lucide icons + Esc-to-cancel + accepted state

@@ -2662,6 +2662,20 @@ test_chat_window() {
   # server emission + 3-subtype coverage + ordering vs. unknown_event,
   # and the 3 client touch-points + bug-48 marker.
   node_test_result test/bug-48-system-event-chrome-batch.test.js "test/bug-48-system-event-chrome-batch.test.js (7 cases)"
+  # bug-49: replace the plan-item trash button (hard-delete) with the
+  # existing close affordance (.artifact-item-close → POST
+  # /artifact/mark). Trash button HTML, onArtifactItemDelete handler,
+  # event wiring, DELETE /artifact/item server route, and 7
+  # .artifact-item-delete CSS rules all removed. fr-47 had already
+  # retired the dual-purpose checkbox in favor of an explicit Close/
+  # Reopen button; bug-49 finishes the lifecycle consolidation so
+  # plan items have exactly one button for closing — keeps the item
+  # in the array with all comments/votes/run-history (close = mark
+  # done, reopen = unmark). Existing tests bug-39 / fr-62 / fr-77
+  # that locked the trash button's existence updated to reflect the
+  # new contract. Static-grep guards on the deleted symbols + the
+  # surviving .artifact-item-close button + a bug-49 marker.
+  node_test_result test/bug-49-trash-becomes-close.test.js "test/bug-49-trash-becomes-close.test.js (9 cases)"
   # critic-gemini-calibration (2026-06-02): triggered by Gemini
   # returning 404 on the deprecated gemini-1.5-pro model name during
   # a bug-46 run-dispatch critique. Three calibrations land together:

@@ -735,24 +735,35 @@ function register(app, deps) {
     });
   });
 
-  app.delete('/sessions/:id/artifact/item', (req, res) => {
-    const ctx = fileApiPreamble(req, res, 'viewer');
-    if (!ctx) return;
-    const type = String(req.query.type || '');
-    const itemId = String(req.query.itemId || '');
-    if (!ARTIFACT_TYPES.includes(type)) return res.status(400).json({ error: 'unknown type' });
-    if (type === 'arch') return res.status(400).json({ error: 'arch has no items' });
-    if (!itemId) return res.status(400).json({ error: 'itemId required' });
-    _loadArtifactIntoRecFromFile(ctx.rec, type);
-    const artifact = ctx.rec.artifacts && ctx.rec.artifacts[type];
-    if (!artifact || !Array.isArray(artifact.items)) return res.status(404).json({ error: 'no items' });
-    const before = artifact.items.length;
-    artifact.items = artifact.items.filter((it) => it.id !== itemId);
-    if (artifact.items.length === before) return res.status(404).json({ error: 'no such item' });
-    persistArtifact(ctx.rec, type, artifact);
-    broadcastArtifact(ctx.id, type, artifact);
-    res.json({ ok: true, artifact });
-  });
+  // bug-49: DELETE /artifact/item route removed. The trash button
+  // that called it was the only client caller; bug-49 replaces that
+  // button with the existing close affordance (.artifact-item-close
+  // → POST /artifact/mark), so hard-deleting a plan item is no
+  // longer reachable from the UI. Per CLAUDE.md §1 (delete code
+  // that no longer has a caller), the server-side endpoint is
+  // removed with the button. /artifact/mark remains the lifecycle
+  // path: close = mark done (item stays in array with all history),
+  // reopen = unmark.
+  //
+  // bug-49 r1 critique response (Gemini flagged a "potential data
+  // loss if hard-delete was an intended feature"): the critique
+  // misreads the data-flow direction. The removed trash button was
+  // the ONLY data-loss path in the UI — `artifact.items.filter(it
+  // => it.id !== itemId)` permanently nuked the item plus every
+  // vote / comment / run-summary attached to it. The surviving
+  // close-via-mark path is the OPPOSITE: it sets `it.done = true`
+  // and leaves the record intact. Removing the trash button +
+  // route ELIMINATES the data-loss surface, doesn't create one. No
+  // other route in this file or elsewhere in server/src/ writes a
+  // similar `items.filter(...)` deletion against the plan/test
+  // artifacts (a `git log` audit of `artifact.items` confirms this
+  // was the sole hard-delete code path). If a legitimate admin-
+  // only hard-delete need surfaces later (GDPR purge, spam
+  // cleanup), reintroduce a fresh route gated by `isOwnerOrAdmin`
+  // + an explicit `require=true` query param — the diff is ~20
+  // lines, the git history of this commit has the exact prior
+  // implementation. Do NOT silently restore the old route or its
+  // UI button — that's the failure mode bug-49 was filed against.
 
   app.delete('/sessions/:id/artifact/comment', (req, res) => {
     const ctx = fileApiPreamble(req, res, 'viewer');

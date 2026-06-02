@@ -9054,6 +9054,13 @@ function renderArtifact(type, artifact) {
     const closeBtn = supportsVoting
       ? `<button class="artifact-item-close" data-type="${escHtml(type)}" data-id="${escHtml(it.id)}" data-done="${it.done ? '1' : '0'}" title="${escHtml(closeTitle)}" aria-label="${escHtml(closeLabel)}"><span class="btn-icon">${closeIcon}</span><span class="btn-text">${escHtml(closeLabel)}</span></button>`
       : '';
+    // bug-49: trash button removed — the .artifact-item-close button
+    // (above) is now the sole lifecycle affordance for plan items.
+    // Hard-delete is no longer reachable from the UI; close-via-mark
+    // (POST /artifact/mark) keeps the item + all its votes / comments
+    // / run-history in the array with `done=true` instead of nuking
+    // the record. Re-add a button here only after explicit user ask
+    // that requires an irreversible-delete capability.
     const actionsRow = `<div class="artifact-item-actions">
         ${mergedBadge}
         ${depsChip}
@@ -9063,7 +9070,6 @@ function renderArtifact(type, artifact) {
         ${runBtn}
         ${closeBtn}
         ${editBtn}
-        <button class="artifact-item-delete" data-id="${escHtml(it.id)}" title="Delete this item" aria-label="Delete">${_lucideIcon('trash')}</button>
       </div>`;
     // Plan/test items render their body as markdown so multi-line
     // text, code fences, lists, and mermaid diagrams all show up
@@ -9160,9 +9166,9 @@ function renderArtifact(type, artifact) {
   body.querySelectorAll('.artifact-item-close').forEach((btn) => {
     btn.addEventListener('click', () => onArtifactItemClose(btn));
   });
-  body.querySelectorAll('.artifact-item-delete').forEach((btn) => {
-    btn.addEventListener('click', () => onArtifactItemDelete(type, btn.dataset.id));
-  });
+  // bug-49: .artifact-item-delete wiring removed — the button is
+  // gone (close-via-mark replaces hard-delete as the only lifecycle
+  // affordance for plan items).
   body.querySelectorAll('.artifact-item-run').forEach((btn) => {
     btn.addEventListener('click', () => onArtifactItemRun(type, btn.dataset.id, btn.dataset.text || ''));
   });
@@ -9301,22 +9307,11 @@ async function onArtifactItemRun(type, itemId /*, itemText */) {
   }
 }
 
-async function onArtifactItemDelete(type, itemId) {
-  const sid = state.activeId;
-  if (!sid || !itemId) return;
-  // Confirm so a fat-finger doesn't lose comments + votes silently.
-  if (!confirm('Delete this item? Its votes and comments will be gone too.')) return;
-  try {
-    const res = await authedFetch(
-      `/sessions/${encodeURIComponent(sid)}/artifact/item?type=${encodeURIComponent(type)}&itemId=${encodeURIComponent(itemId)}`,
-      { method: 'DELETE' }
-    );
-    if (!res || !res.ok) return;
-    await loadArtifact(type);
-  } catch (err) {
-    console.error('item delete failed', err);
-  }
-}
+// bug-49: onArtifactItemDelete removed — the trash button it backed
+// is gone. Hard-delete of plan items is no longer reachable from
+// the UI; .artifact-item-close (onArtifactItemClose, below) is the
+// sole lifecycle affordance now. Per CLAUDE.md §1 (delete code
+// that no longer has a caller).
 
 async function onArtifactVote(type, itemId) {
   const sid = state.activeId;
