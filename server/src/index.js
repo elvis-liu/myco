@@ -1564,6 +1564,118 @@ app.post('/api/admin/config', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// fr-91: probe an API key for end-to-end validity. The admin Config
+// modal exposes 4 keys (Anthropic / Gemini / OpenAI / Custom Critic)
+// — pre-fr-91 there was no way to know a key worked until real
+// traffic surfaced the failure (see the gemini-1.5-pro 404 that
+// blocked bug-46 critic from running). Each probe sends the
+// minimal-possible request to the respective provider, returns
+// {ok: true, name} on success or {ok: false, error: <msg>} on
+// failure. The client reads `name` to render "✓ Valid (model X
+// reachable)" inline next to each input. requireAdmin gate matches
+// the existing /api/admin/config pattern — only admins can set the
+// keys, only admins can probe them.
+app.post('/api/admin/test-key', requireAdmin, async (req, res) => {
+  const { which, key, endpoint, model } = req.body || {};
+  if (!which) return res.json({ ok: false, error: 'missing `which` field' });
+
+  try {
+    if (which === 'anthropic') return res.json(await _probeAnthropicKey(key));
+    if (which === 'gemini')    return res.json(await _probeGeminiKey(key));
+    if (which === 'openai')    return res.json(await _probeOpenAIKey(key));
+    if (which === 'custom')    return res.json(await _probeCustomCriticKey(endpoint, key, model));
+    return res.json({ ok: false, error: `unknown key type: ${which}` });
+  } catch (err) {
+    return res.json({ ok: false, error: err && err.message || String(err) });
+  }
+});
+
+// Anthropic: GET /v1/models with `x-api-key` + `anthropic-version`
+// header. 200 → key is valid + lists models. 401 → bad key. Other
+// codes → surface the status + body.
+async function _probeAnthropicKey(key) {
+  if (!key) return { ok: false, error: 'no Anthropic key provided' };
+  const resp = await fetch('https://api.anthropic.com/v1/models', {
+    headers: {
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    },
+  });
+  if (resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    const count = Array.isArray(data.data) ? data.data.length : 0;
+    return { ok: true, name: `Anthropic — ${count} models reachable` };
+  }
+  const body = (await resp.text().catch(() => '')).slice(0, 200);
+  return { ok: false, error: `HTTP ${resp.status}: ${body || resp.statusText}` };
+}
+
+// Gemini: smallest available probe is a 1-token generation on
+// gemini-2.5-flash (the same model the critic now uses, see
+// server/src/critics/gemini.js). SDK error surfaces the API error
+// verbatim. We don't use models.list because the @google/genai
+// JS SDK version pinned here doesn't expose it consistently.
+async function _probeGeminiKey(key) {
+  if (!key) return { ok: false, error: 'no Gemini key provided' };
+  const { GoogleGenAI } = require('@google/genai');
+  const ai = new GoogleGenAI({ apiKey: key });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: 'ok',
+      config: { maxOutputTokens: 1, temperature: 0 },
+    });
+    const got = (response && response.text ? response.text : '').trim();
+    return { ok: true, name: `Gemini 2.5 Flash reachable (response: "${got.slice(0, 20)}")` };
+  } catch (err) {
+    return { ok: false, error: err && err.message || String(err) };
+  }
+}
+
+// OpenAI: GET /v1/models with Bearer auth. Cheapest probe.
+async function _probeOpenAIKey(key) {
+  if (!key) return { ok: false, error: 'no OpenAI key provided' };
+  const resp = await fetch('https://api.openai.com/v1/models', {
+    headers: { 'Authorization': `Bearer ${key}` },
+  });
+  if (resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    const count = Array.isArray(data.data) ? data.data.length : 0;
+    return { ok: true, name: `OpenAI — ${count} models reachable` };
+  }
+  const body = (await resp.text().catch(() => '')).slice(0, 200);
+  return { ok: false, error: `HTTP ${resp.status}: ${body || resp.statusText}` };
+}
+
+// Custom Critic: probe the user-supplied endpoint with a GET to
+// /v1/models (OpenAI-compatible convention, which Ollama + most
+// hosted LLMs follow). If the endpoint lives behind auth, the
+// optional `key` is passed as a Bearer token.
+async function _probeCustomCriticKey(endpoint, key, model) {
+  if (!endpoint) return { ok: false, error: 'no Custom Critic endpoint provided' };
+  // Normalize the URL: caller may have entered http://host:port/v1
+  // or http://host:port. Append /models if it's a /v1 base.
+  let url = String(endpoint).replace(/\/+$/, '');
+  if (/\/v1$/.test(url)) url += '/models';
+  else url += '/v1/models';
+  const headers = {};
+  if (key) headers['Authorization'] = `Bearer ${key}`;
+  let resp;
+  try {
+    resp = await fetch(url, { headers });
+  } catch (err) {
+    return { ok: false, error: `network error: ${err.message || err}` };
+  }
+  if (resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    const count = Array.isArray(data.data) ? data.data.length : 0;
+    const modelNote = model ? ` (configured model: ${model})` : '';
+    return { ok: true, name: `Custom Critic — ${count} models reachable${modelNote}` };
+  }
+  const body = (await resp.text().catch(() => '')).slice(0, 200);
+  return { ok: false, error: `HTTP ${resp.status}: ${body || resp.statusText}` };
+}
+
 app.get('/api/admin/allowlist', requireAdmin, (req, res) => {
   const list = Array.from(loadAllowlist()).sort();
   res.json({ allowlist: list });

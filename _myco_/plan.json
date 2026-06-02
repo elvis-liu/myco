@@ -4175,7 +4175,38 @@
       "addedBy": "labxnow",
       "source": "user",
       "voters": [],
-      "comments": [],
+      "comments": [
+        {
+          "id": "cd2537d5ea5e",
+          "user": "claude",
+          "text": "✓ success · 380.4s · $14.8895 · 24↓/20404↑\n\n**bug-46 ready to commit.** Working tree:\n\n```\n?? test/bug-46-vote-cross-user.test.js\n M server/src/index.js          ← +1 'authed' tier branch in fileApiPreamble\n M server/src/artifacts.js      ← vote endpoint: 'viewer' → 'authed' + bug-46 comment\n M test/test.sh                 ← wire-in\n M _myco_/plan.json             ← bug-46 run stamped completed\n```\n\n**Test results:** bug-46 4/4 green; adjacent suites untouched (fr-26 10/10, bug-45 26/26).\n\n**The fix in one sentence:** `/artifact/vote` now uses the new `'authed'` tier in `fileApiPreamble` — auth still required (401 for anonymous), but session-access check is bypassed. Every other endpoint (chat, queue mutations, file API, run dispatch) stays on owner/viewer per fr-87.\n\n**Separate concern — your Resume button report:**\n\nLooking at …",
+          "ts": "2026-06-02T00:06:41.163Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-02T00:00:20.672Z"
+          }
+        },
+        {
+          "id": "da261b2398fb",
+          "user": "claude",
+          "text": "✓ success · 338.9s · $23.7009 · 27↓/19028↑\n\n**Commit `dbc06ed` pushed** to `kkrazy/myco main`. Two distinct concerns shipped together:\n\n**1. bug-46 — cross-user vote + comment (your dispatch + follow-up)**\n- New `'authed'` tier in `fileApiPreamble` (server/src/index.js): auth required, but no owner/admin/viewer/share-token check\n- `/artifact/vote` → `'authed'` (per the run dispatch)\n- `/artifact/comment` → `'authed'` (per \"anyone logged in should be able to comment\")\n- Every other endpoint (chat, queue mutations, file API) stays on `'owner'`/`'viewer'` per fr-87\n- Marker comments call out that `'authed'` is the single carve-out — not a general loosening\n- 5/5 test cases\n\n**2. Critic calibration (precondition for re-reviewing)**\n- Model: `gemini-1.5-pro` (retired by Google on v1beta) → `gemini-2.5-flash`\n- Sampling: explicit `temp…",
+          "ts": "2026-06-02T00:12:45.403Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-02T00:07:06.446Z"
+          }
+        },
+        {
+          "id": "c4147d8c228f",
+          "user": "claude",
+          "text": "✓ success · 117.3s · $24.9127 · 8↓/2505↑\n\nUnderstood — holding the deploy. Here's the diff at a glance so you know what's in `dbc06ed`:\n\n```\n _myco_/plan.json                       | 110 ++++++++++++++++++- (bug-46 run stamp)\n server/src/index.js                    |  29 ++++++- (+'authed' tier in fileApiPreamble)\n server/src/artifacts.js                |  24 +++++- (vote + comment → 'authed' tier)\n server/src/critics/gemini.js           |  37 +++++++-- (model + sampling)\n server/src/critique.js                 |  18 ++++- (INSUFFICIENT INFORMATION opt-out)\n test/bug-46-vote-cross-user.test.js    | 132 +++ (NEW — 5 cases)\n test/critic-gemini-calibration.test.js | 137 +++ (NEW — 9 cases)\n test/test.sh                           |  28 +++++ (wire-ins)\n```\n\n**Quick links for review:**\n- The diff on GitHub: `https://github.com/kkraz…",
+          "ts": "2026-06-02T00:15:12.441Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-02T00:13:15.047Z"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "upvote is not working with the following error: app.js?v=2026-06-01T23%3A11%3A40Z:95  POST https://mycobeta.labxnow.ai/sessions/myco-kkrazy-f80476dd/artifact/vote?type=plan&itemId=bug-7 403 (Forbidden)",
@@ -4184,12 +4215,69 @@
       "description": "**Problem:** Users cannot upvote plan items — the vote request is rejected by the server.\n**Expected:** `POST /sessions/:sessionId/artifact/vote?type=plan&itemId=...` succeeds and records the upvote.\n**Actual:** Request returns `403 (Forbidden)`, so the upvote never registers.\n**Context:** Repro at `app.js?v=2026-06-01T23:11:40Z:95`, session `myco-kkrazy-f80476dd`, item `bug-7`, host `mycobeta.labxnow.ai`.",
       "runs": [
         {
+          "status": "success",
+          "ts": "2026-06-02T00:06:41.163Z",
+          "startedAt": "2026-06-02T00:00:20.672Z",
+          "summary": "380.4s · 24→20404 tok",
+          "result": "**bug-46 ready to commit.** Working tree:\n\n```\n?? test/bug-46-vote-cross-user.test.js\n M server/src/index.js          ← +1 'authed' tier branch in fileApiPreamble\n M server/src/artifacts.js      ← vote endpoint: 'viewer' → 'authed' + bug-46 comment\n M test/test.sh                 ← wire-in\n M _myco_/plan.json             ← bug-46 run stamped completed\n```\n\n**Test results:** bug-46 4/4 green; adjacent suites untouched (fr-26 10/10, bug-45 26/26).\n\n**The fix in one sentence:** `/artifact/vote` now uses the new `'authed'` tier in `fileApiPreamble` — auth still required (401 for anonymous), but session-access check is bypassed. Every other endpoint (chat, queue mutations, file API, run dispatch) stays on owner/viewer per fr-87.\n\n**Separate concern — your Resume button report:**\n\nLooking at the code, `/queue/resume` (`artifacts.js:933`) has **two** gates:\n1. `fileApiPreamble('viewer')` — fr-87 private-by-default check\n2. Explicit `isOwnerOrAdmin(ctx.id, user)` — even viewers can't resume\n\nSo unlike vote, the design is \"only the session owner can resume the queue.\" The 403 is intentional at the server. The bug is that the client renders the Resume button without checking owner status. Two ways to fix:\n\n**Option A — hide Resume for non-owners (UI fix, preserves owner-only semantics).** The `_renderRunQueueStrip` (`app.js:7138`) currently gates on `!state.readOnly`. We add a check for `state.isOwner` (or compute it from the session record). Server stays strict.\n\n**Option B — open Resume to any authed user (server change, collaborative queue).** Drops the `isOwnerOrAdmin` check on `/queue/resume`. Anyone signed-in can resume. Similar move as bug-46 vote.\n\nWhich way for Resume? (Also do you want this rolled into the same commit as bug-46, or a separate round?)\n\nAwaiting direction on Resume + the standard `commit + push + deploy` for bug-46."
+        },
+        {
+          "status": "success",
+          "ts": "2026-06-02T00:12:45.403Z",
+          "startedAt": "2026-06-02T00:07:06.446Z",
+          "summary": "338.9s · 27→19028 tok",
+          "result": "**Commit `dbc06ed` pushed** to `kkrazy/myco main`. Two distinct concerns shipped together:\n\n**1. bug-46 — cross-user vote + comment (your dispatch + follow-up)**\n- New `'authed'` tier in `fileApiPreamble` (server/src/index.js): auth required, but no owner/admin/viewer/share-token check\n- `/artifact/vote` → `'authed'` (per the run dispatch)\n- `/artifact/comment` → `'authed'` (per \"anyone logged in should be able to comment\")\n- Every other endpoint (chat, queue mutations, file API) stays on `'owner'`/`'viewer'` per fr-87\n- Marker comments call out that `'authed'` is the single carve-out — not a general loosening\n- 5/5 test cases\n\n**2. Critic calibration (precondition for re-reviewing)**\n- Model: `gemini-1.5-pro` (retired by Google on v1beta) → `gemini-2.5-flash`\n- Sampling: explicit `temperature: 0.2`, `topP: 0.8`, `maxOutputTokens: 1024` (was Gemini defaults tuned for chat)\n- System prompt: added `INSUFFICIENT INFORMATION:` opt-out + explicit \"you only see the diff\" clause\n- All values pulled into `CRITIC_MODEL` + `CRITIC_SAMPLING` named constants so the next bump is one line\n- 9/9 test cases\n\n**Not addressed:**\n- **Resume button 403** — still owner-only by design on the server (`isOwnerOrAdmin` check). Needs a separate round: hide the button for non-owners (UI fix) OR open `/queue/resume` to all authed users (server change). Waiting on your direction from the earlier ask.\n\nStanding by for `commit + push + deploy` — actually pushed already, awaiting **deploy** direction (and the Resume button decision when you're ready)."
+        },
+        {
+          "status": "success",
+          "ts": "2026-06-02T00:15:12.441Z",
+          "startedAt": "2026-06-02T00:13:15.047Z",
+          "summary": "117.3s · 8→2505 tok",
+          "result": "Understood — holding the deploy. Here's the diff at a glance so you know what's in `dbc06ed`:\n\n```\n _myco_/plan.json                       | 110 ++++++++++++++++++- (bug-46 run stamp)\n server/src/index.js                    |  29 ++++++- (+'authed' tier in fileApiPreamble)\n server/src/artifacts.js                |  24 +++++- (vote + comment → 'authed' tier)\n server/src/critics/gemini.js           |  37 +++++++-- (model + sampling)\n server/src/critique.js                 |  18 ++++- (INSUFFICIENT INFORMATION opt-out)\n test/bug-46-vote-cross-user.test.js    | 132 +++ (NEW — 5 cases)\n test/critic-gemini-calibration.test.js | 137 +++ (NEW — 9 cases)\n test/test.sh                           |  28 +++++ (wire-ins)\n```\n\n**Quick links for review:**\n- The diff on GitHub: `https://github.com/kkrazy/myco/commit/dbc06ed`\n- The \"authed\" tier branch: `server/src/index.js` ~line 793-815 (new code) inside `fileApiPreamble`\n- Vote + comment switch: `server/src/artifacts.js` ~line 619 (vote) and ~652 (comment)\n- Critic model bump + sampling: `server/src/critics/gemini.js` (full rewrite of the small file)\n- Critic prompt opt-out: `server/src/critique.js` ~line 20 (the system prompt rewrite)\n\n**Things worth a second look that I'd flag myself:**\n\n1. **`'authed'` tier is intentionally a session-id-knower bypass.** Anyone signed in who knows the 8-hex session id can vote/comment. If your threat model treats session ids as sensitive (they leak via `state.activeId` in client-side URLs / WS frames), this carve-out widens that surface. Counterpoint: voting is idempotent toggle, comments are append-only, no other state can be mutated through these endpoints.\n\n2. **`AUTO_EXECUTE_VOTE_THRESHOLD = 2`** means two signed-in users upvoting auto-dispatches a run. With cross-user voting open, a second account can drive the queue. If that's not what you want, the carve-out should pair with a tighter threshold or a per-vote rate limit.\n\n3. **The critic model bump goes from a \"pro\" tier to a \"flash\" tier."
+        }
+      ]
+    },
+    {
+      "id": "bug-47",
+      "text": "Guest users see empty file explorer despite having view permission",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-02T00:11:21.089Z",
+      "addedBy": "labxnow",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "when logged in as a guest, the file explorer is not showing anything, guest user should still have view permission to the files",
+        "rewritten": true
+      },
+      "description": "**Problem:** Guest-authenticated users cannot browse files in the file explorer, blocking read-only access they are entitled to.\n**Expected:** When logged in as a guest, the file explorer lists files the guest role has view permission for.\n**Actual:** The file explorer renders empty for guest sessions, showing no files at all."
+    },
+    {
+      "id": "fr-91",
+      "text": "Add test key on API key to verify functionality",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-06-02T00:16:02.075Z",
+      "addedBy": "labxnow",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "add a test key on the api key to ensure functionality",
+        "rewritten": true
+      },
+      "description": "**Problem:** No way to validate that an API key is functional before relying on it in production calls.\n**Expected:** API key supports a test key / test-mode credential that can be invoked to confirm the key works end-to-end.\n**Actual:** API keys are issued without any built-in verification path, so breakage is only detected on real traffic.",
+      "runs": [
+        {
           "status": "completed",
-          "ts": "2026-06-02T00:30:00.000Z",
-          "summary": "Root cause: `/artifact/vote` (server/src/artifacts.js:619) called `fileApiPreamble(req, res, 'viewer')` — the fr-87 (private-by-default) helper at server/src/index.js:786 that rejects authenticated users who aren't owner / in rec.admins[] / in rec.viewers[] / holding a valid share token. Cross-user voting was structurally impossible despite the voters[] schema + AUTO_EXECUTE_VOTE_THRESHOLD=2 quorum design explicitly supporting it. Fix: added a third `'authed'` requiredAccess tier to fileApiPreamble that bypasses the owner/admin/viewer/share-token chain — auth still required (401 for anonymous), no session-access check. /artifact/vote AND /artifact/comment both switched to that tier (user follow-up: 'the comment function should allow anyone logged in to add'). Every other session endpoint (chat, queue mutations including resume/cancel/clear, file API, run dispatch) stays on `'owner'` or `'viewer'` per fr-87. Marker comments in both files explicitly name bug-46 and warn that 'authed' is the single carve-out — not a general loosening. Tests: test/bug-46-vote-cross-user.test.js (5 cases) wired into test/test.sh — covers vote + comment endpoints + fileApiPreamble 'authed' branch + bug-46 markers. Separately landed: critic-gemini-calibration round (server/src/critics/gemini.js + server/src/critique.js) — Gemini was returning 404 on the deprecated gemini-1.5-pro model. Bumped to gemini-2.5-flash, added explicit sampling (temp 0.2, topP 0.8, maxOutputTokens 1024) overriding Gemini's chat-tuned defaults, added 'INSUFFICIENT INFORMATION:' opt-out to the system prompt so critics admit uncertainty instead of rubber-stamping. test/critic-gemini-calibration.test.js (9 cases) locks the calibration. Resume button 403 (separate user report earlier) is intentionally owner-only at the server (`isOwnerOrAdmin` check in artifacts.js:937) — the bug is that the client renders the button without checking owner status; that needs a separate UI fix round (hide button for non-owners) which I asked for direction on and haven't started."
+          "ts": "2026-06-02T01:00:00.000Z",
+          "summary": "Scope (per AskUserQuestion): Test buttons next to the 4 ADMIN API keys in the Config modal (Anthropic / Gemini / OpenAI / Custom Critic) — NOT per-repo PATs this round. Inline-warning policy: Save proceeds regardless of probe outcome. Implementation: (1) New `POST /api/admin/test-key` endpoint in server/src/index.js (with `requireAdmin` gate matching /api/admin/config) — 4 probe helpers (_probeAnthropicKey hits api.anthropic.com/v1/models with x-api-key + anthropic-version header; _probeGeminiKey runs a 1-token generateContent on gemini-2.5-flash via the @google/genai SDK; _probeOpenAIKey hits api.openai.com/v1/models with Bearer auth; _probeCustomCriticKey hits the user-supplied endpoint + /v1/models with optional Bearer key). (2) Four Test buttons + inline `.test-key-status` spans in web/public/index.html, sitting in the existing .input-with-reveal row. (3) FR91_BTN_IDS / FR91_INPUT_IDS / FR91_STATUS_IDS explicit maps in web/public/app.js + `_runApiKeyTest(which)` + `_bindApiKeyTestButtons()` wired into loadAdminConfig() so the Test buttons rebind every time the Config modal loads (idempotent via dataset.fr91Bound). (4) CSS: .btn-test-key + .test-key-status.{ok,err,testing} in web/public/styles.css. Tests: test/fr-91-admin-key-test.test.js (8 cases) wired into test/test.sh. Locks: endpoint route + requireAdmin gate, 4 branches in handler, probe targets (api.anthropic.com, api.openai.com, GoogleGenAI), 4 button ids inside #admin-config-form, 4 click handlers in app.js, .value reference near the endpoint URL, and a fr-91 marker comment. Adjacent suites stay green (bug-46 5/5, critic-gemini-calibration 9/9, fr-26 10/10, bug-45 26/26, fr-87 r4 7/7). Would have caught the bug-46 critic failure immediately: pasting a Gemini key + clicking Test would have shown ✓ or ✗ before any plan-item dispatch tried to use it. Not yet committed/pushed — awaiting user direction. Per-repo PATs (GitHub/Gitee via /setpat) are NOT covered this round per the AskUserQuestion answer."
         }
       ]
     }
   ],
-  "updatedAt": "2026-06-02T00:30:00.000Z"
+  "updatedAt": "2026-06-02T01:00:00.000Z"
 }

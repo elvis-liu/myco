@@ -2612,6 +2612,22 @@ test_chat_window() {
   # opt-out clause in the prompt, and the exported `name` field
   # syncing with the actual CRITIC_MODEL.
   node_test_result test/critic-gemini-calibration.test.js "test/critic-gemini-calibration.test.js (9 cases)"
+  # fr-91: add "Test" buttons next to each of the 4 admin API keys
+  # in the Config modal (Anthropic / Gemini / OpenAI / Custom Critic)
+  # so users can probe key validity end-to-end before relying on it
+  # in real traffic (would have caught the gemini-1.5-pro 404 that
+  # blocked bug-46 critic from running). Server: new POST
+  # /api/admin/test-key (server/src/index.js) with requireAdmin gate,
+  # 4 probe helpers (_probeAnthropicKey hits api.anthropic.com/v1/
+  # models, _probeGeminiKey runs a 1-token generateContent on
+  # gemini-2.5-flash via the SDK, _probeOpenAIKey hits
+  # api.openai.com/v1/models, _probeCustomCriticKey hits the user-
+  # supplied endpoint + /v1/models). Client: 4 buttons + inline
+  # status spans (web/public/index.html), explicit FR91_BTN_IDS map
+  # in app.js so a future restyle can't drift the id contract.
+  # Inline warning policy: probe result rendered next to each field,
+  # Save proceeds regardless of outcome.
+  node_test_result test/fr-91-admin-key-test.test.js "test/fr-91-admin-key-test.test.js (8 cases)"
   # fr-88 (composer-collapse — note: distinct from the older fr-88(r)
   # blocking-modal feature that lives in app.js around line 1764+):
   # the four .composer-btn action buttons (Stop / Mic / Draw / Send)

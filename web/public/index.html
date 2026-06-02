@@ -349,12 +349,21 @@
               
               <form id="admin-config-form" autocomplete="off" onsubmit="return false;">
                 
+                <!-- fr-91: each admin API key field gets a Test
+                     button that probes the live API + an inline
+                     result span (#test-status-<which>) that the
+                     button-click handler in app.js fills with
+                     ✓ Valid (model X reachable) or ✗ <error>.
+                     Inline-warning policy: Save proceeds regardless
+                     of probe outcome (user may be mid-rotation). -->
                 <div class="form-group">
                   <label for="input-anthropic-key">Claude API Key (ANTHROPIC_API_KEY)</label>
                   <div class="input-with-reveal">
                     <input type="password" id="input-anthropic-key" placeholder="Enter Anthropic API key" autocomplete="new-password" />
                     <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
+                    <button type="button" id="btn-test-anthropic" class="btn-test-key" title="Probe Anthropic API">Test</button>
                   </div>
+                  <span id="test-status-anthropic" class="test-key-status"></span>
                 </div>
 
                 <div class="form-group">
@@ -362,7 +371,9 @@
                   <div class="input-with-reveal">
                     <input type="password" id="input-gemini-key" placeholder="Enter Gemini API key" autocomplete="new-password" />
                     <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
+                    <button type="button" id="btn-test-gemini" class="btn-test-key" title="Probe Gemini API">Test</button>
                   </div>
+                  <span id="test-status-gemini" class="test-key-status"></span>
                 </div>
 
                 <div class="form-group">
@@ -370,7 +381,9 @@
                   <div class="input-with-reveal">
                     <input type="password" id="input-openai-key" placeholder="Enter OpenAI API key" autocomplete="new-password" />
                     <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
+                    <button type="button" id="btn-test-openai" class="btn-test-key" title="Probe OpenAI API">Test</button>
                   </div>
+                  <span id="test-status-openai" class="test-key-status"></span>
                 </div>
 
                 <div class="form-group">
@@ -383,7 +396,9 @@
                   <div class="input-with-reveal">
                     <input type="password" id="input-critic-key" placeholder="Enter Custom Critic key" autocomplete="new-password" />
                     <button type="button" class="btn-reveal-pwd" title="Toggle visibility">👁️</button>
+                    <button type="button" id="btn-test-critic" class="btn-test-key" title="Probe Custom Critic endpoint">Test</button>
                   </div>
+                  <span id="test-status-critic" class="test-key-status"></span>
                 </div>
 
                 <div class="form-group">

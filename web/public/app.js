@@ -12642,6 +12642,10 @@ async function loadAdminConfig() {
     }
 
     if (statusEl) statusEl.textContent = '';
+    // fr-91: bind the Test buttons every time the Config modal
+    // loads. Idempotent via the dataset.fr91Bound guard inside
+    // _bindApiKeyTestButtons.
+    _bindApiKeyTestButtons();
   } catch (err) {
     if (statusEl) {
       statusEl.className = 'status-msg error';
@@ -12696,6 +12700,89 @@ async function saveAdminConfig() {
       statusEl.className = 'status-msg error';
       statusEl.textContent = `Failed to save configuration: ${err.message}`;
     }
+  }
+}
+
+// fr-91: probe an admin API key against the live provider so the
+// user can verify validity BEFORE Save → before real traffic hits
+// the misconfigured key. Reads the field's CURRENT value (not the
+// saved env) so a freshly-pasted key can be tested before being
+// committed to .env. Inline-warning policy: this never blocks Save
+// — the result is rendered next to the input and the user is
+// responsible for acting on it.
+// fr-91 button + input + status id maps. Explicit (not built via
+// template literal) so a static-grep regression test can lock the
+// id contract — the four buttons in index.html must keep these
+// exact ids so the binder + click handler resolve cleanly.
+const FR91_INPUT_IDS = {
+  anthropic: 'input-anthropic-key',
+  gemini:    'input-gemini-key',
+  openai:    'input-openai-key',
+  critic:    'input-critic-key',
+};
+const FR91_BTN_IDS = {
+  anthropic: 'btn-test-anthropic',
+  gemini:    'btn-test-gemini',
+  openai:    'btn-test-openai',
+  critic:    'btn-test-critic',
+};
+const FR91_STATUS_IDS = {
+  anthropic: 'test-status-anthropic',
+  gemini:    'test-status-gemini',
+  openai:    'test-status-openai',
+  critic:    'test-status-critic',
+};
+
+async function _runApiKeyTest(which) {
+  const inputId = FR91_INPUT_IDS[which];
+  const statusId = FR91_STATUS_IDS[which];
+  const btnId = FR91_BTN_IDS[which];
+  const input = document.getElementById(inputId);
+  const statusEl = document.getElementById(statusId);
+  const btn = document.getElementById(btnId);
+  if (!input || !statusEl) return;
+
+  const key = (input.value || '').trim();
+  // Custom Critic also reads the endpoint + model fields.
+  const endpoint = which === 'critic'
+    ? (document.getElementById('input-critic-endpoint') || { value: '' }).value.trim()
+    : undefined;
+  const model = which === 'critic'
+    ? (document.getElementById('input-critic-model') || { value: '' }).value.trim()
+    : undefined;
+
+  statusEl.textContent = 'Testing…';
+  statusEl.className = 'test-key-status testing';
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await authedFetch('/api/admin/test-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ which, key, endpoint, model }),
+    });
+    const data = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+    if (data.ok) {
+      statusEl.textContent = `✓ ${data.name || 'Valid'}`;
+      statusEl.className = 'test-key-status ok';
+    } else {
+      statusEl.textContent = `✗ ${data.error || 'Invalid'}`;
+      statusEl.className = 'test-key-status err';
+    }
+  } catch (err) {
+    statusEl.textContent = `✗ ${err && err.message || String(err)}`;
+    statusEl.className = 'test-key-status err';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function _bindApiKeyTestButtons() {
+  for (const which of Object.keys(FR91_BTN_IDS)) {
+    const btn = document.getElementById(FR91_BTN_IDS[which]);
+    if (!btn || btn.dataset.fr91Bound === '1') continue;
+    btn.dataset.fr91Bound = '1';
+    btn.addEventListener('click', () => _runApiKeyTest(which));
   }
 }
 
