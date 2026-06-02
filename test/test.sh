@@ -2717,7 +2717,7 @@ test_chat_window() {
   # bumps the values to 16px desktop / 12px mobile. Locks the
   # minimum horizontal margin on both rules + a marker comment near
   # both so a future restyle can't silently revert.
-  node_test_result test/composer-side-spacing.test.js "test/composer-side-spacing.test.js (3 cases)"
+  node_test_result test/composer-side-spacing.test.js "test/composer-side-spacing.test.js (4 cases)"
   # fr-38: per-session strict-mode gate. When `/strict on`, claude-
   # bound chat messages MUST include a [run:plan#<id>] marker (the
   # user's affirmation that the turn is backed by an approved td/fr/

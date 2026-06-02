@@ -1884,10 +1884,19 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
    Previously the conversation column was centered at max-width: 880px
    for line-length readability; that cap is now relaxed to none so the
    chat uses the entire available width. The width:100% + auto margins
-   remain harmless no-ops at max-width: none. */
+   remain harmless no-ops at max-width: none.
+
+   composer side-spacing r2: `#chat-form` is intentionally EXCLUDED
+   from this selector. The base #chat-form.composer rule sets
+   `margin: 4px 16px ...` so the composer card visibly floats away
+   from the pane edges. Including #chat-form here would override that
+   with `margin-left/right: auto`, which combined with width:100%
+   collapses to zero effective lateral margin — defeating the r1 fix
+   on desktop (mobile was unaffected because the @media override is
+   gated at 901px and the mobile override below redeclares the
+   composer margin separately). */
 @media (min-width: 901px) {
   #chatpane.chat-main-view #chat-messages,
-  #chatpane.chat-main-view #chat-form,
   #chatpane.chat-main-view #claude-typing,
   #chatpane.chat-main-view #chat-autocomplete,
   #chatpane.chat-main-view #chat-empty {

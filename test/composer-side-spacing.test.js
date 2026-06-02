@@ -80,6 +80,32 @@ t('web/public/styles.css mobile #chat-form.composer override has ≥12px horizon
   }
 });
 
+// ── r2: desktop @media auto-margin override must not silently
+//        re-include #chat-form ──
+
+t('web/public/styles.css desktop @media (min-width:901px) auto-margin block does NOT include #chat-form', () => {
+  const css = _read('web/public/styles.css');
+  // The chat-pane-fills-width @media block sets
+  //   `width: 100%; max-width: none; margin-left: auto; margin-right: auto;`
+  // on every direct child of #chatpane.chat-main-view that participates
+  // in the column layout. If #chat-form is in that selector list, the
+  // `margin-left/right: auto` overrides the base rule's `margin: 4px
+  // 16px ...` lateral value — defeating r1's lateral spacing on
+  // desktop (this was the r2 fix's surface). Lock the selector list to
+  // exclude #chat-form so future restyles can't re-add it.
+  const blockRe = /@media\s*\([^)]*min-width:\s*901px[^)]*\)\s*\{[\s\S]*?width:\s*100%[\s\S]*?margin-(left|right):\s*auto/m;
+  const blockMatch = css.match(blockRe);
+  assert.ok(blockMatch, 'desktop chat-pane-fills-width @media block must exist (anchor for the selector scan).');
+  // Pull the selector list (everything between `@media (…) {` and the
+  // first `{` of the rule that contains `width: 100%; … margin: auto`).
+  const mediaIdx = blockMatch.index;
+  const ruleStart = css.indexOf('{', css.indexOf('{', mediaIdx) + 1);
+  const ruleSelStart = css.lastIndexOf('}', ruleStart);
+  const selectorChunk = css.slice(ruleSelStart < mediaIdx ? mediaIdx : ruleSelStart, ruleStart);
+  assert.ok(!/#chat-form\b/.test(selectorChunk),
+    "the @media (min-width: 901px) auto-margin selector list must NOT include #chat-form — that override neutralizes the base 16px lateral margin on desktop. Composer side-spacing r2 deliberately excludes it. Selector chunk: " + selectorChunk.slice(0, 400));
+});
+
 // ── marker ──
 
 t('a comment near the composer rules explains the side-spacing fix', () => {
