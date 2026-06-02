@@ -1755,6 +1755,30 @@ function openSession(id, opts = {}) {
   const session = state.sessions.find((s) => s.id === id);
   const isShared = !!(session && !session.owned);
 
+  // bug-47 r2: rehydrate state.shareToken from localStorage on every
+  // session open. The r1 fix (ef3cd80) wired the share token into
+  // viewer-tier file-API URLs via _withShareToken, but that helper
+  // only does anything when state.shareToken is set — and the
+  // bootstrap path at the top of this file sets it ONLY on the
+  // initial `?s=<token>` page load. Any subsequent visit (refresh
+  // without `?s=`, click a saved sidebar card from a different tab,
+  // etc.) lands with state.shareToken empty even though the share
+  // is still saved in localStorage. Without the rehydrate the
+  // file-API endpoints 401 again and the File Explorer renders
+  // empty — exactly the @kkrazy bug-47 re-dispatch.
+  //
+  // For shared sessions, look up the entry by sessionId === id so a
+  // user with multiple saved shares picks the right token. For owned
+  // sessions, explicitly clear state.shareToken — a stray token from
+  // a previous shared-session visit would be a no-op server-side
+  // (owner-tier check wins first), but cleaner state.
+  if (isShared) {
+    const saved = loadShareTokens().find((s) => s.sessionId === id);
+    state.shareToken = saved ? saved.shareToken : '';
+  } else {
+    state.shareToken = '';
+  }
+
   document.getElementById('no-session').hidden = true;
 
   // Phase 9 step 3 — chatpane is THE session view for everyone:

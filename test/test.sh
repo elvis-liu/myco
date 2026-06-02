@@ -2610,6 +2610,22 @@ test_chat_window() {
   # reconsider POST). Static-grep guards lock the helper definition
   # + each callsite wrapping its URL + the bug-47 marker comment.
   node_test_result test/bug-47-guest-files-share-token.test.js "test/bug-47-guest-files-share-token.test.js (6 cases)"
+  # bug-47 r2: the r1 fix wired _withShareToken into the file-API
+  # URLs, but state.shareToken was only set in ONE place — the
+  # bootstrap path at the top of app.js that requires `?s=<token>` in
+  # the page-load URL. Any subsequent visit (refresh, click a saved
+  # sidebar card from a different tab) landed with state.shareToken
+  # empty even though the share entry was still saved in localStorage.
+  # _withShareToken became a no-op, the file-API returned 401, and the
+  # File Explorer rendered empty — exactly the @kkrazy re-dispatch of
+  # bug-47. The r2 fix rehydrates state.shareToken inside openSession()
+  # by calling loadShareTokens() and matching `sessionId === id` so a
+  # user with multiple saved shares picks the right token. For owned
+  # sessions, state.shareToken is explicitly cleared. Static-grep
+  # locks the loadShareTokens() call, the state.shareToken assignment,
+  # the sessionId-keyed lookup, and the bug-47 marker — all inside the
+  # openSession() body.
+  node_test_result test/bug-47-r2-share-token-hydrate-on-open.test.js "test/bug-47-r2-share-token-hydrate-on-open.test.js (4 cases)"
   # bug-48: SDK `system` events with task-lifecycle subtypes
   # (task_started / task_progress / task_notification) were falling
   # through to the unknown_event passthrough on the client, which
