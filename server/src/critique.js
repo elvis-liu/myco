@@ -1,6 +1,41 @@
+const fs = require('fs');
+const path = require('path');
 const sessionsMod = require('./sessions');
 const { getCritic } = require('./critics');
 const runQueue = require('./runQueue');
+
+// fr-89: load the project's _myco_/critic.md so its content can be
+// appended to the critic's system prompt. On the first critique run
+// for a project (file missing), seed it from the myco-shipped default
+// at server/templates/critic.md so the critic always has a baseline
+// of project-relevant rules + anti-patterns. The file is project-
+// owned after seeding — myco template updates do NOT overwrite local
+// edits. To reset to the default, delete `_myco_/critic.md` and
+// trigger another critic run.
+//
+// Returns the file's content as a string, or '' if the load failed
+// (the critique still runs, just without the project-specific rules
+// — graceful degradation).
+function _loadProjectCriticRules(absCwd) {
+  const rulesPath = path.join(absCwd, '_myco_', 'critic.md');
+  try {
+    if (!fs.existsSync(rulesPath)) {
+      const templatePath = path.join(__dirname, '..', 'templates', 'critic.md');
+      if (fs.existsSync(templatePath)) {
+        fs.mkdirSync(path.dirname(rulesPath), { recursive: true });
+        fs.copyFileSync(templatePath, rulesPath);
+        console.log(`[fr-89] seeded ${rulesPath} from myco default template`);
+      } else {
+        console.warn('[fr-89] myco-shipped default critic.md template missing — running critique without project rules');
+        return '';
+      }
+    }
+    return fs.readFileSync(rulesPath, 'utf8');
+  } catch (err) {
+    console.error(`[fr-89] failed to load project critic.md: ${err && err.message ? err.message : err}`);
+    return '';
+  }
+}
 
 async function triggerGeminiCritique(sessionId, session, item, diff, claudeOutput) {
   // Pause the run queue immediately so no other queue items dispatch during review
@@ -30,7 +65,7 @@ async function triggerGeminiCritique(sessionId, session, item, diff, claudeOutpu
   //   · The "✓ AGREED" sentinel stays exactly the same string —
   //     `isAgreed = critique.includes('✓ AGREED')` is the gate that
   //     decides whether the run-queue auto-advances.
-  const systemPrompt = `You are an elite, independent QA and security auditor.
+  const basePrompt = `You are an elite, independent QA and security auditor.
 Review the provided git diff against the user's original task.
 Compare Claude's changes to the original requirement.
 Identify if Claude introduced bugs, security holes, ignored edge cases, or missed requirements.
@@ -39,6 +74,19 @@ You can ONLY see the diff and Claude's short explanation — no full file conten
 
 If you agree with Claude's implementation, write: "✓ AGREED".
 If you disagree, write a clear, concise markdown list of issues/bugs and suggest corrections. Cite specific lines from the diff.`;
+
+  // fr-89: append project-specific critic rules from
+  // <project>/_myco_/critic.md to the base system prompt. The file
+  // is seeded from the myco default template on first run for a
+  // project; project-owned thereafter (user edits don't get clobbered
+  // on subsequent runs).
+  let absCwd;
+  try { absCwd = sessionsMod.resolveCwd(rec.cwd, rec.user); }
+  catch (err) { absCwd = null; console.error(`[fr-89] resolveCwd failed: ${err.message}`); }
+  const projectCriticRules = absCwd ? _loadProjectCriticRules(absCwd) : '';
+  const systemPrompt = projectCriticRules
+    ? `${basePrompt}\n\n=== Project-specific critic rules (from _myco_/critic.md) ===\nThese extend, but never override, the above instructions.\n\n${projectCriticRules}`
+    : basePrompt;
 
   const userPrompt = `
 Task to accomplish: ${item.text}

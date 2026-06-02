@@ -2685,6 +2685,26 @@ test_chat_window() {
   # complete with emphasis"). The reopen branch is locked at
   # 'rotate-ccw' across all iterations.
   node_test_result test/close-icon.test.js "test/close-icon.test.js (2 cases)"
+  # fr-89 Phase 1: self-growing critic.md to persist effective critic
+  # rules + anti-patterns across sessions. Phase 1 (per AskUserQuestion
+  # — auto-growth deferred to a future dispatch) ships:
+  #  · server/templates/critic.md — researched myco-shipped default
+  #    (Core principles / Anti-patterns to flag / Things-NOT-to-flag
+  #    calibration / Project-specific lessons section).
+  #  · server/src/critique.js _loadProjectCriticRules() reads
+  #    <project>/_myco_/critic.md on every critique run and APPENDS
+  #    to the base systemPrompt. On first run for a project the
+  #    helper seeds the file from the shipped template (per @kkrazy
+  #    "myco default … replicate to all myco managed projects").
+  #    After seeding the project owns the file — template updates
+  #    do NOT overwrite local edits.
+  #  · this project (_myco_/critic.md) is initialized with the
+  #    bootstrapped copy. Locks: template exists with the documented
+  #    section headers, critique.js loads + seeds + appends to the
+  #    prompt + handles missing/unreadable file gracefully, this
+  #    project's _myco_/critic.md exists with template content, and
+  #    a fr-89 marker comment is present.
+  node_test_result test/fr-89-critic-md.test.js "test/fr-89-critic-md.test.js (8 cases)"
   # critic-gemini-calibration (2026-06-02): triggered by Gemini
   # returning 404 on the deprecated gemini-1.5-pro model name during
   # a bug-46 run-dispatch critique. Three calibrations land together:

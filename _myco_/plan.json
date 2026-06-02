@@ -4126,13 +4126,21 @@
       "addedAt": "2026-06-01T23:38:55.322Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "labxnow"
+      ],
       "comments": [
         {
           "id": "d0f90e259e54",
           "user": "kkrazy",
           "text": "The critix.md file should have a myco default and replicate to all myco managed projects when a new project is added to myco",
           "ts": "2026-06-01T23:42:47.851Z"
+        },
+        {
+          "id": "879a827db09c",
+          "user": "labxnow",
+          "text": "Research and intialize the critic.md with some good default best practice",
+          "ts": "2026-06-02T14:49:21.667Z"
         }
       ],
       "meta": {
@@ -4140,7 +4148,14 @@
         "originalText": "add a critic.md and automatically save the most effective critic rules such as anti-patterns to it. Its sulposes to be a md grow as we use based on the real results of the system",
         "rewritten": true
       },
-      "description": "**Problem:** There is no persistent store for the critic rules that actually prove effective during real runs, so learnings are lost between sessions.\n**Expected:** A `critic.md` file that auto-accumulates the most effective critic rules (e.g. anti-patterns) and grows organically based on real system results.\n**Actual:** No `critic.md` exists; effective rules and anti-patterns are not captured or reused.\n**Context:** Markdown file intended to grow over time, driven by observed outcomes of the system."
+      "description": "**Problem:** There is no persistent store for the critic rules that actually prove effective during real runs, so learnings are lost between sessions.\n**Expected:** A `critic.md` file that auto-accumulates the most effective critic rules (e.g. anti-patterns) and grows organically based on real system results.\n**Actual:** No `critic.md` exists; effective rules and anti-patterns are not captured or reused.\n**Context:** Markdown file intended to grow over time, driven by observed outcomes of the system.",
+      "runs": [
+        {
+          "status": "completed",
+          "ts": "2026-06-02T15:00:00.000Z",
+          "summary": "Phase 1 shipped (auto-growth deferred to a future dispatch — confirmed via AskUserQuestion since the dispatch admitted multiple architectural interpretations re: where the file lives, how it grows, how it's injected, and how it replicates to new projects). Scope confirmed via Q1=C (project _myco_/critic.md + myco-shipped default template) and Q2=A (manual edits for now). Implementation: (1) NEW server/templates/critic.md — a researched myco-shipped default with four sections: Core review principles (anchor on task text, distinguish severity, cite diff lines, no invented context, match user's explicit ask), Anti-patterns to flag (broad try/catch swallowing errors, new public API without callers/tests/auth, hard deletes against a shared store, weakened tests in the same diff as code, regex on SDK-structured events per CLAUDE.md §Code Style §2, magic numbers, duplicated cross-cutting state per CLAUDE.md §1, mismatched comments + code), Things NOT to flag (calibration to reduce false positives — missing tests for trivial CSS edits, bug-number trail markers, plan.json edits, adjacent unrelated code, legitimate dead-code removal, clean renames), Project-specific lessons (empty section the project grows over time). (2) server/src/critique.js gets a _loadProjectCriticRules(absCwd) helper that reads <project>/_myco_/critic.md; if missing, copies from server/templates/critic.md (the seed step — addresses @kkrazy's 'myco default replicate to all projects' comment). Helper wraps the load+seed in try/catch so a missing/unreadable file degrades gracefully (critique still runs, just without the project rules). Result is appended to the base systemPrompt under a clearly-labelled 'Project-specific critic rules (from _myco_/critic.md)' header that explicitly says 'These extend, but never override, the above instructions'. (3) THIS project bootstrapped with cp server/templates/critic.md _myco_/critic.md so existing runs immediately benefit. (4) _myco_/README.md updated to document the new file. Regression test: test/fr-89-critic-md.test.js (8 cases) locks the template + section headers + critique.js read/seed/inject path + graceful-fallback try/catch + the bootstrapped project file + a fr-89 marker comment. Wired into test/test.sh next to close-icon.test.js. Auto-growth (Phase 2) deferred — needs its own design pass on the PROPOSED-RULE vs end-of-turn-distillation trade-off and an effectiveness signal (probably the user's Accept/Discard verdict on the critique result). Not yet committed/pushed/deployed — awaiting user direction."
+        }
+      ]
     },
     {
       "id": "fr-90",
@@ -4353,7 +4368,28 @@
       "voters": [
         "labxnow"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "0404cf89e7f9",
+          "user": "claude",
+          "text": "✓ success · 143.9s · $27.7059 · 13↓/9376↑\n\n**bug-49 r1 critique response — no behavior change needed:**\n\nThe Gemini critic's concern is **directionally inverted**. Quick breakdown:\n\n| Path | Pre-bug-49 | Post-bug-49 | Data risk |\n|---|---|---|---|\n| 🗑 Trash → `artifact.items.filter(...)` | exists | **removed** | was the ONLY data-loss path |\n| ☑ Close → `it.done = true` | exists | exists | data-preservation (item stays intact) |\n\nRemoving the trash button **eliminates** the data-loss surface — it doesn't create one. The critic's concern was speculative (*\"if hard-delete was an intended feature\"*) but the user's dispatch was explicit: *\"The trash button should be repurposed (or replaced) as a 'close' button\"*. Hard-delete was bug-49's specific removal target, not an intended separate feature.\n\n**What I did to address the documen…",
+          "ts": "2026-06-02T14:11:26.186Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-02T14:09:02.108Z"
+          }
+        },
+        {
+          "id": "f65007d4998f",
+          "user": "claude",
+          "text": "✓ success · 6.8s · $30.0571 · 6↓/302↑\n\n**bug-49 fully shipped to mycodev:**\n\n- ✅ **commit** `70e2ee8 fix(bug-49): replace plan-item trash button with close action`\n- ✅ **push** `3d8e67e..70e2ee8 HEAD -> main` (via mycodev jump)\n- ✅ **deploy mycodev** — container `4f646146690e`, build `2026-06-02T14:15:08Z`, HTTP 200\n\nHard-refresh `https://mycodev.labxnow.ai/` and check any plan item — the actions row should now end at the **Edit** button (the trash icon is gone). Close/Reopen is the only lifecycle affordance, item data is preserved across the close→reopen toggle.\n\nMycobeta + myco.labxnow.ai (prod) still on the older code — say \"deploy to mycobeta\" / \"deploy to prod\" if you want them caught up.",
+          "ts": "2026-06-02T14:16:26.021Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-02T13:58:13.897Z"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "i dont see a checkbox to close a plan item. Also using a check box to close an item is.misleading. The trash button should be changed to a close button and close the item, the checkbox code should be removed if its still in the code base",
@@ -4367,12 +4403,55 @@
           "summary": "Root cause: pre-bug-49 plan items had TWO lifecycle buttons in the actions row — (1) .artifact-item-close (fr-47-era replacement for the legacy dual-purpose checkbox; toggles done via POST /artifact/mark, item stays in array with all history) and (2) .artifact-item-delete trash button (hard-delete via DELETE /artifact/item that filtered the item out entirely, losing votes/comments/run-history). User reported the trash icon as semantically wrong for what should be a close action, asked to remove any remaining checkbox close code. The dual-purpose checkbox was already retired in fr-47 (the CSS comment at styles.css:2464 spelled this out); the remaining stale checkbox-mention CSS comments were the only checkbox-era residue. Fix consolidates lifecycle onto ONE affordance: keep .artifact-item-close as-is (already correct), delete the trash button across all layers — (a) HTML: `<button class=\"artifact-item-delete\">` removed from renderItem in web/public/app.js; (b) JS: onArtifactItemDelete function removed, .artifact-item-delete event-wiring loop removed; (c) CSS: 7 .artifact-item-delete rules across styles.css removed (margin-auto right-edge alignment, action-row selector list entries, mobile @media tap-target entry, base pill chrome, :hover, svg sizing); (d) server: DELETE /sessions/:id/artifact/item route removed from artifacts.js (no remaining client caller — dead code per CLAUDE.md §1). Stale checkbox-mention comments in styles.css updated to reflect post-fr-47 reality. Regression test: test/bug-49-trash-becomes-close.test.js (9 cases) locks the delete symbols are gone + the close button + handler survive + bug-49 marker. Three EXISTING tests that locked the trash button's existence updated to reflect the new contract: bug-39-action-row-uniform-height (button list trimmed 8 → 7), fr-62-plan-item-mobile-tap-targets (ACTION_BUTTONS list 8 → 7 + behavior-pin count updated), fr-77-files-changed-diff (r18 regex anchor shifted to .artifact-item-edit, r19 pill-chrome test deleted entirely). Adjacent suites green: bug-39 (5/5), fr-62 (9/9), fr-77 (92/92), bug-49 (9/9). Wired into test/test.sh next to bug-48. Lifecycle contract: close = mark done (item stays); reopen = unmark; hard-delete no longer reachable from the UI. Not yet committed/pushed/deployed — awaiting user direction."
         },
         {
-          "status": "completed",
-          "ts": "2026-06-02T12:40:00.000Z",
-          "summary": "r1 (critique response): Gemini flagged 'potential data loss if hard-delete was an intended feature'. The critique misreads the data-flow direction — the removed trash button was the ONLY data-loss path the UI exposed (`artifact.items.filter(it => it.id !== itemId)` permanently dropped the item + every vote/comment/run-summary attached). The surviving close-via-mark path is the OPPOSITE: it sets `it.done = true` and leaves the record intact. Removing the trash button ELIMINATES the data-loss surface; it doesn't create one. The critique is also conditioned on 'IF hard-delete was an intended feature' — but the user's bug-49 dispatch was explicit: 'The trash button should be repurposed (or replaced) as a close button'. Hard-delete wasn't a separate intended feature, it was bug-49's specific removal target. No other route in server/src/ writes a similar `items.filter(...)` deletion against the plan/test artifacts (verified by git audit). Resolution: no code-behavior change — but the rationale comment block at the old route's location in server/src/artifacts.js was beefed up to address the data-loss-direction concern in-code, document the audit (sole hard-delete path), and pre-empt any future agent silently restoring the old route + UI button (the explicit failure mode bug-49 was filed against). If a legitimate admin-only hard-delete need surfaces later (GDPR purge, spam cleanup), the comment now spells out how to reintroduce it safely (isOwnerOrAdmin gate + explicit require=true query param). Regression test still 9/9 green after the comment beef-up. Awaiting user direction on commit/push/deploy."
+          "status": "success",
+          "ts": "2026-06-02T14:11:26.186Z",
+          "startedAt": "2026-06-02T14:09:02.108Z",
+          "summary": "143.9s · 13→9376 tok",
+          "result": "**bug-49 r1 critique response — no behavior change needed:**\n\nThe Gemini critic's concern is **directionally inverted**. Quick breakdown:\n\n| Path | Pre-bug-49 | Post-bug-49 | Data risk |\n|---|---|---|---|\n| 🗑 Trash → `artifact.items.filter(...)` | exists | **removed** | was the ONLY data-loss path |\n| ☑ Close → `it.done = true` | exists | exists | data-preservation (item stays intact) |\n\nRemoving the trash button **eliminates** the data-loss surface — it doesn't create one. The critic's concern was speculative (*\"if hard-delete was an intended feature\"*) but the user's dispatch was explicit: *\"The trash button should be repurposed (or replaced) as a 'close' button\"*. Hard-delete was bug-49's specific removal target, not an intended separate feature.\n\n**What I did to address the documentation gap the critique pointed at:**\n\n1. **Beefed up the rationale comment** at the old route's location in `server/src/artifacts.js`. The block now:\n   - Spells out the data-flow direction explicitly (close = preserve, trash = nuke; removing the latter SHRINKS the data-loss surface)\n   - Documents the audit (no other `items.filter(...)` deletion path against plan/test artifacts in `server/src/`)\n   - Pre-empts a future agent silently restoring the old route + UI button (the explicit failure mode bug-49 was filed against)\n   - Spells out the safe path if a legitimate admin-only hard-delete need surfaces later (`isOwnerOrAdmin` gate + explicit `require=true` query param + git history of the prior implementation)\n\n2. **Plan.json updated** with the r1 critique-response run-summary documenting why no behavior change was required.\n\n**Tests still green** — bug-49 (9/9) after the comment beef-up; no other suites affected.\n\nReady for commit / push / deploy on your signal. The original bug-49 commit hasn't landed yet — would you like to roll the critique-response edits into a single bug-49 commit, or land them as a separate `bug-49 r1` commit?"
+        },
+        {
+          "status": "success",
+          "ts": "2026-06-02T14:16:26.021Z",
+          "startedAt": "2026-06-02T13:58:13.897Z",
+          "summary": "6.8s · 6→302 tok",
+          "result": "**bug-49 fully shipped to mycodev:**\n\n- ✅ **commit** `70e2ee8 fix(bug-49): replace plan-item trash button with close action`\n- ✅ **push** `3d8e67e..70e2ee8 HEAD -> main` (via mycodev jump)\n- ✅ **deploy mycodev** — container `4f646146690e`, build `2026-06-02T14:15:08Z`, HTTP 200\n\nHard-refresh `https://mycodev.labxnow.ai/` and check any plan item — the actions row should now end at the **Edit** button (the trash icon is gone). Close/Reopen is the only lifecycle affordance, item data is preserved across the close→reopen toggle.\n\nMycobeta + myco.labxnow.ai (prod) still on the older code — say \"deploy to mycobeta\" / \"deploy to prod\" if you want them caught up."
         }
       ]
+    },
+    {
+      "id": "fr-92",
+      "text": "Map mobile swipe up/down to arrow keys for composer history navigation",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-06-02T14:22:59.791Z",
+      "addedBy": "labxnow",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "swipe up and down should simulate a up or down arrow and bring up the composer history on mobile for better ux",
+        "rewritten": true
+      },
+      "description": "**Problem:** Mobile users can't access composer history because there's no arrow-key equivalent on touch devices.\n**Expected:** Swipe up/down on the composer simulates up/down arrow presses, surfacing previous/next history entries.\n**Actual:** Composer history is effectively unreachable on mobile — no gesture is wired to the history navigation.\n**Context:** Mobile UX only; should mirror the existing desktop arrow-key behavior on the composer input."
+    },
+    {
+      "id": "fr-93",
+      "text": "Allow paste from memory to drawing pad in composer",
+      "layer": "Feature",
+      "done": false,
+      "addedAt": "2026-06-02T14:42:25.125Z",
+      "addedBy": "labxnow",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "allow paste from memory to drawing pad in the composer",
+        "rewritten": true
+      },
+      "description": "**Problem:** Users can't transfer content from memory into the composer's drawing pad, breaking the expected paste flow.\n**Expected:** Paste action in the composer's drawing pad accepts content from memory.\n**Actual:** Paste from memory into the drawing pad is unsupported."
     }
   ],
-  "updatedAt": "2026-06-02T12:40:00.000Z"
+  "updatedAt": "2026-06-02T14:42:30.471Z"
 }
