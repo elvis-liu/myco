@@ -424,6 +424,12 @@ const LUCIDE_PATHS = {
   // Replaces the 'check' ✓ that the .artifact-item-close button was
   // using; ✓ reads as "mark complete", × reads as "close".
   'x':             '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  // close-icon-popout: hand-rolled per user sketch — a checkmark
+  // whose tail pokes through the top-right of an otherwise closed
+  // circle. Reads as "mark complete with emphasis" / "task closed
+  // with affirmation". Circle r=8 centered (12,12); check tail at
+  // (22, 2) is well outside the circle, V-apex + start are inside.
+  'check-popout':  '<circle cx="12" cy="12" r="8"/><polyline points="7 12 12 17 22 2"/>',
   'trash':         '<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
 };
 function _lucideIcon(name, cls) {
@@ -9051,12 +9057,16 @@ function renderArtifact(type, artifact) {
     const closeTitle = it.done
       ? 'Reopen this item (clears done state)'
       : 'Close this item (marks done — no claude dispatch)';
-    // Close icon = × (close); Reopen icon = ↻ (restart). r14 first
-    // swapped to Lucide 'check' + 'rotate-ccw' SVGs (chrome family);
-    // close-icon-uses-x then swapped the close glyph from ✓ to × per
-    // user report — ✓ reads as "mark complete", × reads as "close".
-    // Mobile shows just the icon; desktop adds the text label after.
-    const closeIcon = it.done ? _lucideIcon('rotate-ccw') : _lucideIcon('x');
+    // Close icon = 'check-popout' (a checkmark whose tail pokes
+    // through the top-right of a circle, hand-rolled per user
+    // sketch); Reopen icon = ↻ (rotate-ccw). Icon history on this
+    // button: r14 first picked Lucide 'check' (✓), close-icon-uses-x
+    // swapped to 'x' (×) because ✓ was reading as "mark complete",
+    // then close-icon r2 went to the popout composite to give the
+    // close-as-completion semantic visual emphasis without the bare
+    // ✓ ambiguity. Mobile shows just the icon; desktop adds the text
+    // label after.
+    const closeIcon = it.done ? _lucideIcon('rotate-ccw') : _lucideIcon('check-popout');
     const closeBtn = supportsVoting
       ? `<button class="artifact-item-close" data-type="${escHtml(type)}" data-id="${escHtml(it.id)}" data-done="${it.done ? '1' : '0'}" title="${escHtml(closeTitle)}" aria-label="${escHtml(closeLabel)}"><span class="btn-icon">${closeIcon}</span><span class="btn-text">${escHtml(closeLabel)}</span></button>`
       : '';
