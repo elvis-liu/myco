@@ -7535,6 +7535,18 @@ function _renderVerdictPanel() {
     ? `<span class="verdict-intermediate-badge" title="Mid-run checkpoint critique — the final critique will fire at end of turn">CHECKPOINT: ${escHtml(stageLabel)}</span>`
     : '';
 
+  // bug-52: user-prompt textarea on the verdict pane. The user types
+  // a follow-up concern (e.g. "did you check the offline case?") and
+  // clicks the Retry button (or 🔍 Re-ask) → the next critique is
+  // steered to address that specific question. Always present (not
+  // gated on a state flag) so the user can opt in any time without
+  // additional UI choreography. Empty textarea = standard retry.
+  const userPromptHtml =
+    `<div class="verdict-user-prompt-wrap">` +
+      `<label for="verdict-user-prompt-input" class="verdict-user-prompt-label">Ask the critic to look into something specific (optional):</label>` +
+      `<textarea id="verdict-user-prompt-input" class="verdict-user-prompt-input" placeholder="e.g. did you check the case where the user is offline? did you consider rate limits on the retry button?" rows="2" maxlength="2048"></textarea>` +
+    `</div>`;
+
   panel.innerHTML = `
     <div class="verdict-header">
       <div class="verdict-title ${titleClass}">
@@ -7543,6 +7555,7 @@ function _renderVerdictPanel() {
       <div style="font-size:11px;color:#8b949e;font-family:monospace;">${escHtml(review.itemId)}${intermediateBadge}</div>
     </div>
     <div class="verdict-critique">${formattedCritique}</div>
+    ${userPromptHtml}
     <div class="verdict-actions">
       ${actionsHtml}
     </div>
@@ -7557,10 +7570,19 @@ function _renderVerdictPanel() {
   const btnRetry = panel.querySelector('.verdict-btn-retry');
   if (btnRetry) {
     btnRetry.addEventListener('click', async () => {
+      // bug-52: read the verdict-user-prompt textarea + send as
+      // userPrompt in the body. Empty = standard retry; non-empty =
+      // steer the critic toward the user's specific concern.
+      const ta = panel.querySelector('#verdict-user-prompt-input');
+      const userPrompt = ta && typeof ta.value === 'string' ? ta.value.trim() : '';
       btnRetry.disabled = true;
-      btnRetry.textContent = '↻ Retrying…';
+      btnRetry.textContent = userPrompt ? '🔍 Asking…' : '↻ Retrying…';
       try {
-        const res = await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/critique/retry`, { method: 'POST' });
+        const res = await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/critique/retry`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userPrompt }),
+        });
         if (!res || !res.ok) {
           const body = await (res ? res.json().catch(() => ({})) : Promise.resolve({}));
           btnRetry.disabled = false;

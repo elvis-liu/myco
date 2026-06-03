@@ -86,6 +86,13 @@ async function triggerGeminiCritique(sessionId, session, item, diff, claudeOutpu
   const isIntermediate = !!(opts && opts.isIntermediate);
   const stage = (opts && opts.stage) || null;
   const isRetry = !!(opts && opts.isRetry);
+  // bug-52: optional follow-up prompt the user types into the verdict
+  // pane's input field. Append to the critic's user-prompt so Gemini
+  // looks into the specific concern the user flagged on top of the
+  // standard review. Empty/whitespace inputs are ignored. Capped at
+  // 2 KB to keep the prompt budget under control.
+  const userFollowupRaw = (opts && typeof opts.userPrompt === 'string') ? opts.userPrompt.trim() : '';
+  const userFollowup = userFollowupRaw.slice(0, 2048);
 
   const rec = sessionsMod.getSessionRecord(sessionId);
   // td-33 r1 (Gemini critique catch — 2026-06-03): the original
@@ -141,8 +148,7 @@ Identify if Claude introduced bugs, security holes, ignored edge cases, or misse
 
 You can ONLY see the diff and Claude's short explanation — no full file contents, no chat history, no test runs. If you cannot tell from those alone whether something is correct, write "INSUFFICIENT INFORMATION:" followed by what you would need to verify. Do NOT speculate or rubber-stamp.
 
-If you agree with Claude's implementation, write: "✓ AGREED".
-If you disagree, write a clear, concise markdown list of issues/bugs and suggest corrections. Cite specific lines from the diff.`;
+If you agree with Claude's implementation, write "✓ AGREED" on the first line, then on the lines below give a concise 2-4 sentence explanation of WHY you agree: what the change does well, which parts of the original requirement it satisfies, and any non-blocking observations or polish suggestions worth mentioning. Do not be terse — a bare "✓ AGREED" with no reasoning is unhelpful (the user has explicitly asked the critic to show its reasoning even when approving — bug-52). If you disagree, write a clear, concise markdown list of issues/bugs and suggest corrections. Cite specific lines from the diff.`;
 
   // fr-89: append project-specific critic rules from
   // <project>/_myco_/critic.md to the base system prompt. The file
@@ -167,13 +173,21 @@ If you disagree, write a clear, concise markdown list of issues/bugs and suggest
   const checkpointHeader = isIntermediate
     ? `\n[CHECKPOINT REVIEW — STAGE: ${String(stage || 'unknown').toUpperCase()}]\nThis is a mid-run checkpoint, not the final review. Claude is currently working on this item — the diff reflects partial progress through the ${stage || 'current'} stage. Flag obvious issues + missing pieces; do NOT mark INSUFFICIENT INFORMATION for "work isn't done yet" because that's expected. The next stage will produce a follow-up critique.\n`
     : '';
+  // bug-52: when the user typed a follow-up prompt into the verdict
+  // pane's input field, surface it as a TOP-PRIORITY instruction so
+  // Gemini centers its review on that concern. Without the explicit
+  // "user is specifically asking" framing, the model often gives the
+  // same generic review and ignores the user's question.
+  const userFollowupBlock = userFollowup
+    ? `\n\n[USER FOLLOW-UP — give this priority over the generic review]\nThe user has typed the following concern they want you to look into specifically:\n"${userFollowup}"\nAddress this concern explicitly in your reasoning. If the diff doesn't have enough information to answer it, say so plainly.\n`
+    : '';
   const userPrompt = `${checkpointHeader}
 Task to accomplish: ${item.text}
 Claude's explanation: ${claudeOutput}
 
 === Staged Git Changes ===
 ${diff}
-`;
+${userFollowupBlock}`;
 
   const label = isIntermediate ? `intermediate-${stage}` : 'final';
   console.log(`[critique] Invoking critic "${critic.name}" (${critic.id}) for item ${item.id} (${label}${isRetry ? ', retry' : ''})...`);
@@ -220,7 +234,12 @@ ${diff}
 // or no critique has ever fired on this session). The retried
 // critique broadcasts with isRetry=true so the client can render a
 // "retrying…" → fresh verdict transition.
-async function retryLastCritique(sessionId, session) {
+//
+// bug-52: opts.userPrompt is the optional follow-up prompt the user
+// typed into the verdict pane's input field. When set, the next
+// critique is steered to address that specific concern. Caller
+// (the /critique/retry route) passes it through from the request body.
+async function retryLastCritique(sessionId, session, opts = {}) {
   const rec = sessionsMod.getSessionRecord(sessionId);
   if (!rec || !rec._lastCritique) return false;
   const last = rec._lastCritique;
@@ -229,6 +248,7 @@ async function retryLastCritique(sessionId, session) {
     isIntermediate: last.isIntermediate,
     stage: last.stage,
     isRetry: true,
+    userPrompt: opts && typeof opts.userPrompt === 'string' ? opts.userPrompt : '',
   });
   return true;
 }

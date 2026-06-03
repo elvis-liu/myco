@@ -2916,6 +2916,31 @@ test_chat_window() {
   # styles.css verdict-btn-retry + verdict-intermediate-badge +
   # verdict-title.error, and template section naming td-33.
   node_test_result test/td-33-stage-aware-critic-and-retry.test.js "test/td-33-stage-aware-critic-and-retry.test.js (22 cases — incl. r1 Gemini-critique catch: queue-pause AFTER critic + Dismiss on error)"
+  # bug-52: critic must explain its reasoning on ✓ AGREED + user can
+  # ask the critic to look into something specific via a textarea on
+  # the verdict pane. Consolidates three user-reported observations:
+  # (1) "when the critic agrees, should still show the reasoning of
+  # the agreement with explanation" — the prompt previously told
+  # Gemini to write JUST "✓ AGREED" so several runs came back as
+  # bare 8-char sentinels with no reasoning. (2) "Should let user
+  # decide if there is anything user want the critic to look into
+  # by providing an input field." (3) "Currently it just say agreed
+  # and then continue" — resolved by (1)+(2) making the verdict
+  # pane worth pausing on. Fix: prompt now requires 2-4 sentences
+  # of reasoning AFTER ✓ AGREED + warns against the bare-sentinel
+  # shape so future prompt-tighteners don't regress. New
+  # opts.userPrompt on triggerGeminiCritique (capped at 2KB) gets
+  # appended as a "[USER FOLLOW-UP — give this priority]" block in
+  # the user prompt. retryLastCritique + POST /critique/retry route
+  # both accept + forward it. Verdict pane gains a
+  # #verdict-user-prompt-input textarea between the critique body
+  # and the action row; Retry button reads + JSON.stringify's it
+  # into the POST body. Locks: prompt reasoning + bare-AGREED warn,
+  # opts.userPrompt read + 2KB cap, USER FOLLOW-UP priority block,
+  # retryLastCritique forwarding, route body forwarding, client
+  # textarea + placeholder hint, retry handler reading textarea +
+  # JSON Content-Type + body field, CSS for the three classes.
+  node_test_result test/bug-52-critic-reasoning-and-user-prompt.test.js "test/bug-52-critic-reasoning-and-user-prompt.test.js (9 cases)"
   # fr-81 Phase A: the actual ingest direction. Phase 1 only handled
   # outbound (/feature, /bug write issues upstream). The user-reported
   # gap (Gemini's critique on the previous fr-94 Phase 3 diff: "this

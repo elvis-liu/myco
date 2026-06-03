@@ -1488,8 +1488,13 @@ app.post('/sessions/:id/critique/retry', async (req, res) => {
   const attachMod = require('./attach');
   const session = attachMod.getSession && attachMod.getSession(ctx.id);
   if (!session) return res.status(404).json({ error: 'no live session — attach first' });
+  // bug-52: forward an optional user-prompt from the verdict pane's
+  // "Re-ask with my prompt" input. critique.retryLastCritique passes
+  // it through to triggerGeminiCritique which steers Gemini's review
+  // toward the user-flagged concern.
+  const userPrompt = typeof (req.body && req.body.userPrompt) === 'string' ? req.body.userPrompt : '';
   try {
-    const ok = await critique.retryLastCritique(ctx.id, session);
+    const ok = await critique.retryLastCritique(ctx.id, session, { userPrompt });
     if (!ok) return res.status(404).json({ error: 'no critique on file to retry' });
     res.json({ ok: true });
   } catch (err) {
