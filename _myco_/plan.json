@@ -4736,7 +4736,14 @@
       "voters": [
         "labxnow"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "92fbcd78a85b",
+          "user": "labxnow",
+          "text": "Check the fix again",
+          "ts": "2026-06-03T04:50:07.258Z"
+        }
+      ],
       "runs": [
         {
           "status": "running",
@@ -4782,7 +4789,14 @@
       "voters": [
         "labxnow"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "09367b28f207",
+          "user": "labxnow",
+          "text": "Check the fix again",
+          "ts": "2026-06-03T04:50:21.972Z"
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "the hud status doesnt show real progress, while its applying edit to code, running tests, its still sitting at analyze. Most of time its sitting at analyze and sometimes jumping around analyze code and test.",
@@ -4811,6 +4825,12 @@
             "editedBy": "kkrazy",
             "editedAt": "2026-06-03T03:58:34.824Z"
           }
+        },
+        {
+          "id": "e2d2bd79151e",
+          "user": "kkrazy",
+          "text": "should always make enough information is provided to the critic for full assessment",
+          "ts": "2026-06-03T04:52:46.749Z"
         }
       ],
       "meta": {
