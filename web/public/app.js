@@ -7481,30 +7481,115 @@ function _renderVerdictPanel() {
 
   panel.hidden = false;
 
-  const isAgreed = !review.hasDisagreement;
-  const titleClass = isAgreed ? 'agreed' : 'disagreement';
-  const titleText = isAgreed ? '✓ Gemini Approved Claude\'s Changes' : '⚠️ Gemini Flagged Issues (Disagreement)';
-  
+  // td-33: detect transient critic errors (Gemini 503, missing key,
+  // network blip). When isError is true the verdict body is the
+  // SDK's "(call failed: ...)" envelope, NOT a real verdict — we
+  // render a ↻ Retry button and skip the agree/disagree styling.
+  const isError = !!review.isError;
+  // td-33: intermediate (stage-checkpoint) critiques broadcast for
+  // awareness but don't pause the run queue. Render with a
+  // [Checkpoint] badge so the user knows this isn't the final.
+  const isIntermediate = !!review.isIntermediate;
+  const stageLabel = isIntermediate && review.stage ? String(review.stage).toLowerCase() : '';
+
+  const isAgreed = !isError && !review.hasDisagreement;
+  const titleClass = isError ? 'error' : (isAgreed ? 'agreed' : 'disagreement');
+  let titleText;
+  if (isError) {
+    titleText = 'Critic Error — Retry?';
+  } else if (isAgreed) {
+    titleText = isIntermediate ? `✓ Gemini Approved Checkpoint (${stageLabel})` : '✓ Gemini Approved Claude\'s Changes';
+  } else {
+    titleText = isIntermediate ? `⚠️ Gemini Flagged Checkpoint (${stageLabel})` : '⚠️ Gemini Flagged Issues (Disagreement)';
+  }
+
   const formattedCritique = escHtml(review.critique);
+
+  // td-33: action-row composition depends on the verdict shape.
+  //   · Error: show only Retry (the other actions don't apply — there's
+  //     no real verdict to discard/fix/accept).
+  //   · Intermediate: show Retry + a "Continue" affordance (the run
+  //     queue isn't paused, so there's nothing to accept; user just
+  //     dismisses the checkpoint).
+  //   · Final (current behavior): Discard / Fix / Accept trio.
+  let actionsHtml;
+  if (isError) {
+    // td-33 r1 (Gemini critique catch): on error give the user an
+    // ESCAPE HATCH too. If retries keep failing (e.g. Gemini quota
+    // exhausted, prolonged 503), Retry-only would leave the user
+    // stuck staring at an error panel. Dismiss hides it so they can
+    // move on (queue isn't paused on error per the server-side
+    // gate, so dismissing just clears the panel and they're back
+    // to a clean state).
+    actionsHtml = `<button class="verdict-btn verdict-btn-retry" title="Re-fire the critique against the same diff (use this on Gemini 503 / network errors)">↻ Retry</button>` +
+      `<button class="verdict-btn verdict-btn-dismiss" title="Dismiss the error panel and continue without a critic verdict (queue is not paused on critic errors)">✗ Dismiss</button>`;
+  } else if (isIntermediate) {
+    actionsHtml = `<button class="verdict-btn verdict-btn-retry" title="Re-fire the checkpoint critique against the same diff">↻ Retry</button>` +
+      `<button class="verdict-btn verdict-btn-dismiss" title="Dismiss this checkpoint and continue waiting for the final critique">✓ Dismiss</button>`;
+  } else {
+    actionsHtml = `<button class="verdict-btn verdict-btn-discard" title="Discard git changes and abort task">✗ Discard</button>` +
+      `<button class="verdict-btn verdict-btn-fix" title="Ask Claude to fix issues flagged by Gemini">⚡ Ask Claude to Fix</button>` +
+      `<button class="verdict-btn verdict-btn-accept" title="Accept Claude's changes and resume the run queue">✓ Accept Claude</button>`;
+  }
+  const intermediateBadge = isIntermediate
+    ? `<span class="verdict-intermediate-badge" title="Mid-run checkpoint critique — the final critique will fire at end of turn">CHECKPOINT: ${escHtml(stageLabel)}</span>`
+    : '';
 
   panel.innerHTML = `
     <div class="verdict-header">
       <div class="verdict-title ${titleClass}">
-        ${isAgreed ? '✓' : '⚠️'} ${titleText}
+        ${isError ? '⚠️' : (isAgreed ? '✓' : '⚠️')} ${titleText}
       </div>
-      <div style="font-size:11px;color:#8b949e;font-family:monospace;">${escHtml(review.itemId)}</div>
+      <div style="font-size:11px;color:#8b949e;font-family:monospace;">${escHtml(review.itemId)}${intermediateBadge}</div>
     </div>
     <div class="verdict-critique">${formattedCritique}</div>
     <div class="verdict-actions">
-      <button class="verdict-btn verdict-btn-discard" title="Discard git changes and abort task">✗ Discard</button>
-      <button class="verdict-btn verdict-btn-fix" title="Ask Claude to fix issues flagged by Gemini">⚡ Ask Claude to Fix</button>
-      <button class="verdict-btn verdict-btn-accept" title="Accept Claude's changes and resume the run queue">✓ Accept Claude</button>
+      ${actionsHtml}
     </div>
   `;
 
   const btnDiscard = panel.querySelector('.verdict-btn-discard');
   const btnFix = panel.querySelector('.verdict-btn-fix');
   const btnAccept = panel.querySelector('.verdict-btn-accept');
+  // td-33 wiring: retry button POSTs to /critique/retry. The server
+  // pulls rec._lastCritique + re-fires; the next broadcast replaces
+  // this panel with the fresh verdict.
+  const btnRetry = panel.querySelector('.verdict-btn-retry');
+  if (btnRetry) {
+    btnRetry.addEventListener('click', async () => {
+      btnRetry.disabled = true;
+      btnRetry.textContent = '↻ Retrying…';
+      try {
+        const res = await authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/critique/retry`, { method: 'POST' });
+        if (!res || !res.ok) {
+          const body = await (res ? res.json().catch(() => ({})) : Promise.resolve({}));
+          btnRetry.disabled = false;
+          btnRetry.textContent = '↻ Retry';
+          alert('Retry failed: ' + (body && body.error ? body.error : 'unknown error'));
+        }
+        // Success → next critique-review broadcast re-renders the
+        // panel; nothing else to do here.
+      } catch (err) {
+        btnRetry.disabled = false;
+        btnRetry.textContent = '↻ Retry';
+        alert('Retry failed: ' + (err && err.message || err));
+      }
+    });
+  }
+  const btnDismiss = panel.querySelector('.verdict-btn-dismiss');
+  if (btnDismiss) {
+    btnDismiss.addEventListener('click', () => {
+      // Intermediate critiques are advisory — clicking dismiss just
+      // hides the panel; the queue wasn't paused so there's nothing
+      // to resume.
+      state.awaitingVerdict = false;
+      state.critiqueReview = null;
+      _renderVerdictPanel();
+    });
+  }
+  // Early-return for error + intermediate paths so the legacy
+  // discard/fix/accept wiring below doesn't try to bind null nodes.
+  if (isError || isIntermediate) return;
 
   btnDiscard.addEventListener('click', async () => {
     if (!confirm('Are you sure you want to discard Claude\'s changes? This will revert files to HEAD.')) return;

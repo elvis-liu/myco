@@ -8860,6 +8860,51 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
   box-shadow: 0 0 8px rgba(248, 81, 73, 0.25);
 }
 
+/* td-33: Retry (orange/amber) for transient critic errors. Dismiss
+   (muted) for intermediate-checkpoint dismissal. Title.error styling
+   for the "Critic Error — Retry?" banner. Intermediate badge sits in
+   the header next to the item-id chip. */
+.verdict-btn-retry {
+  background: rgba(255, 159, 64, 0.15);
+  color: #ffa657;
+  border: 1px solid rgba(255, 159, 64, 0.4);
+}
+.verdict-btn-retry:hover {
+  background: rgba(255, 159, 64, 0.3);
+  border-color: #ffa657;
+  box-shadow: 0 0 8px rgba(255, 159, 64, 0.25);
+}
+.verdict-btn-retry:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+.verdict-btn-dismiss {
+  background: rgba(139, 148, 158, 0.12);
+  color: #8b949e;
+  border: 1px solid rgba(139, 148, 158, 0.35);
+}
+.verdict-btn-dismiss:hover {
+  background: rgba(139, 148, 158, 0.25);
+  border-color: #b1bac4;
+}
+.verdict-title.error {
+  color: #ffa657;
+}
+.verdict-intermediate-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: rgba(192, 132, 252, 0.12);
+  color: #c084fc;
+  border: 1px solid rgba(192, 132, 252, 0.35);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: none;
+  vertical-align: middle;
+}
+
 .composer-critic-select {
   background: rgba(255, 255, 255, 0.04);
   color: #8b949e;

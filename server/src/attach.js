@@ -170,6 +170,62 @@ function _registerExternalSession(sessionId, session) {
   sessions.set(sessionId, session);
   if (typeof session.on === 'function') {
     session.on('menu', (menu) => menuMod.handleSessionMenu(sessionId, session, menu));
+    // td-33 (B — stage-aware critic): when claude announces a stage
+    // boundary via [stage: analyze|code|verify done] in its assistant
+    // text, agent-session.js emits a 'stage-done' event here. We
+    // snapshot the current diff + fire an INTERMEDIATE critique. The
+    // critique broadcasts a verdict for the user's awareness but does
+    // NOT pause the run queue (per critique.js's isIntermediate gate)
+    // — pausing on every stage transition would freeze multi-step work
+    // behind a sequence of approvals.
+    //
+    // Guards (matches the final-critique gate):
+    //   · session._activeRunItem must be set (only fires during a
+    //     [run:plan#X] dispatch — bare conversation turns don't get
+    //     checkpoint critiques).
+    //   · The dispatch-drift baseline filter from the 2026-06-03 fix
+    //     applies the same way — pre-existing WIP paths are excluded
+    //     so a stage critique on a no-op run doesn't fire against
+    //     unrelated working-tree state.
+    session.on('stage-done', async ({ stage }) => {
+      try {
+        const active = session._activeRunItem;
+        if (!active || !active.itemId) {
+          console.log(`[td-33] stage-done(${stage}) fired without active run item — skipping`);
+          return;
+        }
+        const rec = sessionsMod.getSessionRecord(sessionId);
+        if (!rec || !rec.absCwd) return;
+        const { listChangedFiles, readDiff } = require('./files');
+        const changedInfo = await listChangedFiles(rec.absCwd);
+        if (!changedInfo || !Array.isArray(changedInfo.entries) || changedInfo.entries.length === 0) {
+          console.log(`[td-33] stage-done(${stage}) — no dirty files at this checkpoint; skipping critique`);
+          return;
+        }
+        const baselineDirty = (active.baselineDirty instanceof Set) ? active.baselineDirty : new Set();
+        const newEntries = changedInfo.entries.filter((e) => !baselineDirty.has(e.path));
+        if (newEntries.length === 0) {
+          console.log(`[td-33] stage-done(${stage}) — only baseline-WIP paths are dirty; skipping critique`);
+          return;
+        }
+        let fullDiff = '';
+        for (const entry of newEntries) {
+          const d = await readDiff(rec.absCwd, entry.path);
+          if (d && d.diff) fullDiff += `\n--- File: ${entry.path} ---\n${d.diff}\n`;
+        }
+        if (!fullDiff.trim()) return;
+        const planArtifact = rec.artifacts && rec.artifacts.plan;
+        const item = planArtifact && Array.isArray(planArtifact.items)
+          && planArtifact.items.find((it) => it.id === active.itemId);
+        if (!item) return;
+        const { triggerGeminiCritique } = require('./critique');
+        await triggerGeminiCritique(sessionId, session, item, fullDiff,
+          (session._currentTurnAssistantText || '').slice(-2000),
+          { isIntermediate: true, stage });
+      } catch (err) {
+        console.error(`[td-33] stage-done(${stage}) critique failed: ${err.message}`);
+      }
+    });
     // Plan-item ▶ Run linkage: when the user kicks off a run via
     // the chat-pane Run button, handleChatMessage stamps
     // session._activeRunItem with the item id. On turn_result we

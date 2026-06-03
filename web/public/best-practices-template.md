@@ -317,6 +317,60 @@ assumption shows up not just to the requester but to every collaborator
 attached to the session. These rules front-load the clarifying step so
 the autonomous portion runs on a confirmed, witnessed premise.
 
+## 9. Stage-aware critic — announce stage boundaries (td-33)
+
+When working through a plan-item dispatch, claude tends to move
+through three natural phases:
+
+1. **analyze** — read the relevant code, understand the problem,
+   plan the fix.
+2. **code** — write the implementation (Edit / Write).
+3. **verify** — run tests, lint, type-check (Bash).
+
+The myco critic infrastructure used to run ONLY at the end of the
+turn, so a flawed analyze or a wrong-shaped code change would
+propagate all the way through verify before Gemini ever flagged it.
+
+**Emit a stage-boundary sentinel** in your assistant text at each
+transition so the critic can review checkpoints:
+
+- `[stage: analyze done]` — fire once you've finished the analyze
+  phase and are about to start writing code.
+- `[stage: code done]` — fire once the implementation is written,
+  before you start the verify phase.
+- `[stage: verify done]` — fire once the verification (tests, lints)
+  has passed and you're about to summarize.
+
+**Format rules:**
+
+- Exactly the bracketed shape `[stage: <name> done]` — case-
+  insensitive, single-space inside, no extra words. The server
+  parser is strict by design so claude can't accidentally trigger
+  on prose like "I am done analyzing."
+- One sentinel per natural transition. Each stage fires AT MOST
+  ONCE per turn (extras are deduped server-side, no harm in
+  emitting twice).
+- The sentinel can sit on its own line OR mid-paragraph — both
+  parse. Putting it on its own line makes the chat-pane render
+  cleaner.
+
+**What the server does on each sentinel:**
+
+- Snapshots the current diff (only files this run actually changed,
+  not pre-existing WIP).
+- Fires the configured critic (Gemini by default) with a CHECKPOINT
+  prompt that says "this is mid-run, partial progress, flag obvious
+  issues only — INSUFFICIENT INFORMATION is allowed but don't use
+  it just because work isn't done."
+- Broadcasts the verdict to all attached clients with
+  `isIntermediate: true`.
+- **Does NOT pause the run queue.** Intermediate critiques are
+  advisory; only the end-of-turn critique gates queue advance.
+
+**You can still continue work after emitting a sentinel** — the
+critique runs in the background and surfaces to the user without
+blocking your next tool call.
+
 ---
 
 *Toggle this section off via the **Best practices** checkbox if your

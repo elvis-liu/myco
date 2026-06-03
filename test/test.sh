@@ -2887,6 +2887,35 @@ test_chat_window() {
   # !beforeDone && done, no-double-fire, type=plan), and helper-
   # level "no token on file" skip with a log.
   node_test_result test/fr-81-phase-b4-write-back.test.js "test/fr-81-phase-b4-write-back.test.js (12 cases)"
+  # td-33: stage-aware critic + retry button. Two-part feature:
+  # (A) When the critic returns a "(call failed: …)" / missing-key /
+  # error envelope, the verdict panel grows a ↻ Retry button. Click
+  # → POST /sessions/:id/critique/retry → server pulls
+  # rec._lastCritique (cached on every fire) + re-runs Gemini
+  # against the same diff + claudeOutput + item. Idempotency-safe:
+  # 404 when no critique on file. (B) Stage-aware critic via
+  # sentinel text — claude announces stage boundaries in its
+  # assistant text ([stage: analyze done] / [stage: code done] /
+  # [stage: verify done]). agent-session.js parses them via
+  # _detectStageSentinels (case-insensitive, three-stage alternation
+  # only, per-turn dedup via Set), emits stage-done on the session
+  # bus. attach.js subscribes + fires triggerGeminiCritique with
+  # isIntermediate=true + stage name. Intermediate critiques
+  # broadcast a verdict (with [Checkpoint: stage] badge) but do NOT
+  # pause the run queue — pre-td-33 final-critique behavior
+  # preserved. CLAUDE.md template grew a §9 "Stage-aware critic"
+  # section telling claude the exact sentinel shape + when to emit.
+  # Locks: triggerGeminiCritique opts param, _looksLikeCriticError
+  # error-detection regex + startsWith('(') gate, rec._lastCritique
+  # cache, retryLastCritique helper, !isIntermediate guard on queue
+  # pause, isError + isIntermediate + isRetry + stage broadcast
+  # fields, _detectStageSentinels method + per-turn _firedStages
+  # dedup + emit('stage-done'), attach.js subscription + intermediate
+  # critic call inheriting the dispatch-drift filter, POST /critique/
+  # retry route, client ↻ Retry + Checkpoint badge rendering,
+  # styles.css verdict-btn-retry + verdict-intermediate-badge +
+  # verdict-title.error, and template section naming td-33.
+  node_test_result test/td-33-stage-aware-critic-and-retry.test.js "test/td-33-stage-aware-critic-and-retry.test.js (22 cases — incl. r1 Gemini-critique catch: queue-pause AFTER critic + Dismiss on error)"
   # fr-81 Phase A: the actual ingest direction. Phase 1 only handled
   # outbound (/feature, /bug write issues upstream). The user-reported
   # gap (Gemini's critique on the previous fr-94 Phase 3 diff: "this

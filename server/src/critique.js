@@ -56,16 +56,66 @@ function _loadProjectCriticRules(rec) {
   }
 }
 
-async function triggerGeminiCritique(sessionId, session, item, diff, claudeOutput) {
-  // Pause the run queue immediately so no other queue items dispatch during review
+// td-33: critic-error detection. When the SDK returns an envelope like
+// "(Gemini call failed: ...)" / "(Gemini API key missing...)" / etc.,
+// the critique payload is unusable and we want to surface a ↻ Retry
+// affordance instead of a malformed verdict. The wrappers consistently
+// emit a parenthesised "(X failed: ...)" or "(X error: ...)" shape;
+// the same pattern catches missing-key sentinels too. Any string that
+// fits is broadcast with isError=true so the client renders the retry
+// button + skips the run-queue-pause logic (a verdict that never
+// happened can't gate a queue advance).
+function _looksLikeCriticError(critique) {
+  const s = String(critique || '').trim();
+  if (!s) return true;                              // empty verdict = error
+  // The wrappers prefix with "(": "(Gemini call failed: ...)",
+  // "(Gemini API key missing...)", "(no Gemini key provided)", etc.
+  if (!s.startsWith('(')) return false;
+  return /failed|missing|error|invalid|timeout|rate.?limit|quota|503|429|401|400/i.test(s);
+}
+
+async function triggerGeminiCritique(sessionId, session, item, diff, claudeOutput, opts = {}) {
+  // td-33: opts.isIntermediate flags a stage-checkpoint critique fired
+  // mid-run (claude announced [stage: analyze done] / [stage: code
+  // done] / [stage: verify done] in its assistant text). Intermediate
+  // critiques broadcast for the user's awareness but do NOT pause the
+  // run queue — pausing on every stage transition would freeze
+  // multi-step work behind a sequence of approvals. Only the FINAL
+  // critique (the one fired on turn_result success) gates queue
+  // advance, matching pre-td-33 behavior.
+  const isIntermediate = !!(opts && opts.isIntermediate);
+  const stage = (opts && opts.stage) || null;
+  const isRetry = !!(opts && opts.isRetry);
+
   const rec = sessionsMod.getSessionRecord(sessionId);
+  // td-33 r1 (Gemini critique catch — 2026-06-03): the original
+  // ordering paused the queue BEFORE running the critic. That meant
+  // a critic-error result (Gemini 503, missing key, etc.) left the
+  // queue paused with only a ↻ Retry button — if retries kept
+  // failing, the user was stuck. The pause now happens AFTER the
+  // critic returns, gated on `!isError` so error verdicts don't
+  // freeze the queue. The window between turn_result and the pause
+  // is small (one Gemini API call, ~5-60s) and harmless: the
+  // critique gate in attach.js returns early on triggerGeminiCritique
+  // success so _advanceRunQueue isn't called during that window.
+
+  // td-33 (A — retry support): cache the inputs on rec so the ↻ Retry
+  // button can re-fire this exact critique without round-tripping the
+  // full diff back through the client. Cache is overwritten on each
+  // fire (we only support retrying the MOST RECENT critique — older
+  // ones are out of scope per "no speculative features").
   if (rec) {
-    rec.runQueuePaused = true;
+    rec._lastCritique = {
+      itemId: item && item.id,
+      itemSnapshot: item,
+      diff,
+      claudeOutput,
+      isIntermediate,
+      stage,
+      firedAt: new Date().toISOString(),
+    };
     sessionsMod.saveStore();
   }
-  
-  // Broadcast queue update to clients so they know it is paused
-  session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
 
   // Resolve critic plugin dynamically (default to rec.criticModel, then env, then gemini)
   const criticId = (rec && rec.criticModel) || process.env.MYCO_CRITIC_MODEL || 'gemini';
@@ -108,7 +158,16 @@ If you disagree, write a clear, concise markdown list of issues/bugs and suggest
     ? `${basePrompt}\n\n=== Project-specific critic rules (from _myco_/critic.md) ===\nThese extend, but never override, the above instructions.\n\n${projectCriticRules}`
     : basePrompt;
 
-  const userPrompt = `
+  // td-33 (B — stage-aware critic): intermediate critiques get a
+  // checkpoint preamble so Gemini calibrates correctly. The end-of-
+  // run critique still expects "all work done"; an intermediate one
+  // is reviewing partial progress + should flag obvious issues only
+  // without expecting completeness. Same INSUFFICIENT INFORMATION
+  // opt-out applies either way.
+  const checkpointHeader = isIntermediate
+    ? `\n[CHECKPOINT REVIEW — STAGE: ${String(stage || 'unknown').toUpperCase()}]\nThis is a mid-run checkpoint, not the final review. Claude is currently working on this item — the diff reflects partial progress through the ${stage || 'current'} stage. Flag obvious issues + missing pieces; do NOT mark INSUFFICIENT INFORMATION for "work isn't done yet" because that's expected. The next stage will produce a follow-up critique.\n`
+    : '';
+  const userPrompt = `${checkpointHeader}
 Task to accomplish: ${item.text}
 Claude's explanation: ${claudeOutput}
 
@@ -116,26 +175,66 @@ Claude's explanation: ${claudeOutput}
 ${diff}
 `;
 
-  console.log(`[critique] Invoking critic "${critic.name}" (${critic.id}) for item ${item.id}...`);
+  const label = isIntermediate ? `intermediate-${stage}` : 'final';
+  console.log(`[critique] Invoking critic "${critic.name}" (${critic.id}) for item ${item.id} (${label}${isRetry ? ', retry' : ''})...`);
 
   // Run the critique stateless completion
   const critique = await critic.runCritique(userPrompt, systemPrompt);
-  const isAgreed = critique.includes('✓ AGREED');
+  const isError = _looksLikeCriticError(critique);
+  const isAgreed = !isError && critique.includes('✓ AGREED');
 
-  console.log(`[critique] "${critic.name}" critique complete for ${item.id}. Agreement=${isAgreed}`);
+  console.log(`[critique] "${critic.name}" critique complete for ${item.id} (${label}). Agreement=${isAgreed} isError=${isError}`);
 
-  // Broadcast the critique event over WebSockets with brand metadata
+  // td-33 r1: pause the run queue NOW (only for non-error, non-
+  // intermediate critiques). Error verdicts intentionally leave the
+  // queue free so the user isn't trapped by a 503-retry loop.
+  if (rec && !isIntermediate && !isError) {
+    rec.runQueuePaused = true;
+    sessionsMod.saveStore();
+    session.emit('state-update', { kind: 'runQueue', state: runQueue.getQueueState(rec) });
+  }
+
+  // Broadcast the critique event over WebSockets with brand metadata.
+  // td-33: isError lets the client render a ↻ Retry button; isIntermediate
+  // lets the client render a [Checkpoint: <stage>] badge + skip the
+  // run-queue-pause-banner. The diff is included so a future client
+  // could expose "diff at checkpoint" if useful.
   session.emit('state-update', {
     kind: 'critique-review',
     itemId: item.id,
     hasDisagreement: !isAgreed,
+    isError,
+    isIntermediate,
+    isRetry,
+    stage,
     critique: critique,
     diff: diff,
     criticName: critic.name,
-    criticId: critic.id
+    criticId: critic.id,
   });
 }
 
+// td-33 (A — retry support): re-fire the most recently cached
+// critique inputs for this session. Returns true on success, false
+// when there's nothing to retry (e.g. server restarted + cache lost,
+// or no critique has ever fired on this session). The retried
+// critique broadcasts with isRetry=true so the client can render a
+// "retrying…" → fresh verdict transition.
+async function retryLastCritique(sessionId, session) {
+  const rec = sessionsMod.getSessionRecord(sessionId);
+  if (!rec || !rec._lastCritique) return false;
+  const last = rec._lastCritique;
+  if (!last.itemSnapshot || !last.itemId) return false;
+  await triggerGeminiCritique(sessionId, session, last.itemSnapshot, last.diff, last.claudeOutput, {
+    isIntermediate: last.isIntermediate,
+    stage: last.stage,
+    isRetry: true,
+  });
+  return true;
+}
+
 module.exports = {
-  triggerGeminiCritique
+  triggerGeminiCritique,
+  retryLastCritique,
+  _looksLikeCriticError,
 };

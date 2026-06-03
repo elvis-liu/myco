@@ -832,6 +832,17 @@ class AgentSession extends EventEmitter {
           // of the default chat-history WS frame to avoid duplicate
           // renders on attach.
           this._persistAssistantTextToRecChat(txt);
+          // td-33 (B — stage-aware critic): scan claude's assistant
+          // text for stage-boundary sentinels emitted per the
+          // critic.md / best-practices-template directive. When claude
+          // says "[stage: analyze done]" / "[stage: code done]" /
+          // "[stage: verify done]" mid-run, fire a `stage-done` event
+          // on the session bus so attach.js can snapshot the diff +
+          // trigger a mid-run checkpoint critique. Each stage is
+          // emitted at most once per turn — duplicate sentinels in
+          // the same text block (or in rapid sequence within a turn)
+          // are deduped via this._firedStages.
+          this._detectStageSentinels(txt);
         } else if (block.type === 'tool_use') {
           this.openToolCalls.set(block.id, {
             name: block.name,
@@ -900,6 +911,11 @@ class AgentSession extends EventEmitter {
       // Reset the per-turn accumulator now that the turn is done so
       // the next turn starts clean.
       this._currentTurnAssistantText = '';
+      // td-33 (B): clear the per-turn stage-fired set so the next turn
+      // can re-fire any stage. (Within a single turn we dedup; across
+      // turns it's a fresh slate — claude may re-do analyze/code/verify
+      // as the conversation evolves and each pass deserves a critique.)
+      this._firedStages = null;
       // bug-40: the turn produced a result, so the in-flight user message
       // was processed — drop it so a later recovery can't redeliver a turn
       // that's already been answered.
@@ -1706,6 +1722,46 @@ class AgentSession extends EventEmitter {
     // stream (assistant_text card) is the live render channel; emitting
     // 'chat' would produce a duplicate bubble next to the card.
     console.log(`[persist-chat] ${this.sessionId} mirrored assistant_text (${trimmed.length} chars) to rec.chat fromAgent:true${msg.meta.kind === 'clarify-reply' ? ' (clarify-reply)' : ''}`);
+  }
+
+  // td-33 (B — stage-aware critic): scan claude's assistant_text for
+  // stage-boundary sentinels emitted per the critic.md +
+  // best-practices-template directive. Sentinel grammar (case-
+  // insensitive, whitespace-tolerant):
+  //     [stage: analyze done]
+  //     [stage: code done]
+  //     [stage: verify done]
+  //
+  // The matching set is fixed at the three stages td-33 names — we
+  // do NOT accept arbitrary stage strings (no speculative features;
+  // claude could otherwise spam the critic with self-invented stages
+  // like "[stage: think done]"). Each stage fires AT MOST ONCE PER
+  // TURN — duplicates in the same text block (or across multiple
+  // assistant_text blocks within the same turn) are deduped via
+  // this._firedStages. The set is cleared on turn_result so the next
+  // turn can re-fire any stage.
+  //
+  // Emits `stage-done` on the session bus with { stage }; attach.js's
+  // _registerExternalSession subscribes and triggers a checkpoint
+  // critique via triggerGeminiCritique({ isIntermediate: true,
+  // stage }).
+  _detectStageSentinels(text) {
+    if (!text || typeof text !== 'string') return;
+    if (!this._firedStages) this._firedStages = new Set();
+    // RegExp.exec in a loop gathers every match so we don't miss a
+    // claude reply that announces two stages back-to-back (e.g.
+    // "[stage: analyze done] ... [stage: code done]" in a single
+    // text block).
+    const re = /\[\s*stage\s*:\s*(analyze|code|verify)\s+done\s*\]/gi;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const stage = m[1].toLowerCase();
+      if (this._firedStages.has(stage)) continue;
+      this._firedStages.add(stage);
+      console.log(`[td-33] session ${this.sessionId} fired stage-done: ${stage}`);
+      try { this.emit('stage-done', { stage }); }
+      catch (err) { console.error(`[td-33] stage-done emit failed: ${err.message}`); }
+    }
   }
 
   // Read up to the last MAX_EVENTS events from <cwd>/_myco_/

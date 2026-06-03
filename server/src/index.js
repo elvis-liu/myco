@@ -1472,6 +1472,31 @@ app.get('/sessions/:id/remote-issues', async (req, res) => {
   }
 });
 
+// td-33 (A — Retry button): re-fire the most recently cached critique
+// for this session. When the critic returns a transient error (Gemini
+// 503, missing key, network blip), the verdict panel grows a ↻ Retry
+// button that POSTs here. The server pulls rec._lastCritique (stamped
+// by triggerGeminiCritique on every fire) and re-runs against the
+// SAME diff + claudeOutput + item so retries are deterministic.
+// Auth: viewer-gated. The retry doesn't change git state; it just
+// re-asks Gemini. Returns 404 when there's nothing to retry (e.g.
+// fresh session, or server restarted between fire + retry).
+app.post('/sessions/:id/critique/retry', async (req, res) => {
+  const ctx = fileApiPreamble(req, res, 'viewer');
+  if (!ctx) return;
+  const critique = require('./critique');
+  const attachMod = require('./attach');
+  const session = attachMod.getSession && attachMod.getSession(ctx.id);
+  if (!session) return res.status(404).json({ error: 'no live session — attach first' });
+  try {
+    const ok = await critique.retryLastCritique(ctx.id, session);
+    if (!ok) return res.status(404).json({ error: 'no critique on file to retry' });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: redact(err.message) });
+  }
+});
+
 // Plan / Arch / Test artifact routes — see server/src/artifacts.js for the
 // route bodies. They need fileApiPreamble (defined above) plus the
 // chat-dispatch hooks; passing them in keeps artifacts.js decoupled from

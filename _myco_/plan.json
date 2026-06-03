@@ -363,7 +363,7 @@
       "id": "dd9b5676e094",
       "text": "the plan/arch/test/file explorer icons are not bringing up the right tab",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-15T16:27:28.587Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -2566,7 +2566,7 @@
       "id": "bug-26",
       "text": "**Problem:** Auto-scroll-to-latest interrupts the user when they've manually scrolled up to read earlier messages.\n**Expected:** If the user has manually scrolled up, suppress auto-scroll-to-latest so they can keep reading.\n**Actual:** New messages force a scroll to the bottom regardless of the user's scroll position.",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-21T22:44:13.696Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -2842,7 +2842,7 @@
       "id": "bug-32",
       "text": "Chat pane keep scroll to the latest msg as they come making it difficult for user who are reading the history",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-23T03:57:07.157Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -3876,7 +3876,7 @@
       "id": "bug-40",
       "text": "Special chars in prompt trigger 400 error on thinking/redacted_thinking blocks",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-29T01:25:49.287Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -3902,7 +3902,14 @@
       "voters": [
         "kkrazy"
       ],
-      "comments": [],
+      "comments": [
+        {
+          "id": "4cc0227d9e43",
+          "user": "kkrazy",
+          "text": "the type something option doesn't provide a text field for input",
+          "ts": "2026-06-03T03:51:55.009Z"
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "allow cancel or free input for user questions, right now if none of the options matches user intent, there is no way to adjust, the entire process will stuck if I just hit \"esc\"",
@@ -4006,7 +4013,7 @@
       "id": "bug-43",
       "text": "HUD and \"critic: gemini\" button overflow on mobile, crowding text input",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-31T09:26:41.729Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -4025,7 +4032,7 @@
       "id": "bug-44",
       "text": "Config page not visible on mobile until a session is opened",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-05-31T10:06:37.468Z",
       "addedBy": "kkrazy",
       "source": "user",
@@ -4372,7 +4379,7 @@
       "id": "bug-47",
       "text": "Guest users see empty file explorer despite having view permission",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-06-02T00:11:21.089Z",
       "addedBy": "labxnow",
       "source": "user",
@@ -4432,7 +4439,7 @@
       "id": "bug-48",
       "text": "Handle `system` events with `task_progress` / `task_started` subtypes in agent frame handler",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-06-02T03:47:51.658Z",
       "addedBy": "labxnow",
       "source": "user",
@@ -4471,7 +4478,7 @@
       "id": "bug-49",
       "text": "Replace plan-item trash button with close action; remove checkbox close path",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-06-02T13:57:48.569Z",
       "addedBy": "labxnow",
       "source": "user",
@@ -4532,7 +4539,7 @@
       "id": "fr-92",
       "text": "Map mobile swipe up/down to arrow keys for composer history navigation",
       "layer": "Feature",
-      "done": false,
+      "done": true,
       "addedAt": "2026-06-02T14:22:59.791Z",
       "addedBy": "labxnow",
       "source": "user",
@@ -4742,7 +4749,7 @@
       "id": "bug-51",
       "text": "Plan item ID wraps in mobile HUD as time ticker grows",
       "layer": "Bug",
-      "done": false,
+      "done": true,
       "addedAt": "2026-06-02T23:27:14.360Z",
       "addedBy": "labxnow",
       "source": "user",
@@ -4791,8 +4798,21 @@
       "addedAt": "2026-06-03T00:57:44.609Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
-      "comments": [],
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "e1dee62d17ce",
+          "user": "kkrazy",
+          "text": "also when experienc error such as 503 (high demand), it should provide an button to retry.",
+          "ts": "2026-06-03T03:56:40.310Z",
+          "meta": {
+            "editedBy": "kkrazy",
+            "editedAt": "2026-06-03T03:58:34.824Z"
+          }
+        }
+      ],
       "meta": {
         "rewriteRequested": "long",
         "originalText": "critic should kick in at each stage, including the analyze, code and verify, not just the last one after everything is finished",
