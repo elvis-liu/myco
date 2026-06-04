@@ -5313,7 +5313,18 @@
       "source": "user",
       "voters": [],
       "comments": []
+    },
+    {
+      "id": "bug-64",
+      "text": "Final critique on turn_result overwrites an unresolved intermediate verdict — bug-61's gates are incomplete. User-reported (verbatim): 'before the first stage (analyze) stage verdict is accepted, the overall verdict is also popped up. the process should be paused until an verdict is accepted.' Root cause: bug-61 server gate only checks stageState in the stage-done handler (attach.js:190); the FINAL critique on turn_result success fires from a separate code path (attach.js:298 IIFE) that doesn't check stageState. Symmetrically, bug-61's client guard exempts `!msg.isIntermediate` (finals) so the client doesn't block replacement either. Empirically observed on myco4 (cloned kkrazy/myco.git post Option A so the per-session CLAUDE.md has §9; claude IS emitting [stage: X done] sentinels). The model still continues all 3 stages in one turn; bug-61 drops the 2nd + 3rd intermediate sentinels (good), but the final critique on turn_result fires + overwrites the analyze verdict. Fix: (1) server-side — in attach.js's turn_result success IIFE, before calling triggerGeminiCritique with the final intent, check stageState; if status is awaiting_verdict/awaiting_accept for an intermediate stage, DEFER the final critique (store on rec) instead of firing. When the user resolves the intermediate (via /critique/resolve with accept-stage/fix-stage OR clearActiveRunItem with reason discard), fire any pending deferred final. (2) client-side — extend bug-61 critique-review WS handler so a FINAL broadcast does NOT replace an unresolved intermediate verdict either; instead queue or buffer it. Paired with the server fix, this is the race-safety net.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-04T06:03:41.073Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
     }
   ],
-  "updatedAt": "2026-06-04T05:39:01.632Z"
+  "updatedAt": "2026-06-04T06:03:41.073Z"
 }

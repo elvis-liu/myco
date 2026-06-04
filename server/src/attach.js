@@ -372,6 +372,40 @@ function _registerExternalSession(sessionId, session) {
                     const planArtifact = rec.artifacts && rec.artifacts.plan;
                     const item = planArtifact && Array.isArray(planArtifact.items) && planArtifact.items.find(it => it.id === active.itemId);
                     if (item) {
+                      // bug-64: parallel hole to bug-61's stage-done
+                      // guard. bug-61 blocks subsequent stage-done
+                      // sentinels when the previous verdict is
+                      // unresolved, but the FINAL critique on
+                      // turn_result success fires from THIS code path
+                      // (not the stage-done handler) — bug-61's guard
+                      // didn't cover it. Empirically the user observed:
+                      //   "before the first stage (analyze) stage
+                      //    verdict is accepted, the overall verdict is
+                      //    also popped up. the process should be
+                      //    paused until an verdict is accepted."
+                      // Fix: defer the final critique if an
+                      // intermediate stageState is still unresolved.
+                      // Store the payload on rec._deferredFinalCritique
+                      // — when the user resolves the intermediate
+                      // (accept-stage / fix-stage via /critique/resolve
+                      // OR clearActiveRunItem on Discard), the
+                      // deferred critique fires from there. The defer
+                      // is single-slot (we never have >1 unresolved
+                      // intermediate thanks to bug-61's drop guard).
+                      const ssCheck = stageStateMod.getStageState(item);
+                      if (ssCheck && (ssCheck.status === 'awaiting_verdict' || ssCheck.status === 'awaiting_accept')) {
+                        console.log(`[bug-64] deferring final critique for ${active.itemId} — current stageState is ${ssCheck.stage}.${ssCheck.status}; will fire on resolve`);
+                        rec._deferredFinalCritique = {
+                          itemId: active.itemId,
+                          item,                       // captured snapshot
+                          diff: fullDiff,
+                          claudeOutput: ev.result || '',
+                          changedEntries: newEntries,
+                          deferredAt: new Date().toISOString(),
+                        };
+                        sessionsMod.saveStore();
+                        return;                     // queue stays paused until deferred fires
+                      }
                       const { triggerGeminiCritique } = require('./critique');
                       // td-33 r2 (context enrichment): pass the
                       // changed entries through so the critic prompt
@@ -2108,6 +2142,16 @@ function clearActiveRunItem(sessionId, session, opts = {}) {
   // discard. Broadcasts the cleared state so other devices clear
   // their HUD display of "X awaiting accept on Y stage."
   _clearAndBroadcastStageState(sessionId, session, finishedItemId);
+  // bug-64: clear any deferred final critique. The run is ending
+  // (discard / verify-accept) — no need to fire the deferred. If
+  // we left it set, the next dispatch on this rec could erroneously
+  // pick it up.
+  const recForDefer = sessionsMod.getSessionRecord(sessionId);
+  if (recForDefer && recForDefer._deferredFinalCritique) {
+    console.log(`[bug-64] clearActiveRunItem clearing pending _deferredFinalCritique for ${finishedItemId} (reason=${reason})`);
+    recForDefer._deferredFinalCritique = null;
+    sessionsMod.saveStore();
+  }
   // Advance the queue if this item was the head running entry. The
   // turn_result handler used to fire this on every success; with
   // bug-57 we defer it to /run/done so multi-stage runs don't

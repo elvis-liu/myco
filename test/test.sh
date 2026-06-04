@@ -3225,6 +3225,44 @@ test_chat_window() {
   # + exempts isRetry + exempts !isIntermediate (finals) + exempts
   # isError + short-circuits via return; bug-61 marker in both files.
   node_test_result test/bug-61-pause-enforcement.test.js "test/bug-61-pause-enforcement.test.js (10 cases)"
+  # bug-64 (final critique on turn_result overwrites unresolved
+  # intermediate verdict — bug-61's pause gates were incomplete):
+  # user-reported (myco4) "before the first stage (analyze) stage
+  # verdict is accepted, the overall verdict is also popped up. the
+  # process should be paused until an verdict is accepted." Root
+  # cause: bug-61 server gate only checks stageState in the
+  # stage-done handler; the FINAL critique on turn_result success
+  # fires from a separate code path (attach.js:298 IIFE) that
+  # didn't check stageState. Symmetrically, bug-61's client guard
+  # exempted !msg.isIntermediate so the client's critique-review
+  # handler replaced the intermediate verdict modal with the final
+  # one. Fix: two paired guards mirroring bug-61's pattern. (1)
+  # SERVER DEFER (attach.js turn_result IIFE): check stageState
+  # via stageStateMod.getStageState(item) before triggerGeminiCritique;
+  # if status is awaiting_verdict/awaiting_accept, stash the
+  # payload (itemId/item/diff/claudeOutput/changedEntries/deferredAt)
+  # in rec._deferredFinalCritique + saveStore + return. The deferred
+  # fires from critique.js::resolveCritique on reason==='accept-stage'
+  # via fire-and-forget triggerGeminiCritique then sets
+  # rec._deferredFinalCritique = null. clearActiveRunItem (Discard /
+  # verify-Accept) drops the deferred without firing. (2) CLIENT
+  # BUFFER (app.js critique-review WS handler): race-safety net.
+  # If currentIsUnresolvedIntermediate && !msg.isIntermediate &&
+  # !msg.isRetry, stash msg in state.deferredFinalCritique + return.
+  # New _replayDeferredFinalCritique() helper surfaces the buffered
+  # as if just arrived; called from critique-resolved WS handler,
+  # Dismiss button, Accept Stage button. Discard / Fix (final) / Fix
+  # Stage explicitly drop state.deferredFinalCritique = null because
+  # the deferred is stale (run abandoned / claude redoing). Accept
+  # Claude (final) needs no action — by definition no buffer exists
+  # when the user is acting on the final itself. Locks: server-side
+  # getStageState read before triggerGeminiCritique, payload shape,
+  # return short-circuit, resolveCritique accept-stage branch +
+  # triggerGeminiCritique fire + null clear, clearActiveRunItem
+  # null clear; client-side buffer assignment + return, replay
+  # helper signature + render call, ≥3 helper call sites, ≥3
+  # buffer-drop sites; bug-64 marker in all 3 files.
+  node_test_result test/bug-64-final-critique-defer.test.js "test/bug-64-final-critique-defer.test.js (14 cases)"
   # NOTE: the "bug-53" reference in the comment block below is a
   # stale label from an older HUD-stuck issue (eventually shipped
   # under a different plan-item number). It is NOT the same bug as

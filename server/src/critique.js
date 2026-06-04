@@ -522,6 +522,46 @@ function resolveCritique(sessionId, session, opts = {}) {
       console.error(`[fr-96] resolveCritique → stageState transition (${reason}) failed: ${err.message}`);
     }
   }
+  // bug-64: fire any deferred final critique. The turn_result-success
+  // IIFE in attach.js may have deferred the final critique because an
+  // intermediate verdict was still unresolved at the time. Now that
+  // the user has resolved an intermediate (accept-stage / fix-stage /
+  // accept on the final pane), check rec._deferredFinalCritique and
+  // fire it if present. This is what makes the user see the
+  // sequence "intermediate verdict → review → accept → final
+  // verdict" instead of the buggy "intermediate verdict overwritten
+  // by final before review."
+  //
+  // We only fire on accept-stage — the natural "user reviewed +
+  // moved on" signal. Other reasons:
+  //   - fix-stage: user wants the stage redone; the deferred final
+  //     should stay pending until the redone stage is also accepted.
+  //   - dismiss: pane closed without decision; don't fire.
+  //   - discard: handled by clearActiveRunItem which clears the
+  //     deferred (run abandoned).
+  //   - accept (final pane): the final critique is the one being
+  //     accepted, so no deferred needs to fire.
+  if (reason === 'accept-stage') {
+    try {
+      const rec = sessionsMod.getSessionRecord(sessionId);
+      if (rec && rec._deferredFinalCritique && rec._deferredFinalCritique.itemId === itemId) {
+        const deferred = rec._deferredFinalCritique;
+        rec._deferredFinalCritique = null;
+        sessionsMod.saveStore();
+        console.log(`[bug-64] firing deferred final critique for ${itemId} (deferred at ${deferred.deferredAt})`);
+        // Fire-and-forget — don't await. The resolveCritique caller
+        // (the /critique/resolve route) shouldn't block on the
+        // critic's API call.
+        triggerGeminiCritique(sessionId, session, deferred.item, deferred.diff, deferred.claudeOutput, {
+          changedEntries: deferred.changedEntries,
+        }).catch((err) => {
+          console.error(`[bug-64] deferred final critique fire failed: ${err.message}`);
+        });
+      }
+    } catch (err) {
+      console.error(`[bug-64] resolveCritique deferred-fire check failed: ${err.message}`);
+    }
+  }
   return true;
 }
 

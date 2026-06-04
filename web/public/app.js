@@ -7407,6 +7407,25 @@ function _applyStateUpdate(msg) {
       console.warn(`[bug-61] dropping incoming intermediate critique-review (stage=${msg.stage}) — current intermediate verdict (stage=${state.critiqueReview.stage}) is unresolved; user must accept/fix existing verdict first`);
       return;
     }
+    // bug-64: parallel hole — bug-61's guard only blocks incoming
+    // INTERMEDIATE over unresolved intermediate. The FINAL critique
+    // on turn_result success comes through as !isIntermediate, which
+    // the bug-61 guard passes — so the final verdict overwrites the
+    // intermediate. User-reported empirically on myco4: "before the
+    // first stage (analyze) stage verdict is accepted, the overall
+    // verdict is also popped up. the process should be paused until
+    // an verdict is accepted." Fix: BUFFER the incoming final into
+    // state.deferredFinalCritique instead of replacing. The verdict-
+    // pane button handlers replay it after the current verdict is
+    // resolved (via _replayDeferredFinalCritique) — so the user sees
+    // the sequence "intermediate → review → resolve → final" instead
+    // of the buggy overlap. The server-side bug-64 defer also
+    // catches this case; this client buffer is the race-safety net.
+    if (currentIsUnresolvedIntermediate && !msg.isIntermediate && !msg.isRetry) {
+      console.warn(`[bug-64] buffering incoming FINAL critique-review — current intermediate verdict (stage=${state.critiqueReview.stage}) is unresolved; will replay after resolve`);
+      state.deferredFinalCritique = msg;
+      return;
+    }
     state.awaitingVerdict = true;
     state.critiqueReview = msg;
     _renderVerdictPanel();
@@ -7425,6 +7444,13 @@ function _applyStateUpdate(msg) {
       state.critiqueReview = null;
       _renderVerdictPanel();
       _updateTaskHUD();
+      // bug-64: after clearing the resolved verdict, replay any
+      // buffered final critique. If a final critique arrived
+      // while an intermediate was showing (race past the server's
+      // defer guard), it was stashed in state.deferredFinalCritique
+      // instead of replacing. Now that the intermediate is cleared,
+      // surface the buffered final.
+      _replayDeferredFinalCritique();
     }
     return;
   }
@@ -7700,6 +7726,24 @@ function _updateTaskHUD() {
       }
     }, 1000);
   }
+}
+
+// bug-64: replay any buffered final critique that arrived while an
+// intermediate verdict was showing. Called from every site that
+// clears the current verdict (the 6 button handlers + the
+// cross-device critique-resolved WS handler). If
+// state.deferredFinalCritique is non-null, apply it as if it just
+// arrived — promotes the buffered final to be the current verdict.
+// Safe to call when nothing is buffered (just no-ops).
+function _replayDeferredFinalCritique() {
+  if (!state.deferredFinalCritique) return;
+  const buffered = state.deferredFinalCritique;
+  state.deferredFinalCritique = null;
+  console.log(`[bug-64] replaying buffered final critique-review (itemId=${buffered.itemId})`);
+  state.awaitingVerdict = true;
+  state.critiqueReview = buffered;
+  _renderVerdictPanel();
+  _updateTaskHUD();
 }
 
 function _renderVerdictPanel() {
@@ -8011,6 +8055,10 @@ function _renderVerdictPanel() {
       state.critiqueReview = null;
       _renderVerdictPanel();
       _broadcastCritiqueResolved('dismiss');
+      // bug-64: if a final critique-review was buffered (race past
+      // the server-side defer), surface it now that the intermediate
+      // is cleared.
+      _replayDeferredFinalCritique();
     });
   }
   // bug-56: ✓ Accept Stage + ⚡ Ask Claude to Fix Stage — intermediate
@@ -8048,6 +8096,13 @@ function _renderVerdictPanel() {
       // advance signal Claude reads on the next turn; fr-96 will
       // formalize this into a server-side state-machine transition.
       sendChatMessage(promptText);
+      // bug-64: if a final critique was buffered locally (race past
+      // the server-side defer), replay it now. The server will ALSO
+      // fire any server-side deferred via the /critique/resolve POST
+      // — having both paths is belt-and-braces; whichever lands
+      // first wins, the other's broadcast becomes a no-op via the
+      // bug-61 guard's idempotency.
+      _replayDeferredFinalCritique();
     });
   }
   const btnFixStage = panel.querySelector('.verdict-btn-fix-stage');
@@ -8061,6 +8116,11 @@ function _renderVerdictPanel() {
       _broadcastCritiqueResolved('fix-stage');
       // No /run/done — redoing a stage is "stay in the same run."
       sendChatMessage(promptText);
+      // bug-64: drop any locally-buffered final critique. The stage
+      // is being redone — the deferred is now stale (refers to the
+      // OLD claude output that the user rejected). Server-side
+      // bug-64 doesn't fire its deferred on fix-stage either.
+      state.deferredFinalCritique = null;
     });
   }
   // Early-return for error + intermediate paths so the legacy
@@ -8091,6 +8151,9 @@ function _renderVerdictPanel() {
       // dispatches start clean. Idempotent: server checks itemId
       // match and no-ops if the active item is something else.
       _broadcastRunDone('discard');
+      // bug-64: drop any buffered final critique. The run is
+      // abandoned; the deferred is stale.
+      state.deferredFinalCritique = null;
     } catch (err) {
       console.error('Discard action failed:', err);
     }
@@ -8104,6 +8167,10 @@ function _renderVerdictPanel() {
     _renderVerdictPanel();
     _updateTaskHUD();
     _broadcastCritiqueResolved('fix');
+    // bug-64: drop any buffered final critique. Claude is being
+    // asked to redo; the buffered deferred is for the OLD output the
+    // user rejected, so it's stale.
+    state.deferredFinalCritique = null;
 
     authedFetch(`/sessions/${encodeURIComponent(state.activeId)}/queue/resume`, { method: 'POST' }).then(() => {
       sendChatMessage(promptText);
