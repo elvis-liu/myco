@@ -1330,7 +1330,7 @@ test_new_session_readonly() {
   # transcript-autoheal and other future ensureLiveSession inserts;
   # the assertion intent ("both calls happen, in order, in the same
   # function") is preserved without bouncing on every code add.
-  grep -Pzoq "_migrateLegacyMemory\(rec\.absCwd\)[\s\S]{0,3000}spawnAgent" server/src/sessions.js \
+  grep -Pzoq "_migrateLegacyMemory\((rec\.absCwd|liveCwd)\)[\s\S]{0,3000}spawnAgent" server/src/sessions.js \
     && pass "sessions.js: ensureLiveSession invokes _migrateLegacyMemory before spawnAgent" \
     || fail "sessions.js: ensureLiveSession does not run the memory migration"
   # Smoke test the helper itself: copy a tmp fixture from a fake
@@ -1406,7 +1406,7 @@ test_status_bar_user_and_build_stamps() {
 }
 
 test_mermaid_html_init() {
-  grep -q 'mermaid.initialize' web/public/index.html && pass "mermaid init" || fail "mermaid init"
+  grep -q 'mermaid.initialize' web/public/app.js && pass "mermaid init" || fail "mermaid init"
   grep -q 'highlight.min.js' web/public/index.html && pass "highlight.js loaded" || fail "highlight.js loaded"
 }
 
