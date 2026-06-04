@@ -6,6 +6,11 @@ const { getCritic } = require('./critics');
 // above. See critics/specialties/index.js for the fan-out order +
 // gating contract.
 const { FINAL_SPECIALTIES, INTERMEDIATE_SPECIALTIES } = require('./critics/specialties');
+// bug-65: critic prompts are now loaded from .md files in
+// critics/prompts/ for easy review (no JS escape noise). The loader
+// caches on first require. See critics/prompts/index.js + the
+// sibling .md files.
+const criticPrompts = require('./critics/prompts');
 const runQueue = require('./runQueue');
 
 // td-33 r2: context enrichment caps. User-reported (verbatim):
@@ -137,47 +142,80 @@ function _buildFileContextBlock(changedEntries, recAbsCwd) {
   return header + parts.join('\n\n');
 }
 
-// td-33 r2: surface the plan item's recent iteration history so the
-// critic understands "what's been tried." A change that looks like a
-// regression in isolation may be the second-best iteration after a
-// prior approach was rejected — the critic should know.
+// td-33 r2: surface the plan item's recent run history so the
+// critic understands "what's been tried" + (critical for bug-65
+// code-stage critique) what the PREVIOUS stage's claude output was.
+// The most recent entry == the analyze-stage plan when this is the
+// code-stage critique; the most recent two == analyze + code plans
+// when this is the verify-stage critique.
+//
+// bug-65: moved item.comments out of this block (they're not "what
+// was tried" — they're user discussion + clarifications belonging
+// with the problem statement). Comments now go into _buildProblemBlock
+// at the top of userPrompt.
+// bug-65: bumped per-run summary cap 800 → 2000 chars so the
+// previous stage's plan fits without truncation (analyze plans can
+// easily exceed 800).
+//
 // Includes:
 //   · Last HISTORY_RUNS_MAX runs (most recent first) with status +
-//     summary.
-//   · Last HISTORY_COMMENTS_MAX comments (most recent first), trimmed
-//     to ~600 chars each.
+//     summary up to HISTORY_RUN_SUMMARY_CAP chars each.
 // Capped at HISTORY_BLOCK_MAX_CHARS total — overrun is truncated.
+const HISTORY_RUN_SUMMARY_CAP = 2000;          // bug-65: was 800 (inline)
 function _buildHistoryBlock(item) {
   if (!item) return '';
   const runs = Array.isArray(item.runs) ? item.runs.slice(-HISTORY_RUNS_MAX).reverse() : [];
-  const comments = Array.isArray(item.comments) ? item.comments.slice(-HISTORY_COMMENTS_MAX).reverse() : [];
-  if (runs.length === 0 && comments.length === 0) return '';
+  if (runs.length === 0) return '';
   const lines = [];
-  lines.push(`\n\n=== PLAN ITEM HISTORY (${item.id || 'unknown id'} — last ${runs.length} run${runs.length === 1 ? '' : 's'} + last ${comments.length} comment${comments.length === 1 ? '' : 's'}) ===`);
-  lines.push(`A change that looks like a regression in isolation may be the second-best iteration after a prior approach was rejected, or a follow-up to a user-reported gap. Use this history to calibrate the review.\n`);
-  if (runs.length > 0) {
-    lines.push(`--- Recent runs (most recent first) ---`);
-    for (const r of runs) {
-      const ts = r.ts || '?';
-      const status = r.status || '?';
-      const summary = String(r.summary || r.result || '').slice(0, 800);
-      lines.push(`· [${ts}] (${status}) ${summary}`);
-    }
-  }
-  if (comments.length > 0) {
-    lines.push(`\n--- Recent comments (most recent first) ---`);
-    for (const c of comments) {
-      const ts = c.ts || '?';
-      const user = c.user || '?';
-      const text = String(c.text || '').slice(0, 600);
-      lines.push(`· [${ts}] @${user}: ${text}`);
-    }
+  lines.push(`\n\n=== PLAN ITEM HISTORY (${item.id || 'unknown id'} — last ${runs.length} run${runs.length === 1 ? '' : 's'}, most recent first) ===`);
+  lines.push(`The most recent entry is claude's PREVIOUS stage output in this multi-turn run. For code-stage critique, the previous run is the analyze-stage plan; use this to verify the diff implements that plan. A change that looks like a regression in isolation may be the second-best iteration after a prior approach was rejected, or a follow-up to a user-reported gap. Use this history to calibrate the review.\n`);
+  lines.push(`--- Recent runs (most recent first) ---`);
+  for (const r of runs) {
+    const ts = r.ts || '?';
+    const status = r.status || '?';
+    const summary = String(r.summary || r.result || '').slice(0, HISTORY_RUN_SUMMARY_CAP);
+    lines.push(`· [${ts}] (${status}) ${summary}`);
   }
   let out = lines.join('\n');
   if (out.length > HISTORY_BLOCK_MAX_CHARS) {
     out = out.slice(0, HISTORY_BLOCK_MAX_CHARS) + `\n\n[...history truncated to ${HISTORY_BLOCK_MAX_CHARS} chars to fit budget]`;
   }
   return out;
+}
+
+// bug-65: build the USER-REPORTED PROBLEM block that leads the user
+// prompt. Combines item.text (the original problem statement) +
+// item.comments (user discussion + clarifications, which often
+// contain critical refinements to the original report). The critic
+// must evaluate claude's work against this combined problem
+// statement, not just the original item.text.
+//
+// Comments are surfaced most-recent first up to HISTORY_COMMENTS_MAX
+// (the existing td-33 r2 cap, preserved). Each comment is trimmed
+// to a reasonable per-comment cap to keep the block bounded.
+const PROBLEM_COMMENT_CAP_PER_ENTRY = 800;
+function _buildProblemBlock(item) {
+  if (!item) return '';
+  const lines = [];
+  lines.push(`=== USER-REPORTED PROBLEM (the criterion for your verdict) ===`);
+  lines.push(`Plan item: ${item.id || 'unknown'}${item.layer ? ` (${item.layer})` : ''}`);
+  lines.push(``);
+  lines.push(`User's report:`);
+  lines.push(String(item.text || '(no text on this plan item)'));
+  const comments = Array.isArray(item.comments) ? item.comments.slice(-HISTORY_COMMENTS_MAX).reverse() : [];
+  if (comments.length > 0) {
+    lines.push(``);
+    lines.push(`User discussion + clarifications (plan-item comments, most recent first):`);
+    for (const c of comments) {
+      const ts = c.ts || '?';
+      const user = c.user || '?';
+      const text = String(c.text || '').slice(0, PROBLEM_COMMENT_CAP_PER_ENTRY);
+      lines.push(`· [${ts}] @${user}: ${text}`);
+    }
+  }
+  lines.push(``);
+  lines.push(`YOUR JOB: evaluate whether Claude's work below solves THIS problem, taking the full discussion context into account.`);
+  return lines.join('\n');
 }
 
 async function triggerGeminiCritique(sessionId, session, item, diff, claudeOutput, opts = {}) {
@@ -237,37 +275,29 @@ async function triggerGeminiCritique(sessionId, session, item, diff, claudeOutpu
   const criticId = (rec && rec.criticModel) || process.env.MYCO_CRITIC_MODEL || 'gemini';
   const critic = getCritic(criticId);
 
-  // Critic system prompt. Calibration notes (2026-06-02):
-  //   · "INSUFFICIENT INFORMATION" opt-out: critics with broad
-  //     instructions tend to rubber-stamp when they can't actually
-  //     tell. The explicit out lets the critic admit uncertainty
-  //     instead of confabulating a plausible-but-wrong verdict.
-  //     Combined with low temperature in the model wrapper, this
-  //     catches a class of hallucination the prior prompt missed.
-  //   · Anti-speculation clause: the critic only sees the diff —
-  //     no chat history, no full file contents, no test runs. Make
-  //     that limitation explicit so it doesn't invent context.
-  //   · The "✓ AGREED" sentinel stays exactly the same string —
-  //     `isAgreed = critique.includes('✓ AGREED')` is the gate that
-  //     decides whether the run-queue auto-advances.
+  // bug-65: the basePrompt now lives in
+  // server/src/critics/prompts/base.md and is loaded via the
+  // criticPrompts loader. The framing has shifted from "elite QA
+  // auditor" (generic code review) to "plan-item-driven problem-
+  // solving validator" — the PRIMARY criterion is now "does Claude's
+  // work solve the user-reported problem?", with code quality /
+  // security / test sufficiency as secondary criteria. See base.md
+  // for the full content + the bug-65 plan item for the user
+  // report that motivated the rewrite.
   //
-  // fr-95 cache-optimized layout. `basePrompt` is the STABLE PREFIX of
-  // the system instruction across all three specialties in a single
-  // fan-out — the bit that's identical for general / test-validity /
-  // perf-security. The per-specialty `systemSuffix` (~500 chars each)
-  // is appended at the TAIL of the system instruction, NOT
-  // interleaved with the heavy user-prompt body. The user prompt
-  // (file context + history + diff + claudeOutput + follow-up) is
-  // bit-for-bit identical across the fan-out, so Gemini 2.5's prefix
-  // cache hits the heavy ~10-65 KB tail on calls 2 and 3.
-  const basePrompt = `You are an elite, independent QA and security auditor.
-Review the provided git diff against the user's original task.
-Compare Claude's changes to the original requirement.
-Identify if Claude introduced bugs, security holes, ignored edge cases, or missed requirements.
-
-td-33 r2 (user-requested context enrichment): you now have THREE inputs — (1) the diff hunks, (2) the FULL CURRENT CONTENT of each changed file (so you can see the surrounding code — imports, related functions, type usages — not just the changed lines), and (3) the plan item's recent iteration history (last few runs + comments — so you understand what's been tried). Use them together: the diff tells you WHAT changed; the file context tells you whether the change is CONSISTENT WITH THE REST OF THE FILE; the history tells you what TRADE-OFFS were already considered. You should rarely need "INSUFFICIENT INFORMATION" anymore — the context is significantly richer than the pre-r2 diff-only prompt. Reserve INSUFFICIENT INFORMATION for cases where you genuinely cannot reach a verdict (e.g. the change references an external API whose contract isn't shown).
-
-If you agree with Claude's implementation, write "✓ AGREED" on the first line, then on the lines below give a concise 2-4 sentence explanation of WHY you agree: what the change does well, which parts of the original requirement it satisfies, and any non-blocking observations or polish suggestions worth mentioning. Do not be terse — a bare "✓ AGREED" with no reasoning is unhelpful (the user has explicitly asked the critic to show its reasoning even when approving — bug-52). If you disagree, write a clear, concise markdown list of issues/bugs and suggest corrections. Cite specific lines from the diff.`;
+  // fr-95 cache-optimized layout is preserved: `basePrompt` is the
+  // STABLE PREFIX of the system instruction across all three
+  // specialties in a single fan-out. The per-specialty `systemSuffix`
+  // (also loaded from sibling .md files per bug-65) appends at the
+  // TAIL. The user prompt (problem block + claudeOutput + diff +
+  // file context + history + follow-up) is bit-for-bit identical
+  // across the fan-out, so Gemini 2.5's prefix cache hits the heavy
+  // tail on calls 2 and 3.
+  //
+  // The "✓ AGREED" sentinel string is preserved exactly — detection
+  // (`critique.includes('✓ AGREED')`) still works. Disagreement now
+  // is explicitly signaled with "✗ DISAGREE" too (bug-65 + bug-63).
+  const basePrompt = criticPrompts.base;
 
   // fr-89: append project-specific critic rules from
   // <project>/_myco_/critic.md to the base system prompt. The file
@@ -288,15 +318,33 @@ If you agree with Claude's implementation, write "✓ AGREED" on the first line,
     ? `${basePrompt}\n\n=== Project-specific critic rules (from _myco_/critic.md) ===\nThese extend, but never override, the above instructions.\n\n${projectCriticRules}`
     : basePrompt;
 
-  // td-33 (B — stage-aware critic): intermediate critiques get a
-  // checkpoint preamble so Gemini calibrates correctly. The end-of-
-  // run critique still expects "all work done"; an intermediate one
-  // is reviewing partial progress + should flag obvious issues only
-  // without expecting completeness. Same INSUFFICIENT INFORMATION
-  // opt-out applies either way.
-  const checkpointHeader = isIntermediate
-    ? `\n[CHECKPOINT REVIEW — STAGE: ${String(stage || 'unknown').toUpperCase()}]\nThis is a mid-run checkpoint, not the final review. Claude is currently working on this item — the diff reflects partial progress through the ${stage || 'current'} stage. Flag obvious issues + missing pieces; do NOT mark INSUFFICIENT INFORMATION for "work isn't done yet" because that's expected. The next stage will produce a follow-up critique.\n`
-    : '';
+  // bug-65: stage-aware addendum. The pre-bug-65 checkpoint preamble
+  // (td-33 B) was a generic "mid-run checkpoint" header — useful for
+  // calibrating expectations, but didn't tell the critic WHAT to
+  // focus on per stage. The new stageAddendum loads the per-stage
+  // prompt from .md (server/src/critics/prompts/stage-{X}.md) which
+  // tells the critic precisely what to evaluate at this checkpoint:
+  //   · analyze stage: evaluate the PLAN against the problem
+  //     (no diff exists yet)
+  //   · code stage: verify the diff implements the analyze plan
+  //     (read the PREVIOUS run summary in history) AND solves
+  //     the user's problem
+  //   · verify stage: confirm regression net is complete; test
+  //     wired to test.sh; would catch a future re-introduction
+  //   · final (turn_result success, non-intermediate): full-run
+  //     verdict gating queue advance
+  // Each addendum is also stage-specific about what NOT to demand
+  // (e.g. "don't demand a test at analyze stage").
+  let stageAddendum;
+  if (isIntermediate) {
+    const stageLc = String(stage || 'unknown').toLowerCase();
+    if (stageLc === 'analyze') stageAddendum = criticPrompts.stageAnalyze;
+    else if (stageLc === 'code') stageAddendum = criticPrompts.stageCode;
+    else if (stageLc === 'verify') stageAddendum = criticPrompts.stageVerify;
+    else stageAddendum = criticPrompts.stageFinal;       // unknown intermediate → safest is final framing
+  } else {
+    stageAddendum = criticPrompts.stageFinal;
+  }
   // bug-52: when the user typed a follow-up prompt into the verdict
   // pane's input field, surface it as a TOP-PRIORITY instruction so
   // Gemini centers its review on that concern. Without the explicit
@@ -305,21 +353,36 @@ If you agree with Claude's implementation, write "✓ AGREED" on the first line,
   const userFollowupBlock = userFollowup
     ? `\n\n[USER FOLLOW-UP — give this priority over the generic review]\nThe user has typed the following concern they want you to look into specifically:\n"${userFollowup}"\nAddress this concern explicitly in your reasoning. If the diff doesn't have enough information to answer it, say so plainly.\n`
     : '';
-  // td-33 r2: build the new context blocks. opts.changedEntries is
+  // td-33 r2: build the file-context block. opts.changedEntries is
   // passed through from attach.js's critique gate (the same list
-  // listChangedFiles returns, filtered by the baseline-dirty exclusion).
-  // recAbsCwd needed for absolute file resolution.
+  // listChangedFiles returns, filtered by the baseline-dirty
+  // exclusion). recAbsCwd needed for absolute file resolution.
   const fileContextBlock = _buildFileContextBlock(
     opts && Array.isArray(opts.changedEntries) ? opts.changedEntries : [],
     rec && rec.absCwd
   );
   const historyBlock = _buildHistoryBlock(item);
+  // bug-65: build the problem block (item.text + item.comments).
+  // Comments moved from history block (where td-33 r2 placed them)
+  // to here because they are user-discussion that refines the
+  // problem statement, not "what's been tried."
+  const problemBlock = _buildProblemBlock(item);
 
-  const userPrompt = `${checkpointHeader}
-Task to accomplish: ${item.text}
-Claude's explanation: ${claudeOutput}
+  // bug-65: userPrompt restructure. The PROBLEM now leads (it's the
+  // criterion against which everything else is judged). The
+  // stageAddendum precedes the problem block to tell the critic
+  // what kind of evaluation they're doing this turn. Claude's
+  // explanation, diff, file context, and history follow as
+  // supporting evidence. The user follow-up block (bug-52) stays
+  // at the end as the highest-priority steerable.
+  const userPrompt = `${stageAddendum}
 
-=== Staged Git Changes ===
+${problemBlock}
+
+=== CLAUDE'S EXPLANATION (this turn) ===
+${claudeOutput}
+
+=== STAGED GIT CHANGES ===
 ${diff}
 ${fileContextBlock}${historyBlock}${userFollowupBlock}`;
 

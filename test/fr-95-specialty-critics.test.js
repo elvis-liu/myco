@@ -54,8 +54,18 @@ t('server/src/critics/specialties/general.js exports {id:"general", name, system
     'general specialty must export a name string.');
   assert.ok(/systemSuffix:/.test(src),
     'general specialty must export a systemSuffix string (the focus suffix appended to the shared system prompt).');
-  assert.ok(/SPECIALTY FOCUS/.test(src),
-    'general.systemSuffix must contain a "SPECIALTY FOCUS" header so the critic can find its instructions.');
+  // bug-65 follow-up: the SPECIALTY FOCUS header content was moved
+  // OUT of the .js (inline systemSuffix template string) and INTO a
+  // sibling general.md file (loaded via fs.readFileSync). The
+  // contract this test locks (the suffix mentions "SPECIALTY
+  // FOCUS") is now satisfied by the .md content; check both
+  // locations for forward compat.
+  const md = (() => {
+    try { return _read('server/src/critics/specialties/general.md'); }
+    catch { return ''; }
+  })();
+  assert.ok(/SPECIALTY FOCUS/.test(src) || /SPECIALTY FOCUS/.test(md),
+    'general systemSuffix (either inline in general.js OR loaded from general.md sibling) must contain a "SPECIALTY FOCUS" header so the critic can find its instructions.');
 });
 
 t('server/src/critics/specialties/test-validity.js exports {id:"test-validity", name, systemSuffix}', () => {
@@ -64,9 +74,13 @@ t('server/src/critics/specialties/test-validity.js exports {id:"test-validity", 
     'test-validity specialty must export id:"test-validity".');
   assert.ok(/systemSuffix:/.test(src),
     'test-validity specialty must export a systemSuffix string.');
-  // Domain content — must mention what test-validity actually checks.
-  assert.ok(/[Tt]autologic|[Ww]ould have CAUGHT|wrong[- ]layer|[Mm]issing[- ]coverage/i.test(src),
-    'test-validity.systemSuffix must mention what the critic is checking (tautological tests, would-have-caught, wrong layer, missing coverage) — these are the failure modes it owns.');
+  // bug-65 follow-up: domain content was moved to test-validity.md
+  // sibling (loaded via fs.readFileSync in the .js). Check both
+  // locations for forward compat.
+  const md = (() => { try { return _read('server/src/critics/specialties/test-validity.md'); } catch { return ''; } })();
+  const haystack = src + '\n' + md;
+  assert.ok(/[Tt]autologic|[Ww]ould have CAUGHT|wrong[- ]layer|[Mm]issing[- ]coverage/i.test(haystack),
+    'test-validity systemSuffix (inline in .js OR loaded from .md sibling) must mention what the critic is checking (tautological tests, would-have-caught, wrong layer, missing coverage).');
 });
 
 t('server/src/critics/specialties/perf-security.js exports {id:"perf-security", name, systemSuffix}', () => {
@@ -75,11 +89,14 @@ t('server/src/critics/specialties/perf-security.js exports {id:"perf-security", 
     'perf-security specialty must export id:"perf-security".');
   assert.ok(/systemSuffix:/.test(src),
     'perf-security specialty must export a systemSuffix string.');
-  // Domain content — perf criteria + security criteria.
-  assert.ok(/O\(N|n\+1|sync.?fs|unbounded/i.test(src),
-    'perf-security.systemSuffix must mention concrete perf-regression patterns (O(N²), n+1, sync-fs, unbounded) — not abstract scolding.');
-  assert.ok(/PAT|token|secret|injection|sanitiz|CSRF|CORS|innerHTML|child_process/i.test(src),
-    'perf-security.systemSuffix must mention concrete security patterns (secrets logged, injection, sanitization, CSRF, etc.) — not theoretical scolding.');
+  // bug-65 follow-up: domain content was moved to perf-security.md
+  // sibling. Check both locations.
+  const md = (() => { try { return _read('server/src/critics/specialties/perf-security.md'); } catch { return ''; } })();
+  const haystack = src + '\n' + md;
+  assert.ok(/O\(N|n\+1|sync.?fs|unbounded/i.test(haystack),
+    'perf-security systemSuffix (inline OR .md) must mention concrete perf patterns (O(N²), n+1, sync-fs, unbounded).');
+  assert.ok(/PAT|token|secret|injection|sanitiz|CSRF|CORS|innerHTML|child_process/i.test(haystack),
+    'perf-security systemSuffix (inline OR .md) must mention concrete security patterns (secrets logged, injection, etc.).');
 });
 
 // ── 2. Specialty registry wires the fan-out order + intermediate-only-general gate ──

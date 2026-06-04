@@ -24,46 +24,17 @@
 // owns the deeper pass on perf-regressions + concrete security
 // risks, with sharper expectations on specificity.
 
+// bug-65: systemSuffix extracted to perf-security.md sibling (loaded
+// via fs.readFileSync at module-load time). Edit perf-security.md to
+// change the prompt; server restart picks up the new content. Also
+// bug-63 (in flight): the "✓ AGREED is INFORMATIONAL" framing was
+// REMOVED — Perf/Security findings now participate in the overall
+// hasDisagreement aggregation per the bug-63 flip.
+const fs = require('fs');
+const path = require('path');
+
 module.exports = {
   id: 'perf-security',
   name: 'Perf / Security',
-  systemSuffix: `
-=== SPECIALTY FOCUS: PERFORMANCE + SECURITY ===
-You are the PERF/SECURITY critic. Two narrow questions only:
-
-PERFORMANCE:
-- Does the diff introduce a quantifiable runtime regression that
-  would show up under realistic load (myco context: ~1-100 sessions
-  × ~100 plan items × ~100 KB chat history × ~64 KB file caps,
-  tests under 30 s)?
-- Examples of "yes": O(N²) where O(N) is trivially available;
-  sync fs.readFileSync in a request hot path; repeated parsing
-  of the same large input; unbounded growth of in-memory state;
-  n+1 fetch/DB patterns.
-- Examples of "no" (DO NOT FLAG): adding a 5-line helper; using
-  an extra Map allocation in a function called once per turn;
-  string concatenation in a non-hot path. Premature optimization
-  scolding is noise.
-
-SECURITY:
-- Does the diff introduce a CONCRETE, EXPLOITABLE risk?
-- Examples of "yes": logging an API key / PAT / session token to
-  stdout or artifacts; unsanitized user input flowing into
-  child_process / SQL / innerHTML / regex source; auth check
-  missing on a route that reads or writes /data; CORS opened
-  wider than needed; PATs returned in error messages.
-- Examples of "no" (DO NOT FLAG): "an attacker who already has
-  filesystem access could read this"; "in theory this could be
-  vulnerable if the future caller is malicious." Theoretical-only
-  risks are noise.
-
-For every flag: cite the specific diff line + describe the exact
-attack vector or load condition that would trip it. Vague flags
-("possible memory leak") without a concrete trigger are NOT useful
-and should be omitted.
-
-If no perf or security issues exist, write "✓ AGREED" on the first
-line, then 2-4 sentences explaining what you checked and why the
-change is clean on both axes. Your ✓ AGREED is INFORMATIONAL — the
-general critic's verdict gates queue advance, not yours.`,
+  systemSuffix: '\n' + fs.readFileSync(path.join(__dirname, 'perf-security.md'), 'utf8'),
 };

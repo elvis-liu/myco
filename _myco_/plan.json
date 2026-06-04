@@ -5324,7 +5324,18 @@
       "source": "user",
       "voters": [],
       "comments": []
+    },
+    {
+      "id": "bug-65",
+      "text": "Critic verdicts are generic QA review, not problem-solving validation against the plan-item. User-reported: 'the verdict must criticize if the proposed solution actually solves the fr/td/bug we are working on. right now it's just a general review of the diff, the analyze result and whether it solves the problem of the fr/td/bug should be our focus.' Root cause: the basePrompt in critique.js framing claude as 'elite, independent QA and security auditor' biases the critic toward generic code-quality review; the userPrompt does include `Task to accomplish: ${item.text}` but it's BELOW the diff (not primary). Specialty prompts (general/test-validity/perf-security) each focus on their domain without elevating 'does this solve the plan-item' as the central question. Stage-specific gap: analyze stage has ZERO diff (per the directive) so generic-diff-review doesn't even apply — critic should evaluate the PLAN against item.text; code stage should evaluate whether the diff IMPLEMENTS the solution; verify stage should evaluate whether the regression test SPECIFICALLY catches the user-reported failure mode (would it have red-flipped against the pre-fix code?). Fix: (1) rewrite basePrompt to put 'does claude's work solve the user's plan-item' as the PRIMARY criterion + state secondary criteria; (2) restructure userPrompt to put item.text + the problem framing AT THE TOP, then diff/code as supporting evidence; (3) add stage-aware prompt addenda — analyze stage critic gets 'evaluate the plan against the problem', verify stage critic gets 'would this test have caught the original failure'. Specialty prompts (general/test-validity/perf-security) inherit the stage-aware framing too.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-04T06:40:19.631Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
     }
   ],
-  "updatedAt": "2026-06-04T06:03:41.073Z"
+  "updatedAt": "2026-06-04T06:40:19.631Z"
 }

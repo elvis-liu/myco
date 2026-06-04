@@ -142,18 +142,21 @@ t('server/src/critique.js: userPrompt template includes ${fileContextBlock} and 
 });
 
 t('server/src/critique.js: basePrompt is rewritten to acknowledge the new context (no longer says "you can ONLY see the diff")', () => {
+  // bug-65 follow-up: the basePrompt content was moved out of
+  // critique.js (inline template string) and into
+  // server/src/critics/prompts/base.md (loaded via the
+  // criticPrompts loader). The contract this test locks (basePrompt
+  // mentions file-context + history) is now satisfied by base.md
+  // content; check the .md file too.
   const src = _read('server/src/critique.js');
-  // Find the basePrompt assignment.
-  const at = src.search(/const\s+basePrompt\s*=/);
-  assert.ok(at > -1);
-  const body = src.slice(at, at + 4000);
-  assert.ok(/td-33 r2/.test(body),
-    'basePrompt must reference "td-33 r2" so a future restyle knows the prompt was updated for context enrichment.');
-  // The new prompt explicitly mentions the three inputs.
-  assert.ok(/FULL CURRENT CONTENT|file context|surrounding code/i.test(body),
-    'basePrompt must mention the file-context input so the critic knows it has surrounding-code context to work with.');
-  assert.ok(/iteration history|plan item.*history|history/i.test(body),
-    'basePrompt must mention the iteration-history input so the critic knows it has prior-run context.');
+  const md = (() => { try { return _read('server/src/critics/prompts/base.md'); } catch { return ''; } })();
+  const haystack = src + '\n' + md;
+  assert.ok(/td-33 r2/.test(haystack),
+    'basePrompt (or its provenance in critique.js) must reference "td-33 r2" so a future restyle knows the context-enrichment iteration is intentional.');
+  assert.ok(/FULL CURRENT CONTENT|file context|surrounding code/i.test(haystack),
+    'basePrompt (inline OR loaded from base.md) must mention the file-context input so the critic knows it has surrounding-code context to work with.');
+  assert.ok(/iteration history|plan item.*history|PLAN ITEM HISTORY|history/i.test(haystack),
+    'basePrompt (inline OR loaded from base.md) must mention the iteration-history input so the critic knows it has prior-run context.');
 });
 
 t('server/src/critique.js: rec._lastCritique cache stores changedEntries so retry preserves the enrichment', () => {

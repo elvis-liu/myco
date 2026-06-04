@@ -3263,6 +3263,50 @@ test_chat_window() {
   # helper signature + render call, ≥3 helper call sites, ≥3
   # buffer-drop sites; bug-64 marker in all 3 files.
   node_test_result test/bug-64-final-critique-defer.test.js "test/bug-64-final-critique-defer.test.js (14 cases)"
+  # bug-65 (critic verdicts are generic QA review, not problem-
+  # solving validation against the plan-item): user-reported "the
+  # verdict must criticize if the proposed solution actually solves
+  # the fr/td/bug we are working on. right now it's just a general
+  # review of the diff, the analyze result and whether it solves the
+  # problem of the fr/td/bug should be our focus." User added:
+  # (a) analyze stage must consider item.comments not just item.text;
+  # (b) code stage must verify the diff matches the analyze plan;
+  # (c) prompts must be extracted to independent files for easy review.
+  # Fix: three paired changes. (1) PROMPT EXTRACTION: new
+  # server/src/critics/prompts/ directory with base.md + 4 stage-{X}.md
+  # files + index.js loader (fs.readFileSync, cached at require-time).
+  # Specialty systemSuffix extracted to sibling .md files
+  # (general.md, test-validity.md, perf-security.md) loaded by .js
+  # shims. (2) PROMPT CONTENT REWRITE: basePrompt reframed from
+  # "elite QA auditor" (generic) to "plan-item-driven problem-solving
+  # validator" — PRIMARY criterion is now does-it-solve-the-problem.
+  # Stage-aware addenda per stage (analyze: plan vs problem; code:
+  # diff matches analyze plan via history + solves problem; verify:
+  # regression net complete + test.sh wired + future-proof; final:
+  # full-run verdict gating queue). (3) USERPROMPT RESTRUCTURE:
+  # problem leads. New _buildProblemBlock(item) helper combines
+  # item.text + item.comments (per user-asked "consider all of the
+  # comments on the plan item"). _buildHistoryBlock no longer
+  # includes comments — they moved to the problem block. Per-run
+  # summary cap bumped 800→2000 chars so the analyze plan fits when
+  # the code-stage critic reads it. Locks: prompts/ directory + files
+  # exist; index.js exports base + 4 stage prompts; 3 specialty .md
+  # files exist + .js shims load via fs.readFileSync; base.md has
+  # PRIMARY+problem framing (no "elite QA" generic-review framing)
+  # + ✓ AGREED + ✗ DISAGREE sentinel guidance; stage-analyze.md
+  # mentions no-diff + plan + comments; stage-code.md references
+  # analyze plan + PLAN ITEM HISTORY + red-flip / pre-fix check;
+  # stage-verify.md requires test.sh wiring + regression simulation;
+  # stage-final.md mentions queue gating; critique.js requires
+  # criticPrompts loader (no inline basePrompt template); stageAddendum
+  # references all 4 stage prompts; _buildProblemBlock combines text
+  # + comments; _buildHistoryBlock no longer references item.comments
+  # (after stripping JS comments); HISTORY_RUN_SUMMARY_CAP = 2000;
+  # userPrompt interpolates ${stageAddendum} + ${problemBlock} (not
+  # the pre-bug-65 "Task to accomplish: ${item.text}" inline form);
+  # bug-65 markers in critique.js + 5 prompt .md files + 3 specialty
+  # .md files.
+  node_test_result test/bug-65-problem-solving-prompts.test.js "test/bug-65-problem-solving-prompts.test.js (18 cases)"
   # NOTE: the "bug-53" reference in the comment block below is a
   # stale label from an older HUD-stuck issue (eventually shipped
   # under a different plan-item number). It is NOT the same bug as

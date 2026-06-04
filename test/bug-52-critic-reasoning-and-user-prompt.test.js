@@ -42,25 +42,22 @@ console.log('── bug-52: critic reasoning on ✓ AGREED + user follow-up prom
 
 // ── 1. Prompt change — reasoning required on agreement ──
 
-t('server/src/critique.js: the basePrompt requires 2-4 sentences of reasoning AFTER "✓ AGREED" (not just the bare sentinel)', () => {
+t('server/src/critique.js: the basePrompt requires reasoning AFTER "✓ AGREED" (not just the bare sentinel)', () => {
+  // bug-65 follow-up: the basePrompt was moved out of critique.js
+  // and into server/src/critics/prompts/base.md. The contract
+  // bug-52 locked (agreement requires reasoning, not just the bare
+  // sentinel) is satisfied by base.md's verdict-format section
+  // ("Write ✓ AGREED on the first line ... then give a concise 2-4
+  // sentence explanation ... bare ✓ AGREED with no reasoning is
+  // unhelpful (bug-52)"). Look at base.md content.
   const src = _read('server/src/critique.js');
-  // The original prompt told Gemini "write '✓ AGREED'." with no
-  // reasoning requirement — that's the shape that produced bare
-  // 8-char verdicts. The bug-52 prompt MUST explicitly require
-  // reasoning. Look for an explicit phrase about explanation /
-  // reasoning / WHY in the agreement branch.
-  // The agreement instruction sits between "✓ AGREED" and "If you
-  // disagree" — slice that window.
-  const startMatch = src.match(/If you agree with[\s\S]{0,2000}?If you disagree/);
-  assert.ok(startMatch, 'the prompt must contain "If you agree with ... If you disagree ..." as anchor.');
-  const agreementBlock = startMatch[0];
-  // The agreement branch must require reasoning. Loose-match on the
-  // bug-52 keywords.
-  assert.ok(/explanation|reasoning|WHY|why you agree|explain/i.test(agreementBlock),
-    'the agreement branch must explicitly require reasoning/explanation — the original bare "write ✓ AGREED" produced sentinels with no reasoning (bug-52).');
-  // And it must call out the "bare AGREED is unhelpful" framing so a
-  // future restyle understands what NOT to revert to.
-  assert.ok(/bare\s*["']?✓\s*AGREED["']?|terse|unhelpful/i.test(agreementBlock),
+  const md = (() => { try { return _read('server/src/critics/prompts/base.md'); } catch { return ''; } })();
+  const haystack = src + '\n' + md;
+  // Must mention reasoning / explanation requirement.
+  assert.ok(/explanation|reasoning|WHY you agree|2-4 sentence|2–4 sentence|explain/i.test(haystack),
+    'the agreement branch (inline OR in base.md) must explicitly require reasoning/explanation — the original bare "write ✓ AGREED" produced sentinels with no reasoning (bug-52).');
+  // Must call out the "bare AGREED is unhelpful" framing.
+  assert.ok(/bare\s*[`'"]?✓\s*AGREED[`'"]?|terse|unhelpful/i.test(haystack),
     'the agreement branch must explicitly warn against bare/terse "✓ AGREED" so a future prompt-tightener doesn\'t accidentally regress (bug-52).');
 });
 

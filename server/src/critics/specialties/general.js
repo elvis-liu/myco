@@ -15,19 +15,14 @@
 // the user prompt and only need to process the small specialty-suffix
 // delta on the system prompt.
 
+// bug-65: systemSuffix extracted to general.md sibling (loaded via
+// fs.readFileSync at module-load time). Edit general.md to change
+// the prompt; server restart picks up the new content.
+const fs = require('fs');
+const path = require('path');
+
 module.exports = {
   id: 'general',
   name: 'General QA',
-  systemSuffix: `
-=== SPECIALTY FOCUS: GENERAL QA + SECURITY AUDIT ===
-You are the GENERAL critic of the fan-out. Cover the broad surface:
-correctness, requirements coverage, edge-cases, security holes the
-other specialties don't already own (auth, injection, info-leak that
-isn't a perf problem). Defer perf-regressions to the Perf/Security
-critic and test-correctness to the Test-Validity critic — don't
-duplicate their work, but DO flag anything they would miss.
-
-Your verdict gates the run queue: ✓ AGREED here means "this change is
-ready"; anything else pauses the queue and surfaces a Retry. Be
-deliberate — false-positive disagreement is expensive.`,
+  systemSuffix: '\n' + fs.readFileSync(path.join(__dirname, 'general.md'), 'utf8'),
 };

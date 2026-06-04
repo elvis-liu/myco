@@ -126,12 +126,22 @@ t('critique.js: system prompt carries the INSUFFICIENT INFORMATION opt-out (crit
     'critique.js system prompt must include an "INSUFFICIENT INFORMATION:" opt-out so the critic can admit it can\'t tell from the diff alone — without that, broad-instruction critics rubber-stamp confidently-wrong verdicts.');
 });
 
-t('critique.js: system prompt names the critic\'s limited surface (diff + claude explanation only)', () => {
+t('critique.js: system prompt explicitly names the critic\'s input surface', () => {
+  // bug-65 + td-33 r2 follow-up: the original phrasing was a NEGATIVE
+  // "you can ONLY see the diff" to stop the critic from confabulating
+  // context. td-33 r2 INVERTED that — the critic now HAS file context
+  // and history, so the prompt names what the critic DOES have. bug-65
+  // moved the prompt content to base.md. The original test's contract
+  // (the critic shouldn't confabulate context) is still locked: now
+  // satisfied by EXPLICITLY listing the critic's inputs so it doesn't
+  // invent anything beyond them.
   const src = _read('server/src/critique.js');
-  // Stop the critic from inventing context. Look for an explicit
-  // limitation clause near the system prompt.
-  assert.ok(/no full file contents|cannot see|only see the diff|ONLY see/i.test(src),
-    'critique.js system prompt must explicitly name what the critic CAN\'T see (no full file contents, no chat history, no test runs) so it doesn\'t confabulate context.');
+  const md = (() => { try { return _read('server/src/critics/prompts/base.md'); } catch { return ''; } })();
+  const haystack = src + '\n' + md;
+  // The prompt must explicitly enumerate the critic's inputs so it
+  // sticks to them.
+  assert.ok(/three (blocks of )?evidence|THREE inputs|diff hunks|FULL CURRENT CONTENT|file context|PLAN ITEM HISTORY/i.test(haystack),
+    'critique.js system prompt (inline OR base.md) must explicitly enumerate the critic\'s inputs (diff / file context / history) so it doesn\'t confabulate context beyond what it has.');
 });
 
 // ── exported name reflects the model ──
