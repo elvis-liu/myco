@@ -1679,6 +1679,29 @@ test_login_modal_static() {
   grep -q "app.post.*'/auth/login'" server/src/index.js && pass "route: POST /auth/login"              || fail "route: POST /auth/login"
 }
 
+# Regression guard: test_index_html_contents (test/test.sh) MUST use here-
+# strings (`grep -q PAT <<<"$index"`), NOT the `echo "$index" | grep -q PAT`
+# pipe form. Under `set -o pipefail` the pipe form races on glibc hosts —
+# grep -q short-circuits at first match, echo's next chunked write hits
+# SIGPIPE → pipefail propagates exit 141 → the assertion fails even though
+# the pattern was found. Verified on mycobeta (glibc) 2026-06-05.
+test_index_chatpane_uses_herestring() {
+  # Locate the function block, strip comments + blank lines, then assert the
+  # surviving (assertion) lines use here-strings and avoid the racy pipe
+  # form. Stripping comments matters because the function-body comment
+  # explains the bug and *mentions* the bad pattern — without the strip,
+  # we'd flag our own warning text as a regression.
+  local body
+  body=$(awk '/^test_index_html_contents\(\) \{/,/^\}/' test/test.sh \
+        | sed -E '/^[[:space:]]*#/d; /^[[:space:]]*$/d')
+  grep -q 'grep -q .id="chatpane". <<<"\$index"' <<<"$body" \
+    && pass "test.sh: test_index_html_contents uses here-string for chatpane assertion" \
+    || fail "test.sh: test_index_html_contents must use here-string — see comment at test.sh test_index_html_contents()"
+  ! grep -qE 'echo "\$index" \| grep -q' <<<"$body" \
+    && pass "test.sh: test_index_html_contents avoids racy 'echo \"\$index\" | grep -q' pipe form" \
+    || fail "test.sh: test_index_html_contents contains racy pipe form (SIGPIPE+pipefail bug on glibc) — switch to here-strings"
+}
+
 run_static_checks() {
   section "Static checks"
   test_server_js_files
@@ -1704,6 +1727,7 @@ run_static_checks() {
   test_login_modal_static
   test_file_explorer_static
   test_file_viewer_polish_static
+  test_index_chatpane_uses_herestring
 }
 
 # ─── feature checks ──────────────────────────────────────────────────────────
@@ -4357,11 +4381,21 @@ test_vendor_serving() {
 }
 
 test_index_html_contents() {
+  # Use here-strings (`grep -q PAT <<<"$index"`), NOT `echo "$index" | grep -q`.
+  # Under `set -o pipefail` (line 3) the pipe form races: `grep -q` short-
+  # circuits at first match, the pipe-read end closes, echo's next chunked
+  # stdio write (glibc writes the 58KB index in ~4KB chunks) returns EPIPE
+  # → echo exits 141 → pipefail propagates 141 → the assertion reads as
+  # failure even though the pattern *was* found. The race is host-dependent
+  # (mycobeta/glibc hits it; Alpine/musl writes the whole 58KB in one shot
+  # and doesn't). Markers near EOF (mermaid/highlight) escape the race by
+  # luck of position, but `id="chatpane"` at byte ~8855 reliably loses.
+  # Here-strings dump the variable through a temp file — no pipe, no race.
   local index
   index=$(curl -sf "http://127.0.0.1:$SMOKE_PORT/" 2>/dev/null || echo "")
-  echo "$index" | grep -q 'id="chatpane"' && pass "index serves chatpane" || fail "index serves chatpane"
-  echo "$index" | grep -q 'mermaid.min.js' && pass "index includes mermaid script" || fail "index includes mermaid script"
-  echo "$index" | grep -q 'highlight.min.js' && pass "index includes highlight script" || fail "index includes highlight script"
+  grep -q 'id="chatpane"' <<<"$index" && pass "index serves chatpane" || fail "index serves chatpane"
+  grep -q 'mermaid.min.js' <<<"$index" && pass "index includes mermaid script" || fail "index includes mermaid script"
+  grep -q 'highlight.min.js' <<<"$index" && pass "index includes highlight script" || fail "index includes highlight script"
 }
 
 test_invalid_share_token_rejected() {
