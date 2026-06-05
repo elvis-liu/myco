@@ -3866,6 +3866,17 @@ test_chat_window() {
   # used by both seq gates in _appendAgentEvent. turn_result behavior
   # preserved (it had an inline short-circuit before; helper hoists it).
   node_test_result test/bug-67-perm-request-folds-into-chrome-batch.test.js "test/bug-67-perm-request-folds-into-chrome-batch.test.js (16 cases)"
+  # bug-67 round 2: the round-1 always-folds helper only checked
+  # whether prev IS directly the chrome batch. broadcastMenuToChat
+  # appends a .chat-msg.chat-msg-menu div between the chrome batch
+  # and any follow-up permission_resolved event (user's interaction
+  # surface for the perm-ask), so perm_resolved still went into a
+  # fresh batch. Fix adds _findChromeBatchAcrossMenus(pane) — walks
+  # backward across chat-msg-menu / chat-msg-menu-collapsed cards
+  # to find the underlying chrome batch. Stops at any other non-
+  # chrome element (real chat-msg, assistant_text) so genuine
+  # semantic breaks still split the batch.
+  node_test_result test/bug-67-r2-perm-resolved-folds-across-menu-card.test.js "test/bug-67-r2-perm-resolved-folds-across-menu-card.test.js (16 cases)"
   # bug-70: chat-accept of a verdict (typing "looks good" / "the test
   # worked" / "yes" while a plan item is in awaiting_accept) must fire
   # the same advancement as the verdict-pane button. Pre-fix only the

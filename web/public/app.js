@@ -6110,6 +6110,41 @@ function _chromeEventAlwaysFolds(ev) {
       || ev.type === 'permission_resolved';
 }
 
+// bug-67 r2: a menu card (.chat-msg.chat-msg-menu — rendered by
+// menu.broadcastMenuToChat as the user's interaction surface for a
+// permission_request) is appended to #chat-messages BETWEEN the
+// chrome batch and any follow-up permission_resolved / turn_result.
+// The prev-DOM-sibling adjacency check in the chrome-routing block
+// fails because prev is the menu card, not the chrome batch — so
+// the always-fold helper had no batch to fold into and a fresh
+// batch started (the bug: perm_resolved + tool_result rendering
+// as a separate × 2 batch from the tool_use + perm_request batch).
+//
+// Walk backward across chat-msg-menu* cards (chat-msg-menu,
+// chat-msg-menu-collapsed) to find the chrome batch underneath.
+// Stop at any non-menu non-chrome element (real chat-msg bubble,
+// assistant_text card, turn footer) — those are real semantic
+// breaks that SHOULD split the batch. The lookback only engages
+// for callers that pass an always-fold event; non-perm chrome
+// events keep the strict adjacency rule.
+//
+// Returns the chrome batch element or null if none found within
+// the contiguous menu-cards run from pane's tail.
+function _findChromeBatchAcrossMenus(pane) {
+  let el = pane && pane.lastElementChild;
+  while (el) {
+    if (el.dataset && el.dataset.evType === '_chrome_batch') return el;
+    if (el.classList && (
+        el.classList.contains('chat-msg-menu') ||
+        el.classList.contains('chat-msg-menu-collapsed'))) {
+      el = el.previousElementSibling;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
 // assistant_text still concatenates (separate from chrome) so claude's
 // narration between tool calls renders as one continuous markdown blob
 // with mermaid support — see the dedicated merge branch in
@@ -6313,11 +6348,25 @@ function _appendAgentEvent(ev) {
     // pre-routing finish gate. turn_result also matches here (its
     // separate short-circuit at the top of this block already handled
     // it, but routing through the helper keeps both gates symmetric).
+    //
+    // bug-67 r2: when prev is NOT directly the chrome batch (a menu
+    // card sits between, because broadcastMenuToChat appended it to
+    // #chat-messages as the user's perm-ask interaction surface),
+    // walk backward across menu cards to find the underlying chrome
+    // batch and fold there. This is ONLY engaged for always-fold
+    // events — non-perm chrome events keep the strict adjacency rule
+    // (a real chat-msg between SHOULD split the batch).
     const alwaysFolds = _chromeEventAlwaysFolds(ev);
+    let foldTarget = null;
     if (prev && prev.dataset && prev.dataset.evType === '_chrome_batch' && (alwaysFolds || seqsConsecutive)) {
-      _appendToChromeBatch(prev, ev, ts);
-      if (Number.isFinite(evSeq)) prev.dataset.lastSeq = String(evSeq);
-      batch = prev;
+      foldTarget = prev;
+    } else if (alwaysFolds) {
+      foldTarget = _findChromeBatchAcrossMenus(pane);
+    }
+    if (foldTarget) {
+      _appendToChromeBatch(foldTarget, ev, ts);
+      if (Number.isFinite(evSeq)) foldTarget.dataset.lastSeq = String(evSeq);
+      batch = foldTarget;
     } else {
       batch = _createChromeBatch(ev, ts);
       if (ev.ts) batch.dataset.ts = ev.ts;
