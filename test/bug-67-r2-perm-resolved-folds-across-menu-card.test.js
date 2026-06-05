@@ -76,11 +76,18 @@ t('chrome-routing block invokes the helper for always-fold events', () => {
   const fnSlice = APP.slice(fnStart, fnStart + 80000);
   assert.ok(/_findChromeBatchAcrossMenus\s*\(\s*pane\s*\)/.test(fnSlice),
     '_appendAgentEvent must call _findChromeBatchAcrossMenus(pane)');
-  // The call must be gated on alwaysFolds — non-perm chrome events
-  // must NOT engage the lookback.
-  const callBlock = fnSlice.match(/else if\s*\(\s*alwaysFolds\s*\)\s*\{[\s\S]{0,200}?_findChromeBatchAcrossMenus/);
+  // bug-67 r4: the call must be inside an `else if` that gates on
+  // alwaysFolds OR _prevIsMenuCard. Pre-r4 it was just alwaysFolds;
+  // r4 widened to also engage for ANY chrome event when prev is a
+  // menu card. Real chat-msg / assistant_text as prev still blocks
+  // (via _findChromeBatchAcrossMenus's own walk).
+  const callBlock = fnSlice.match(/else if\s*\([\s\S]*?alwaysFolds[\s\S]{0,2000}?_findChromeBatchAcrossMenus/);
   assert.ok(callBlock,
-    'the call to _findChromeBatchAcrossMenus must be gated by `else if (alwaysFolds)` so non-perm chrome events keep strict adjacency');
+    'the call to _findChromeBatchAcrossMenus must be gated by an `else if` mentioning alwaysFolds (r2/r3) — and post-r4 may also include _prevIsMenuCard');
+  // r4 widening guard: the gate must include `_prevIsMenuCard` so
+  // non-always-fold chrome events still fold when prev is a menu.
+  assert.ok(/else if\s*\([^)]*_prevIsMenuCard\s*\(/.test(fnSlice),
+    'bug-67 r4: the lookback gate must also engage when _prevIsMenuCard(prev) — otherwise rate_limit / system_event / hook_* mid-perm-cycle still break the batch');
 });
 
 t('bug-67 r1 chrome-batch direct-prev path still exists (fast path preserved)', () => {
@@ -257,13 +264,20 @@ function _chromeEventAlwaysFolds(ev) {
       || ev.type === 'permission_resolved'
       || ev.type === 'tool_result';
 }
+// bug-67 r4: predicate mirrors prod _prevIsMenuCard helper.
+function _prevIsMenuCard(el) {
+  return !!(el && el.classList && (
+    el.classList.contains('chat-msg-menu') ||
+    el.classList.contains('chat-msg-menu-collapsed')));
+}
 function simulateChromeRouting(pane, ev) {
   const prev = pane.lastElementChild;
   const alwaysFolds = _chromeEventAlwaysFolds(ev);
   let foldTarget = null;
   if (prev && prev.dataset && prev.dataset.evType === '_chrome_batch') {
     foldTarget = prev;
-  } else if (alwaysFolds) {
+  } else if (alwaysFolds || _prevIsMenuCard(prev)) {
+    // bug-67 r4: widened gate — ANY chrome event with menu-card prev.
     foldTarget = _findChromeBatchAcrossMenus(pane);
   }
   return foldTarget; // null = new batch would be created
@@ -344,16 +358,62 @@ t('end-to-end: chat-msg between batch and menu correctly breaks the chain', () =
     'a real chat-msg between the chrome batch and the menu card must break the lookback — fresh batch is correct here');
 });
 
-t('end-to-end: non-perm chrome event (tool_use) with menu prev does NOT engage lookback', () => {
-  // Strict adjacency for non-perm events: tool_use arriving after a
-  // menu card must NOT retro-merge into an older chrome batch.
+t('end-to-end (bug-67 r4): rate_limit with menu prev folds into chrome batch', () => {
+  // User-reported repro 2026-06-05 17:09: rate_limit landed
+  // between perm_request and perm_resolved (sub-second after the
+  // perm_request fired). Pre-r4 rate_limit was a chrome event but
+  // NOT in always-folds; with menu card as prev, the ELSE branch
+  // started a fresh batch → break. r4 widens the lookback gate to
+  // engage for ANY chrome event when prev is a menu card.
+  const batch = makeChromeBatch('B1');
+  const menu = makeMenuCard();
+  const pane = makePane(batch, menu);
+  const rateLimit = { type: 'rate_limit', raw: { retryAfterSec: 30 }, seq: 50 };
+  const target = simulateChromeRouting(pane, rateLimit);
+  assert.strictEqual(target, batch,
+    'bug-67 r4: rate_limit during perm-cycle (menu prev) must fold into the chrome batch — this is the exact 17:09:55 user repro');
+});
+
+t('end-to-end (bug-67 r4): system_event with menu prev folds (any chrome event class)', () => {
+  // Generalization: not just rate_limit. System events, hook_*,
+  // ANY chrome event that's not in always-folds should still fold
+  // when prev is a menu card. Whack-a-mole on per-type lists
+  // doesn't scale.
+  const batch = makeChromeBatch('B1');
+  const menu = makeMenuCard({ collapsed: true });
+  const pane = makePane(batch, menu);
+  const sysEvent = { type: 'system_event', subtype: 'task_progress', seq: 50 };
+  const target = simulateChromeRouting(pane, sysEvent);
+  assert.strictEqual(target, batch,
+    'bug-67 r4: system_event with menu prev must engage lookback (rule is by prev=menu, not by event type)');
+});
+
+t('end-to-end (bug-67 r4): tool_use with menu prev folds (also engages lookback)', () => {
+  // Previously this test asserted tool_use does NOT engage the
+  // lookback (strict adjacency). r4 flipped this: the rule is
+  // about menu-card adjacency, not event-type whitelist. So
+  // tool_use during a perm cycle (rare but possible during
+  // parallel tool calls) folds into the surrounding batch.
   const batch = makeChromeBatch('B1');
   const menu = makeMenuCard();
   const pane = makePane(batch, menu);
   const toolUse = { type: 'tool_use', name: 'Bash', seq: 100 };
   const target = simulateChromeRouting(pane, toolUse);
+  assert.strictEqual(target, batch,
+    'bug-67 r4: tool_use with menu prev now folds — the widened gate is by prev=menu, not by event type');
+});
+
+t('end-to-end (bug-67 r4): chrome event with REAL chat-msg prev does NOT engage lookback', () => {
+  // Defense: the widened gate must not retro-merge across real
+  // chat-msg / assistant_text. _findChromeBatchAcrossMenus's own
+  // stop-on-non-menu-non-chrome rule prevents that.
+  const batch = makeChromeBatch('B1');
+  const realMsg = makeChatMsg();
+  const pane = makePane(batch, realMsg);
+  const rateLimit = { type: 'rate_limit', raw: {}, seq: 100 };
+  const target = simulateChromeRouting(pane, rateLimit);
   assert.strictEqual(target, null,
-    'tool_use is NOT in always-folds → lookback must not engage. Strict adjacency means new batch.');
+    'bug-67 r4: a real chat-msg as prev must still break the chain — lookback returns null, fresh batch is correct');
 });
 
 console.log('\n' + passed + ' passed, ' + failed + ' failed');

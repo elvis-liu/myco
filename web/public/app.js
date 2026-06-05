@@ -6141,6 +6141,19 @@ function _chromeEventAlwaysFolds(ev) {
 // for callers that pass an always-fold event; non-perm chrome
 // events keep the strict adjacency rule.
 //
+// bug-67 r4: tiny predicate — is the element a menu card (active or
+// resolved)? Used to widen the lookback gate so ANY chrome event
+// arriving while prev is a menu card engages the cross-menus walk,
+// not just always-fold events. Without this, chrome events like
+// rate_limit / system_event / hook_* land mid-perm-cycle and start
+// a fresh batch even though semantically they're part of the
+// surrounding tool lifecycle.
+function _prevIsMenuCard(el) {
+  return !!(el && el.classList && (
+    el.classList.contains('chat-msg-menu') ||
+    el.classList.contains('chat-msg-menu-collapsed')));
+}
+
 // Returns the chrome batch element or null if none found within
 // the contiguous menu-cards run from pane's tail.
 function _findChromeBatchAcrossMenus(pane) {
@@ -6373,7 +6386,18 @@ function _appendAgentEvent(ev) {
     let foldTarget = null;
     if (prev && prev.dataset && prev.dataset.evType === '_chrome_batch' && (alwaysFolds || seqsConsecutive)) {
       foldTarget = prev;
-    } else if (alwaysFolds) {
+    } else if (alwaysFolds || _prevIsMenuCard(prev)) {
+      // bug-67 r2/r3: always-fold events use the lookback to bridge
+      // menu cards.
+      // bug-67 r4: ANY chrome event arriving while prev is a menu
+      // card also engages the lookback — rate_limit, system_event,
+      // hook_*, etc. landed mid-perm-cycle and were starting fresh
+      // batches even though they semantically belong to the
+      // surrounding tool lifecycle whose tool_use + perm_request are
+      // already in the batch above the menu card. The lookback's
+      // own stop-on-real-chat-msg rule keeps genuine semantic
+      // breaks intact (a real chat-msg between menu and chrome
+      // event blocks the walk).
       foldTarget = _findChromeBatchAcrossMenus(pane);
     }
     if (foldTarget) {
