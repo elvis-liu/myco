@@ -3851,6 +3851,14 @@ test_chat_window() {
   # gated to skip clarify-tagged messages and routed BEFORE the
   # slash-command branch.
   node_test_result test/bug-70-chat-accept-fires-run-done.test.js "test/bug-70-chat-accept-fires-run-done.test.js (71 cases)"
+  # bug-68: intermediate-stage critique passed only the LAST 2KB of
+  # claude's turn text to the critic as CLAUDE'S EXPLANATION, so
+  # analyze plans (which put structured sections at the HEAD) lost
+  # PROPOSED SOLUTION + VERIFICATION STEPS in the tail-2KB window —
+  # critic empirically said "Missing Proposed Solution" on bug-66 +
+  # bug-69 + bug-68 itself. Fix flips TAIL→HEAD and bumps cap 2KB
+  # →32KB at attach.js:262.
+  node_test_result test/bug-68-intermediate-critique-explanation-not-truncated.test.js "test/bug-68-intermediate-critique-explanation-not-truncated.test.js (10 cases)"
   # bug-69: test.sh portability — busybox grep (no PCRE) was failing
   # 26 static checks; missing server/node_modules was failing
   # test_npm_deps + 6 server-smoke tests. Fix added pcre_match() (node-

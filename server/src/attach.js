@@ -258,8 +258,21 @@ function _registerExternalSession(sessionId, session) {
         const { triggerGeminiCritique } = require('./critique');
         // td-33 r2: pass newEntries through so intermediate critiques
         // get the same file-context enrichment as final critiques.
+        // bug-68: was `.slice(-2000)` — the TAIL-2KB truncation
+        // dropped structured plan sections (Root Cause, Proposed
+        // Solution, Verification Steps) that sit at the HEAD of a
+        // typical analyze response, leaving the critic with only the
+        // assumption block + closing sentinel. Critic verdicts
+        // empirically said "Missing Proposed Solution" on bug-66 +
+        // bug-69 + bug-68 itself even though the plans were fully
+        // present in claude's emitted text. Flip direction to HEAD
+        // and bump the cap to 32 KB so any realistic analyze plan
+        // (<= 8K tokens, <= ~4000 words) fits in full. Gemini 2.5's
+        // >1M-token budget makes 32 KB negligible (~$0.024/call).
+        // FINAL critiques (attach.js:~416) pass ev.result directly
+        // and are unaffected.
         await triggerGeminiCritique(sessionId, session, item, fullDiff,
-          (session._currentTurnAssistantText || '').slice(-2000),
+          (session._currentTurnAssistantText || '').slice(0, 32000),
           { isIntermediate: true, stage, changedEntries: newEntries });
       } catch (err) {
         console.error(`[td-33] stage-done(${stage}) critique failed: ${err.message}`);
