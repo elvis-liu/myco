@@ -1881,6 +1881,18 @@ class AgentSession extends EventEmitter {
     if (Number.isFinite(rows)) this.rows = rows;
   }
 
+  updateCwd(newCwd) {
+    this.cwd = newCwd;
+    let _mycoDir = null;
+    try {
+      const sessionsMod = require('./sessions');
+      const { resolveMycoDir } = require('./artifacts');
+      const rec = sessionsMod.getSessionRecord(this.sessionId);
+      if (rec) _mycoDir = resolveMycoDir(rec);
+    } catch {}
+    this._eventsFile = path.join(_mycoDir || path.join(this.cwd, '_myco_'), 'events.jsonl');
+  }
+
   kill() {
     if (!this.alive) return;
     this.alive = false;

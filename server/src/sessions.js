@@ -809,11 +809,24 @@ function _runGitCloneInBackground(sessionId, projectAbs, gitUrl) {
       try { injectBestPracticesIntoClaudeMd(projectAbs); }
       catch (err) { console.error(`[fr-94 Phase 3] post-clone CLAUDE.md inject failed for ${sessionId}: ${err.message}`); }
       _emitCloneMsg(sessionId, `✓ Cloned ${gitUrl} in ${elapsed}s. cd ${path.basename(projectAbs)} to anchor work in the project.`, 'fr-94/clone-success');
+      // Move any temporary _myco_ folder created during clone-pending to the new project subdirectory
+      const tempMyco = path.join(path.dirname(projectAbs), '_myco_');
+      const destMyco = path.join(projectAbs, '_myco_');
+      if (fs.existsSync(tempMyco) && !fs.existsSync(destMyco)) {
+        try {
+          fs.renameSync(tempMyco, destMyco);
+        } catch (err) {
+          console.error(`[fr-94 Phase 3] failed to move _myco_ directory: ${err.message}`);
+        }
+      }
       try {
         const attachMod = require('./attach');
-        attachMod.killSession(sessionId);
+        const live = typeof attachMod.getSession === 'function' ? attachMod.getSession(sessionId) : null;
+        if (live) {
+          live.updateCwd(projectAbs);
+        }
       } catch (err) {
-        console.error(`[fr-94 Phase 3] post-clone killSession failed for ${sessionId}: ${err.message}`);
+        console.error(`[fr-94 Phase 3] post-clone update CWD failed for ${sessionId}: ${err.message}`);
       }
     } else {
       _markCloneFailed(sessionId, `✗ git clone failed (exit ${code}${signal ? `, signal ${signal}` : ''}) after ${elapsed}s. Project dir is empty.`);
