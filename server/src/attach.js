@@ -1834,6 +1834,33 @@ function handleChatMessage(sessionId, session, user, text, opts = {}) {
   if (user === ASSISTANT_USER) return;
   if (mentionTarget) return;
 
+  // bug-70: chat-accept handler. CLAUDE.md §9 documents that a chat
+  // reply with an accept-class phrase ("accept", "yes", "looks good",
+  // "ship it", "the test worked", or simply naming the next stage)
+  // advances the plan-item run the same way the verdict-pane button
+  // does. Pre-fix only the button was wired (POST /run/done +
+  // critique.resolveCritique 'accept-stage'); the chat path went
+  // straight to claude as an unrelated turn. Result: bug-66 stayed
+  // stuck in awaiting_accept after the user typed "the test worked"
+  // — the queue never advanced, the next plan item never dispatched.
+  //
+  // Behavior:
+  //   - verify.awaiting_accept + accept-phrase → clearActiveRunItem
+  //     (mirrors POST /sessions/:id/run/done: clear stage state +
+  //     advance queue).
+  //   - {analyze|code}.awaiting_accept + accept-phrase → transition
+  //     to next.in_progress (mirrors critique.resolveCritique
+  //     'accept-stage') + fire any deferred final critique (bug-64).
+  //
+  // The user's typed message is preserved in the chat record (it was
+  // already persisted + broadcast above); claude routing is
+  // SUPPRESSED for the accepted message so the accept signal isn't
+  // misread as a fresh prompt.
+  if (!text.startsWith('/') && !(message.meta && message.meta.kind === 'clarify')) {
+    const acceptHandled = _maybeHandleChatAccept(sessionId, session, user, text);
+    if (acceptHandled) return;
+  }
+
   if (text.startsWith('/')) {
     const rec = sessionsMod.loadStore().sessions[sessionId];
     const absCwd = rec && rec.absCwd;
@@ -1883,6 +1910,120 @@ function handleChatMessage(sessionId, session, user, text, opts = {}) {
 // the legacy hex ids still work.
 function _hasRunMarker(text) {
   return /\[run:(plan|test|arch|td|fr|bug)#[A-Za-z0-9_-]+\]/.test(String(text || ''));
+}
+
+// bug-70: detect an accept-class chat phrase. WHOLE-STRING match
+// (after trim + lowercase + trailing-punct strip) so a message like
+// "the test worked but I have a question" does NOT auto-accept —
+// only a plain affirmation does. The vocabulary mirrors CLAUDE.md
+// §9's documented set plus the user's empirically-used "the test
+// worked" and equivalents.
+//
+// Returns true only for unambiguous accept signals. Forward-stage
+// shortcuts ("code", "verify", "code stage") also count as accept of
+// the CURRENT awaiting_accept stage — the chat-accept handler doesn't
+// honor them as JUMP-TO-STAGE; it just treats them as "yes, advance."
+function _matchAcceptPhrase(text) {
+  const raw = String(text || '').trim().toLowerCase();
+  // Bare-emoji affirmations — match BEFORE the trailing-strip so a
+  // message that's JUST an emoji (no other content) doesn't get
+  // stripped to empty.
+  if (/^(👍|✓|✔️|👌)$/.test(raw)) return true;
+  // Strip trailing punct + emoji from messages like "looks good 👍".
+  const s = raw.replace(/\s*[.!👍✓✔️👌]+\s*$/, '');
+  if (!s) return false;
+  // Single-word accept tokens.
+  if (/^(accept(ed)?|yes|yep|yeah|ok|okay|sure|proceed|done|good|great|nice)$/.test(s)) return true;
+  // Multi-word affirmations.
+  if (/^(looks good|looks great|works for me|all good|all green|ship it|lgtm|the test worked|test worked|tests worked|that works|that worked|it works|it worked|test passed|tests passed|test passes|tests pass)$/.test(s)) return true;
+  // Forward-stage signals — "code" / "verify" / "code stage" / etc.
+  if (/^(code|verify)( stage)?$/.test(s)) return true;
+  if (/^start (coding|verifying|verification)$/.test(s)) return true;
+  return false;
+}
+
+// bug-70: chat-accept dispatcher. Returns true if the message was
+// consumed as a stage-accept (caller should suppress claude routing);
+// false otherwise.
+//
+// Reads stageState fresh from plan.json each call — survives
+// container restarts since the state is persisted. The two branches
+// mirror the verdict-pane button paths verbatim so chat-accept and
+// button-accept land at the same end state (no skew).
+function _maybeHandleChatAccept(sessionId, session, user, text) {
+  if (!session) return false;
+  const active = session._activeRunItem;
+  if (!active || !active.itemId) return false;
+  if (!_matchAcceptPhrase(text)) return false;
+  let stageState;
+  try {
+    const rec = sessionsMod.getSessionRecord(sessionId);
+    const item = _findPlanItemInRec(rec, active.itemId);
+    stageState = stageStateMod.getStageState(item);
+  } catch (err) {
+    console.error(`[bug-70] chat-accept lookup failed for ${active.itemId}: ${err.message}`);
+    return false;
+  }
+  if (!stageState || stageState.status !== 'awaiting_accept') return false;
+  const stage = stageState.stage;
+  console.log(`[bug-70] ${sessionId} ${user} chat-accept on ${active.itemId} stage=${stage} text=${JSON.stringify(String(text).slice(0, 60))}`);
+  if (stage === 'verify') {
+    // Final stage — clear + advance queue. Same path as POST /run/done.
+    try {
+      clearActiveRunItem(sessionId, session, { itemId: active.itemId, reason: 'chat-accept-verify' });
+    } catch (err) {
+      console.error(`[bug-70] chat-accept (verify) clearActiveRunItem failed: ${err.message}`);
+      return false;
+    }
+    const note = {
+      user: ASSISTANT_USER,
+      text: `✓ accepted — plan-item run for **${active.itemId}** closed.`,
+      ts: new Date().toISOString(),
+      meta: { kind: 'bug-70-accept', stage: 'verify' },
+    };
+    sessionsMod.appendChatMessage(sessionId, note);
+    session.emit('chat', note);
+    return true;
+  }
+  // Intermediate stage — advance to next.in_progress (mirrors
+  // critique.resolveCritique 'accept-stage') + fire any deferred
+  // final critique (mirrors bug-64).
+  const next = stageStateMod.nextStage(stage);
+  if (!next) {
+    console.warn(`[bug-70] chat-accept on intermediate stage ${stage} has no next — unexpected; no-op`);
+    return false;
+  }
+  try {
+    _transitionStageState(sessionId, session, active.itemId, next, 'in_progress');
+  } catch (err) {
+    console.error(`[bug-70] chat-accept (intermediate ${stage}→${next}) transition failed: ${err.message}`);
+    return false;
+  }
+  // Mirror critique.js's bug-64 deferred-final-critique fire.
+  try {
+    const recForDefer = sessionsMod.getSessionRecord(sessionId);
+    if (recForDefer && recForDefer._deferredFinalCritique && recForDefer._deferredFinalCritique.itemId === active.itemId) {
+      const deferred = recForDefer._deferredFinalCritique;
+      recForDefer._deferredFinalCritique = null;
+      sessionsMod.saveStore();
+      console.log(`[bug-70] firing deferred final critique for ${active.itemId} on chat-accept`);
+      const { triggerGeminiCritique } = require('./critique');
+      triggerGeminiCritique(sessionId, session, deferred.item, deferred.diff, deferred.claudeOutput, {
+        changedEntries: deferred.changedEntries,
+      }).catch((err) => console.error(`[bug-70] deferred critique fire failed: ${err.message}`));
+    }
+  } catch (err) {
+    console.error(`[bug-70] chat-accept deferred-critique fire failed: ${err.message}`);
+  }
+  const note = {
+    user: ASSISTANT_USER,
+    text: `✓ accepted — advancing **${active.itemId}** to **${next}** stage.`,
+    ts: new Date().toISOString(),
+    meta: { kind: 'bug-70-accept', stage, nextStage: next },
+  };
+  sessionsMod.appendChatMessage(sessionId, note);
+  session.emit('chat', note);
+  return true;
 }
 
 // Non-slash routing fallthrough — separate function so the slash path

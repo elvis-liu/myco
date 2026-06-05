@@ -3777,6 +3777,15 @@ test_chat_window() {
   # used by both seq gates in _appendAgentEvent. turn_result behavior
   # preserved (it had an inline short-circuit before; helper hoists it).
   node_test_result test/bug-67-perm-request-folds-into-chrome-batch.test.js "test/bug-67-perm-request-folds-into-chrome-batch.test.js (16 cases)"
+  # bug-70: chat-accept of a verdict (typing "looks good" / "the test
+  # worked" / "yes" while a plan item is in awaiting_accept) must fire
+  # the same advancement as the verdict-pane button. Pre-fix only the
+  # button was wired; chat went to claude unchanged and the queue
+  # stayed stuck in awaiting_accept (bug-66 reproduced this). Fix
+  # adds _matchAcceptPhrase + _maybeHandleChatAccept in attach.js,
+  # gated to skip clarify-tagged messages and routed BEFORE the
+  # slash-command branch.
+  node_test_result test/bug-70-chat-accept-fires-run-done.test.js "test/bug-70-chat-accept-fires-run-done.test.js (71 cases)"
   # bug-25: unknown_event events (server-side passthrough for SDK
   # message types myco doesn't recognize) used to leak into the
   # chat pane as literal "unknown_event" rows + JSON dumps. Now
