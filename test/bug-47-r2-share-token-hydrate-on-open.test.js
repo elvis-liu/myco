@@ -27,6 +27,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -49,7 +50,7 @@ function _openSessionBody() {
   assert.ok(at > -1, 'openSession must exist (anchor for the hydration scan).');
   // openSession is ~150 lines / ~4500 chars. Read a generous window so
   // the assignment can sit anywhere reasonable inside the function.
-  return app.slice(at, at + 6000);
+  return sliceFn(app, at);
 }
 
 // ── hydration call ──

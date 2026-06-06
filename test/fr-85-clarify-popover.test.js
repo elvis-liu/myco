@@ -18,6 +18,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -113,7 +114,7 @@ t('app.js: r4 — _sendClarify ships via sendChatMessage with meta.kind=clarify 
   // of normal chat render via meta.kind matching.
   const idx = APP.search(/function\s+_sendClarify\s*\(/);
   assert.ok(idx > -1, '_sendClarify handler must be defined');
-  const win = APP.slice(idx, idx + 4500);
+  const win = sliceFn(APP, idx);
   // Must call sendChatMessage with the meta arg.
   assert.ok(/sendChatMessage\([^,]+,\s*\{\s*meta:\s*\{\s*kind:\s*['"]clarify['"]/.test(win),
     '_sendClarify must call sendChatMessage(text, { meta: { kind: "clarify", ... } })');
@@ -146,7 +147,7 @@ t('app.js: r4 — chat render skips clarify-tagged messages so they don\'t pollu
   // is what's being locked, not a specific code shape.
   const idx = APP.search(/function\s+renderChatMessage\s*\(/);
   assert.ok(idx > -1, 'renderChatMessage must be defined');
-  const win = APP.slice(idx, idx + 800);
+  const win = sliceFn(APP, idx);
   const directHasClarify = /clarify-reply/.test(win) && /clarify/.test(win);
   if (directHasClarify) return;                                     // legacy shape: in-function check passes
 
@@ -157,7 +158,7 @@ t('app.js: r4 — chat render skips clarify-tagged messages so they don\'t pollu
     'renderChatMessage must skip clarify-tagged messages — either by an in-function check OR by calling a helper like _shouldSkipMessageRender(m).');
   const helperAt = APP.search(/function\s+_shouldSkipMessageRender\s*\(/);
   assert.ok(helperAt > -1, '_shouldSkipMessageRender helper must be defined when renderChatMessage delegates to it');
-  const helperWin = APP.slice(helperAt, helperAt + 800);
+  const helperWin = sliceFn(APP, helperAt);
   assert.ok(/clarify-reply/.test(helperWin) && /clarify/.test(helperWin),
     '_shouldSkipMessageRender must check meta.kind for "clarify" and "clarify-reply" — that\'s where renderChatMessage now delegates the skip decision after f71495f.');
 });
@@ -165,7 +166,7 @@ t('app.js: r4 — chat render skips clarify-tagged messages so they don\'t pollu
 t('app.js: r4 — appendChatMessage skips clarify-tagged messages (no state.chatMessages bloat)', () => {
   const idx = APP.search(/function\s+appendChatMessage\s*\(/);
   assert.ok(idx > -1, 'appendChatMessage must be defined');
-  const win = APP.slice(idx, idx + 800);
+  const win = sliceFn(APP, idx);
   assert.ok(/clarify-reply/.test(win) && /clarify/.test(win),
     'appendChatMessage must early-return for clarify-tagged messages — they belong in the popover only, not state.chatMessages');
 });
@@ -188,7 +189,7 @@ t('app.js: r4 — _clarifyState tracks questionTs so the right popover gets the 
   assert.ok(/_clarifyState\s*=\s*\{/.test(APP),
     '_clarifyState object must exist');
   const idx = APP.search(/function\s+_handleClarifyReplyFrame\s*\(/);
-  const win = APP.slice(idx, idx + 500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_clarifyState\.questionTs/.test(win) &&
             /payload\.questionTs/.test(win),
     'reply handler must compare payload.questionTs against _clarifyState.questionTs before rendering');
@@ -197,7 +198,7 @@ t('app.js: r4 — _clarifyState tracks questionTs so the right popover gets the 
 t('app.js: r4 — sendChatMessage accepts optional opts.meta + forwards it on the WS frame', () => {
   const idx = APP.search(/function\s+sendChatMessage\s*\(text(?:,\s*opts)?\)/);
   assert.ok(idx > -1, 'sendChatMessage(text, opts) signature must exist');
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/opts\.meta/.test(win) || /opts && opts\.meta/.test(win),
     'sendChatMessage must read opts.meta');
   assert.ok(/frame\.meta\s*=/.test(win),
@@ -241,7 +242,7 @@ t('app.js: r3 — popover left + width come from #chat-messages bbox (not the se
   // there instead.
   const idx = APP.search(/function\s+_clarifyReposition\s*\(\s*\)/);
   assert.ok(idx > -1, '_clarifyReposition must exist');
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   // Must look up #chat-messages for horizontal alignment.
   assert.ok(/getElementById\(['"]chat-messages['"]\)/.test(win) ||
             /querySelector\(['"]#chat-messages['"]\)/.test(win),
@@ -261,7 +262,7 @@ t('app.js: r3 — vertical anchor still uses the anchor bbox\'s bottom (below th
   // Same r4 relocation — anchor-bottom-driven top now lives in
   // _clarifyReposition.
   const idx = APP.search(/function\s+_clarifyReposition\s*\(\s*\)/);
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   assert.ok(/rect\.bottom\s*\+\s*window\.scrollY/.test(win) ||
             /selRect\.bottom\s*\+\s*window\.scrollY/.test(win),
     'top position must use the anchor bbox\'s bottom (popover sits BELOW the highlight)');
@@ -306,7 +307,7 @@ t('app.js: r4 — popover follows chat scroll (re-positions on #chat-messages sc
 t('app.js: r4 — close removes the scroll + resize listeners (no leak when × clicked)', () => {
   const idx = APP.search(/function\s+_closeClarifyPopover\s*\(\s*\)/);
   assert.ok(idx > -1, '_closeClarifyPopover must be defined');
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/removeEventListener\(\s*['"]scroll['"]/.test(win),
     '_closeClarifyPopover must removeEventListener("scroll", ...)');
   assert.ok(/removeEventListener\(\s*['"]resize['"]/.test(win),
@@ -368,7 +369,7 @@ t('app.js: r5 — anchor out of chat-messages viewport hides popover (re-shows o
   // the popover. State stays alive; only the visibility flips.
   const idx = APP.search(/function\s+_clarifyReposition\s*\(\s*\)/);
   assert.ok(idx > -1, '_clarifyReposition must exist');
-  const win = APP.slice(idx, idx + 2500);
+  const win = sliceFn(APP, idx);
   // Must compute the chat-messages bbox AND compare it to the anchor bbox.
   // (chatRect is already read for left/width; now also used for visibility.)
   assert.ok(/visibility/.test(win),
@@ -409,7 +410,7 @@ t('app.js: r6 — popover width is inset from the chat-messages bbox (visible si
   // padding instead of butting against it.
   const idx = APP.search(/function\s+_clarifyReposition\s*\(\s*\)/);
   assert.ok(idx > -1, '_clarifyReposition must be defined');
-  const win = APP.slice(idx, idx + 1800);
+  const win = sliceFn(APP, idx);
   // Width must subtract a positive horizontal-margin literal (not
   // chatRect.width on its own). Accept any explicit subtraction.
   assert.ok(

@@ -11,6 +11,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -102,7 +103,7 @@ t('app.js closes on Escape + clicks outside the dialog', () => {
 t('openManualModal fetches /USER_MANUAL.md and renders via renderMd', () => {
   const start = APP.search(/async\s+function\s+openManualModal\s*\(/);
   assert.ok(start > -1, 'openManualModal must exist');
-  const body = APP.slice(start, start + 2000);
+  const body = sliceFn(APP, start);
   assert.ok(/fetch\(['"]\/USER_MANUAL\.md['"]/.test(body),
     'openManualModal must fetch /USER_MANUAL.md');
   assert.ok(/renderMd\(/.test(body),

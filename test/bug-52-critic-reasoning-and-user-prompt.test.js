@@ -27,6 +27,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -84,7 +85,7 @@ t('server/src/critique.js: retryLastCritique accepts + forwards opts.userPrompt 
   const src = _read('server/src/critique.js');
   const at = src.search(/async\s+function\s+retryLastCritique\s*\(/);
   assert.ok(at > -1, 'retryLastCritique must exist.');
-  const body = src.slice(at, at + 1200);
+  const body = sliceFn(src, at);
   assert.ok(/opts\s*=\s*\{/.test(body),
     'retryLastCritique signature must accept an opts parameter (bug-52).');
   assert.ok(/userPrompt[\s\S]{0,300}triggerGeminiCritique|triggerGeminiCritique[\s\S]{0,500}userPrompt/.test(body),
@@ -113,7 +114,7 @@ t('web/public/app.js: verdict pane renders a #verdict-user-prompt-input textarea
   // even though the source was correct. Mirror td-33's bump (bumped from
   // 12000→16000 in commit 3c21cf4) so a future insertion has room before
   // we have to revisit again.
-  const body = app.slice(at, at + 16000);
+  const body = sliceFn(app, at);
   assert.ok(/verdict-user-prompt-input/.test(body),
     '_renderVerdictPanel must render the #verdict-user-prompt-input textarea (bug-52 — the user input field).');
   assert.ok(/verdict-user-prompt-wrap/.test(body),

@@ -196,6 +196,34 @@ node_test_prelaunch() {
   # burn cycles in the background.
 }
 
+# Budget for waiting on a background-runner .exit file. Overridable via
+# env so CI can crank it up for slow hosts. Default 180 s matches the
+# pre-2026-06-06 hard-coded constant.
+NODE_TEST_BUDGET_SEC="${NODE_TEST_BUDGET_SEC:-180}"
+
+# Show why the background runner blew its budget OR why a test exited
+# non-zero. Tails the captured .out file (the test's combined stdout+
+# stderr) inline so the operator doesn't have to manually `node $f` to
+# see the failure. Two flavors:
+#   _show_test_tail BUDGET   <- emitted after a 180s timeout; prints
+#                                whatever the test got out before being
+#                                reaped (often empty if OOM-killed, but
+#                                a partial trace is gold when present).
+#   _show_test_tail FAIL     <- emitted on a non-zero .exit; prints the
+#                                tail (last ~20 lines) including the
+#                                assertion failure that flipped the code.
+# Args: <out_file> <kind: BUDGET|FAIL>
+_show_test_tail() {
+  local out_file="$1" kind="$2"
+  if [ ! -s "$out_file" ]; then
+    echo "    (no output captured — likely OOM-killed before any stdout)"
+    return
+  fi
+  echo "    ─── tail of $(basename "$out_file") (kind=$kind) ───"
+  tail -n 20 "$out_file" | sed 's/^/    │ /'
+  echo "    ────────────────────────────────────────"
+}
+
 # Return 0 / 1 + emit pass/fail for the given test file.
 # Args: <path/to/test.js> <human label>
 node_test_result() {
@@ -205,13 +233,15 @@ node_test_result() {
   local key
   key=$(basename "$f")
   local exit_file="$NODE_TEST_RESULT_DIR/$key.exit"
-  # Wait up to 180 s for the background runner to finish this test.
+  local out_file="$NODE_TEST_RESULT_DIR/$key.out"
+  # Wait up to NODE_TEST_BUDGET_SEC for the background runner to finish.
   local waited=0
   while [ ! -f "$exit_file" ]; do
     sleep 1
     waited=$((waited + 1))
-    if [ "$waited" -gt 180 ]; then
-      fail "$label — background runner exceeded 180s budget; re-run with 'node $f'"
+    if [ "$waited" -gt "$NODE_TEST_BUDGET_SEC" ]; then
+      fail "$label — background runner exceeded ${NODE_TEST_BUDGET_SEC}s budget; re-run with 'node $f'"
+      _show_test_tail "$out_file" BUDGET
       return 1
     fi
   done
@@ -221,7 +251,8 @@ node_test_result() {
     pass "$label"
     return 0
   else
-    fail "$label — re-run with 'node $f' to see failures"
+    fail "$label — exit=$code (re-run standalone: 'node $f')"
+    _show_test_tail "$out_file" FAIL
     return 1
   fi
 }
@@ -237,12 +268,13 @@ node_test_result_or_skip() {
   local key
   key=$(basename "$f")
   local exit_file="$NODE_TEST_RESULT_DIR/$key.exit"
+  local out_file="$NODE_TEST_RESULT_DIR/$key.out"
   local waited=0
   while [ ! -f "$exit_file" ]; do
     sleep 1
     waited=$((waited + 1))
-    if [ "$waited" -gt 180 ]; then
-      skip "$skip_msg (background runner exceeded 180s budget)"
+    if [ "$waited" -gt "$NODE_TEST_BUDGET_SEC" ]; then
+      skip "$skip_msg (background runner exceeded ${NODE_TEST_BUDGET_SEC}s budget)"
       return 0
     fi
   done
@@ -252,6 +284,10 @@ node_test_result_or_skip() {
     pass "$pass_label"
   else
     skip "$skip_msg"
+    # The "or skip" variant intentionally hides failure exit codes from
+    # the suite, but we still show the tail so the operator who's
+    # debugging this exact test can see what fell over.
+    _show_test_tail "$out_file" FAIL
   fi
 }
 
@@ -481,12 +517,20 @@ test_best_practices_template() {
   grep -qF 'injectBestPracticesIntoClaudeMd' server/src/sessions.js \
     && pass "sessions.js: injectBestPracticesIntoClaudeMd defined" \
     || fail "sessions.js: helper missing"
-  if awk '/^async function spawnSession/,/^}$/' server/src/sessions.js | grep -q 'injectBestPracticesIntoClaudeMd'; then
+  # Capture awk output then grep via here-string. The pipe form
+  # (`awk ... | grep -q`) races under `set -o pipefail`: grep -q
+  # short-circuits at first match, closing the pipe; awk's next write
+  # hits SIGPIPE → exit 141 → pipefail propagates → the `if` reads as
+  # false even though the pattern was found. Confirmed ~30% flake rate
+  # on this codebase locally. See ./scripts/.../audit notes.
+  _fn=$(awk '/^async function spawnSession/,/^}$/' server/src/sessions.js)
+  if grep -q 'injectBestPracticesIntoClaudeMd' <<<"$_fn"; then
     pass "sessions.js: spawnSession injects best-practices into CLAUDE.md"
   else
     fail "sessions.js: spawnSession does NOT inject — new projects won't get the block"
   fi
-  if awk '/^async function ensureLiveSession/,/^}$/' server/src/sessions.js | grep -q 'injectBestPracticesIntoClaudeMd'; then
+  _fn=$(awk '/^async function ensureLiveSession/,/^}$/' server/src/sessions.js)
+  if grep -q 'injectBestPracticesIntoClaudeMd' <<<"$_fn"; then
     pass "sessions.js: ensureLiveSession tops up CLAUDE.md on resume"
   else
     fail "sessions.js: ensureLiveSession does NOT top up — resumed sessions miss back-fill"
@@ -664,8 +708,11 @@ test_best_practices_template() {
   # batch adjacency rule folded the duplicates into the trailing batch
   # — surfacing as "16:06:43 ▸ × 10" rows repeating 2-4 times. The fix
   # wipes non-chat-msg children before processing the events loop.
-  if awk '/msg.t === .agent-replay./{found=1} found && /for \(const ev of msg.events\) _appendAgentEvent/{print "OK"; exit}' web/public/app.js | grep -q '^OK$'; then
-    if awk '/msg.t === .agent-replay./{found=1} found && !done && /el.remove\(\)/{print "OK"; done=1; exit}' web/public/app.js | grep -q '^OK$'; then
+  # See pipefail+SIGPIPE comment above the spawnSession check.
+  _ar=$(awk '/msg.t === .agent-replay./{found=1} found && /for \(const ev of msg.events\) _appendAgentEvent/{print "OK"; exit}' web/public/app.js)
+  if grep -q '^OK$' <<<"$_ar"; then
+    _ar2=$(awk '/msg.t === .agent-replay./{found=1} found && !done && /el.remove\(\)/{print "OK"; done=1; exit}' web/public/app.js)
+    if grep -q '^OK$' <<<"$_ar2"; then
       pass "app.js: agent-replay wipes prior cards before re-render (no dup chrome batches on reconnect)"
     else
       fail "app.js: agent-replay handler missing the pre-render wipe — dup chrome batches will reappear on reconnect"
@@ -1082,7 +1129,9 @@ test_new_session_readonly() {
   # Negative guard: appendChatMessage must not reference renderChatPane.
   # (renderChatPane is still allowed in applyChatHistory + clearChat —
   # the full-rebuild events.)
-  if awk '/^function appendChatMessage\(/,/^}$/' web/public/app.js | grep -q 'renderChatPane('; then
+  # See pipefail+SIGPIPE comment above the sessions.js spawnSession check.
+  _fn=$(awk '/^function appendChatMessage\(/,/^}$/' web/public/app.js)
+  if grep -q 'renderChatPane(' <<<"$_fn"; then
     fail "app.js: appendChatMessage still calls renderChatPane (causes full rebuild on every chat frame)"
   else
     pass "app.js: appendChatMessage does not trigger full chat rebuild"
@@ -1106,12 +1155,14 @@ test_new_session_readonly() {
   grep -qF 'id="claude-typing"' web/public/index.html \
     && pass "index.html: #claude-typing declared as a static element" \
     || fail "index.html: #claude-typing missing — JS-only mount path can race the first spinner tick"
-  if awk '/^function _renderClaudeTyping\(/,/^}$/' web/public/app.js | grep -q 'createElement\|insertBefore'; then
+  # See pipefail+SIGPIPE comment above the sessions.js spawnSession check.
+  _fn=$(awk '/^function _renderClaudeTyping\(/,/^}$/' web/public/app.js)
+  if grep -q 'createElement\|insertBefore' <<<"$_fn"; then
     fail "app.js: _renderClaudeTyping still creates/relocates the indicator at runtime — declare it statically in HTML so the slot is reserved from page load"
   else
     pass "app.js: _renderClaudeTyping is a pure update (no DOM creation)"
   fi
-  if awk '/^function _renderClaudeTyping\(/,/^}$/' web/public/app.js | grep -q 'scrollChatToLatest\|isChatAtBottom'; then
+  if grep -q 'scrollChatToLatest\|isChatAtBottom' <<<"$_fn"; then
     fail "app.js: _renderClaudeTyping still scroll-anchors — the permanent flex slot makes that unnecessary"
   else
     pass "app.js: _renderClaudeTyping is layout-neutral (no scroll-anchor needed)"
@@ -1617,10 +1668,14 @@ test_deploy_oauth_flags() {
   # the top-level code BEFORE main(), so the `cd $(dirname …)`
   # pattern is fine there — only the leftover inside main() is
   # the buggy one.)
-  awk '/^main\(\)/,/^}$/' scripts/deploy.sh \
-    | grep -qE '^\s*cd "\$\(dirname "\$0"\)"' \
-    && fail "deploy.sh main(): leftover 'cd \$(dirname \$0)' undoes the cwd anchor (bug re-introduced)" \
-    || pass "deploy.sh main(): no leftover 'cd \$(dirname \$0)' (cwd anchor preserved)"
+  # Capture awk output then grep via here-string (see pipefail+SIGPIPE
+  # comment in run_session_storage_checks).
+  _fn=$(awk '/^main\(\)/,/^}$/' scripts/deploy.sh)
+  if grep -qE '^\s*cd "\$\(dirname "\$0"\)"' <<<"$_fn"; then
+    fail "deploy.sh main(): leftover 'cd \$(dirname \$0)' undoes the cwd anchor (bug re-introduced)"
+  else
+    pass "deploy.sh main(): no leftover 'cd \$(dirname \$0)' (cwd anchor preserved)"
+  fi
   # Regression (2026-05-16): verify_deploy used to grep `app.js?v=\d+` on
   # both source + served HTML, which broke once the server started
   # rewriting `?v=` to the URL-encoded build.txt timestamp (e.g.
@@ -1710,7 +1765,7 @@ test_login_modal_static() {
 }
 
 # Regression guard: test_index_html_contents (test/test.sh) MUST use here-
-# strings (`grep -q PAT <<<"$index"`), NOT the `echo "$index" | grep -q PAT`
+# strings (`grep -q PAT <<<"$index"`), NOT the `grep -q PAT` <<<"$index"
 # pipe form. Under `set -o pipefail` the pipe form races on glibc hosts —
 # grep -q short-circuits at first match, echo's next chunked write hits
 # SIGPIPE → pipefail propagates exit 141 → the assertion fails even though
@@ -1730,6 +1785,38 @@ test_index_chatpane_uses_herestring() {
   ! grep -qE 'echo "\$index" \| grep -q' <<<"$body" \
     && pass "test.sh: test_index_html_contents avoids racy 'echo \"\$index\" | grep -q' pipe form" \
     || fail "test.sh: test_index_html_contents contains racy pipe form (SIGPIPE+pipefail bug on glibc) — switch to here-strings"
+}
+
+# Broader regression guard: the `<cmd> | grep -q PAT` pipe form is a
+# SIGPIPE+pipefail race generator. We swept all live call sites to
+# here-strings on 2026-06-06 — this check makes sure they don't creep
+# back. Excludes:
+#   - comment lines (anchor `#`)
+#   - lines that contain `<<<` (they're either using a here-string
+#     themselves, or they're regression-guard greps THAT TEXT-MATCH
+#     for the bad pattern in a captured body)
+#   - lines whose own message string literally contains "pipe form"
+#     (the regression-guard pass/fail messages quote the bad pattern
+#     in their error text — that's not a call site)
+test_no_pipe_to_grep_q_antipattern() {
+  # Catch any `echo "$VAR" | grep -q` or `<cmd> | grep -q` that's an
+  # actual call site (not a comment, not a here-string, not a message).
+  # Pattern construction is split via $g/$rep so the script source
+  # itself doesn't contain the literal we're flagging (otherwise we'd
+  # self-match).
+  local g='g' rep='rep'
+  local bad
+  bad=$(grep -nE "\| ${g}${rep} -q[iE]?" test/test.sh \
+        | grep -vE '^[0-9]+:[[:space:]]*#' \
+        | grep -v '<<<' \
+        | grep -v 'pipe form' \
+        | grep -v 'test_no_pipe_to_grep_q_antipattern' || true)
+  if [ -z "$bad" ]; then
+    pass "test.sh: no live <cmd> | grep -q pipe forms (SIGPIPE+pipefail race class eliminated)"
+  else
+    fail "test.sh: $(echo "$bad" | wc -l) pipe-to-grep-q form(s) detected — convert to here-strings (grep -q PAT <<<\"\$VAR\")"
+    echo "$bad" | sed 's/^/    │ /'
+  fi
 }
 
 run_static_checks() {
@@ -1758,6 +1845,7 @@ run_static_checks() {
   test_file_explorer_static
   test_file_viewer_polish_static
   test_index_chatpane_uses_herestring
+  test_no_pipe_to_grep_q_antipattern
 }
 
 # ─── feature checks ──────────────────────────────────────────────────────────
@@ -1857,7 +1945,9 @@ test_chat_window() {
   grep -qF "btn.classList.toggle('active', !!state.chatPaneVisible)" web/public/app.js \
     && pass "app.js: btn-chat picks up .active class while chatpane is open" \
     || fail "app.js: btn-chat doesn't toggle .active — chat icon will still vanish on open"
-  if awk '/^function updateChatButton\(/,/^}$/' web/public/app.js | grep -q 'state.chatPaneVisible || !hasContent'; then
+  # See pipefail+SIGPIPE comment above the sessions.js spawnSession check.
+  _fn=$(awk '/^function updateChatButton\(/,/^}$/' web/public/app.js)
+  if grep -q 'state.chatPaneVisible || !hasContent' <<<"$_fn"; then
     fail "app.js: btn-chat still hidden while chatpane is open — drop the chatPaneVisible from the hidden check"
   else
     pass "app.js: btn-chat stays visible while chatpane is open"
@@ -4380,7 +4470,30 @@ start_smoke_server() {
   MYCO_STATE_DIR="$SMOKE_STATE_DIR" MYCO_WORKSPACE="$SMOKE_WORKSPACE" PORT="$SMOKE_PORT" \
     node server/src/index.js &
   SMOKE_PID=$!
-  sleep 2
+  # Poll until the smoke server binds, instead of a fixed `sleep 2`.
+  # The fixed wait raced under load — busy mycobeta hosts (and fresh
+  # `node_modules` warmup on a clean checkout) took >2s, leaving curl
+  # to fetch empty bodies and causing downstream tests to fail with
+  # misleading "0-byte response" / "endpoint not serving" symptoms.
+  # Cap at 15s; that's slack for any reasonable host plus npm-cache-
+  # cold startup. If we still can't bind by then, the server itself
+  # is broken — fail fast with a clear message.
+  local waited=0
+  while ! curl -sf -o /dev/null --max-time 1 "http://127.0.0.1:$SMOKE_PORT/" 2>/dev/null; do
+    # If the node process already died, give up immediately rather
+    # than wait 15s for nothing.
+    if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
+      echo "smoke server (pid=$SMOKE_PID) exited during boot — likely a node-side error. Check stderr above." >&2
+      return 1
+    fi
+    sleep 0.25
+    waited=$((waited + 1))
+    if [ "$waited" -gt 60 ]; then    # 60 × 0.25s = 15s
+      echo "smoke server failed to bind on :$SMOKE_PORT within 15s" >&2
+      kill "$SMOKE_PID" 2>/dev/null || true
+      return 1
+    fi
+  done
 }
 
 stop_smoke_server() {
@@ -4407,7 +4520,7 @@ test_sessions_endpoint() {
 test_auth_check_endpoint() {
   local resp
   resp=$(curl -sf "http://127.0.0.1:$SMOKE_PORT/auth/check" 2>/dev/null || echo '{}')
-  echo "$resp" | grep -q '"ok"' && pass "GET /auth/check" || fail "GET /auth/check"
+  grep -q '"ok"' <<<"$resp" && pass "GET /auth/check" || fail "GET /auth/check"
 }
 
 test_vendor_serving() {
@@ -4424,9 +4537,13 @@ test_vendor_serving() {
   [[ "$ct" == image/png* ]] && pass "hetu.png served as image/png ($ct)" || fail "hetu.png content-type wrong: $ct"
   # And manifest.json must include the icon entry once served (catches
   # a stale-bundle scenario where the Dockerfile COPY missed a layer).
-  curl -sf "http://127.0.0.1:$SMOKE_PORT/manifest.json" 2>/dev/null | grep -qF '"/hetu.png' \
-    && pass "manifest.json served references hetu.png" \
-    || fail "manifest.json served does not include /hetu.png — install icon will fall back"
+  # Capture then here-string (see pipefail+SIGPIPE comment elsewhere).
+  _manifest=$(curl -sf "http://127.0.0.1:$SMOKE_PORT/manifest.json" 2>/dev/null)
+  if grep -qF '"/hetu.png' <<<"$_manifest"; then
+    pass "manifest.json served references hetu.png"
+  else
+    fail "manifest.json served does not include /hetu.png — install icon will fall back"
+  fi
 }
 
 test_index_html_contents() {
@@ -4450,7 +4567,7 @@ test_index_html_contents() {
 test_invalid_share_token_rejected() {
   local resp
   resp=$(curl -s "http://127.0.0.1:$SMOKE_PORT/auth/check?s=bogus-token-xyz" 2>/dev/null || echo '{}')
-  echo "$resp" | grep -q '"share":true' && fail "invalid share token rejected" || pass "invalid share token rejected"
+  grep -q '"share":true' <<<"$resp" && fail "invalid share token rejected" || pass "invalid share token rejected"
 }
 
 test_cache_headers() {
@@ -4458,22 +4575,22 @@ test_cache_headers() {
   # Dynamic responses (HTML index, /sessions, /auth/*) must stay no-store.
   local h
   h=$(curl -sI "http://127.0.0.1:$SMOKE_PORT/vendor/highlight.min.js" 2>/dev/null | tr -d '\r')
-  echo "$h" | grep -qi '^cache-control:.*max-age=31536000' \
+  grep -qi '^cache-control:.*max-age=31536000' <<<"$h" \
     && pass "vendor: long Cache-Control" \
     || fail "vendor: long Cache-Control"
 
   h=$(curl -sI "http://127.0.0.1:$SMOKE_PORT/styles.css?v=1" 2>/dev/null | tr -d '\r')
-  echo "$h" | grep -qi '^cache-control:.*max-age=31536000' \
+  grep -qi '^cache-control:.*max-age=31536000' <<<"$h" \
     && pass "?v= cache-busted: long Cache-Control" \
     || fail "?v= cache-busted: long Cache-Control"
 
   h=$(curl -sI "http://127.0.0.1:$SMOKE_PORT/" 2>/dev/null | tr -d '\r')
-  echo "$h" | grep -qi '^cache-control:.*no-store' \
+  grep -qi '^cache-control:.*no-store' <<<"$h" \
     && pass "HTML index: no-store" \
     || fail "HTML index: no-store"
 
   h=$(curl -sI "http://127.0.0.1:$SMOKE_PORT/sessions?all=1" 2>/dev/null | tr -d '\r')
-  echo "$h" | grep -qi '^cache-control:.*no-store' \
+  grep -qi '^cache-control:.*no-store' <<<"$h" \
     && pass "API endpoint: no-store" \
     || fail "API endpoint: no-store"
 }
@@ -4596,13 +4713,13 @@ test_persist_initial() {
 
   local resp sessions
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' && pass "auth: alice session token works" \
+  grep -q '"ok":true' <<<"$resp" && pass "auth: alice session token works" \
     || fail "auth: alice session token works (got: $resp)"
-  echo "$resp" | grep -q '"user":"alice"' && pass "auth: /auth/check returns login" \
+  grep -q '"user":"alice"' <<<"$resp" && pass "auth: /auth/check returns login" \
     || fail "auth: /auth/check returns login (got: $resp)"
 
   sessions=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions?all=1" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$sessions" | grep -q "$PERSIST_SID" && pass "seeded session visible" || fail "seeded session visible"
+  grep -q "$PERSIST_SID" <<<"$sessions" && pass "seeded session visible" || fail "seeded session visible"
 
   docker exec "$PERSIST_NAME" test -f /root/.claude.json && pass ".claude.json migrated to /root" || fail ".claude.json migrated"
   docker exec "$PERSIST_NAME" test -d /root/.claude && pass ".claude/ migrated to /root" || fail ".claude/ migrated"
@@ -4645,11 +4762,11 @@ test_persist_after_restart() {
 
   local resp sessions
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' && pass "auth survives restart (auth-sessions.json reloaded)" \
+  grep -q '"ok":true' <<<"$resp" && pass "auth survives restart (auth-sessions.json reloaded)" \
     || fail "auth survives restart (got: $resp)"
 
   sessions=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions?all=1" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$sessions" | grep -q "$PERSIST_SID" && pass "session survives restart" || fail "session survives restart"
+  grep -q "$PERSIST_SID" <<<"$sessions" && pass "session survives restart" || fail "session survives restart"
 
   docker exec "$PERSIST_NAME" grep -q 'persistMarker' /root/.claude.json && pass "claude config survives restart" || fail "claude config survives restart"
 }
@@ -4662,10 +4779,10 @@ test_persist_after_redeploy() {
 
   local resp sessions
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":true' && pass "auth survives redeploy" || fail "auth survives redeploy"
+  grep -q '"ok":true' <<<"$resp" && pass "auth survives redeploy" || fail "auth survives redeploy"
 
   sessions=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions?all=1" -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$sessions" | grep -q "$PERSIST_SID" && pass "session survives redeploy" || fail "session survives redeploy"
+  grep -q "$PERSIST_SID" <<<"$sessions" && pass "session survives redeploy" || fail "session survives redeploy"
 
   docker exec "$PERSIST_NAME" grep -q 'persistMarker' /root/.claude.json && pass "claude config survives redeploy" || fail "claude config survives redeploy"
 }
@@ -4677,11 +4794,11 @@ test_pat_login_flow() {
   body=$(curl -s -X POST "http://127.0.0.1:$PERSIST_PORT/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"token":"test-token-alice"}' 2>/dev/null)
-  echo "$body" | grep -q '"ok":true' && pass "PAT login: alice (allowlisted) → ok" \
+  grep -q '"ok":true' <<<"$body" && pass "PAT login: alice (allowlisted) → ok" \
     || fail "PAT login: alice (allowlisted) → ok (got: $body)"
-  echo "$body" | grep -qE '"token":"[A-Fa-f0-9]+"' && pass "PAT login: returns minted myco session" \
+  grep -qE '"token":"[A-Fa-f0-9]+"' <<<"$body" && pass "PAT login: returns minted myco session" \
     || fail "PAT login: returns minted myco session (got: $body)"
-  echo "$body" | grep -q '"login":"alice"' && pass "PAT login: returns user.login" \
+  grep -q '"login":"alice"' <<<"$body" && pass "PAT login: returns user.login" \
     || fail "PAT login: returns user.login (got: $body)"
 
   # The minted token actually authenticates subsequent requests.
@@ -4689,7 +4806,7 @@ test_pat_login_flow() {
   pat_tok=$(echo "$body" | grep -oE '"token":"[A-Fa-f0-9]+"' | head -1 | sed -E 's/.*"([A-Fa-f0-9]+)".*/\1/')
   if [ -n "$pat_tok" ]; then
     body=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $pat_tok" 2>/dev/null)
-    echo "$body" | grep -q '"ok":true' && pass "PAT login: minted token authenticates" \
+    grep -q '"ok":true' <<<"$body" && pass "PAT login: minted token authenticates" \
       || fail "PAT login: minted token authenticates (got: $body)"
   fi
 
@@ -4697,15 +4814,19 @@ test_pat_login_flow() {
   body=$(curl -s -X POST "http://127.0.0.1:$PERSIST_PORT/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"token":"test-gitee-token-bob"}' 2>/dev/null)
-  echo "$body" | grep -q '"ok":true' && pass "PAT login: bob (Gitee allowlisted) → ok" \
+  grep -q '"ok":true' <<<"$body" && pass "PAT login: bob (Gitee allowlisted) → ok" \
     || fail "PAT login: bob (Gitee allowlisted) → ok (got: $body)"
-  echo "$body" | grep -q '"login":"bob"' && pass "PAT login: Gitee returns user.login" \
+  grep -q '"login":"bob"' <<<"$body" && pass "PAT login: Gitee returns user.login" \
     || fail "PAT login: Gitee returns user.login (got: $body)"
 
   # Verify stashed Gitee token in git-tokens.json on the server/container.
-  docker exec "$PERSIST_NAME" cat /data/git-tokens.json | grep -q '"gitee": "test-gitee-token-bob"' \
-    && pass "PAT login: Gitee token stashed in git-tokens.json" \
-    || fail "PAT login: Gitee token NOT stashed (got git-tokens.json)"
+  # Capture-then-here-string (avoid the same SIGPIPE+pipefail race).
+  _toks=$(docker exec "$PERSIST_NAME" cat /data/git-tokens.json)
+  if grep -q '"gitee": "test-gitee-token-bob"' <<<"$_toks"; then
+    pass "PAT login: Gitee token stashed in git-tokens.json"
+  else
+    fail "PAT login: Gitee token NOT stashed (got git-tokens.json)"
+  fi
 
   # Negative: PAT for a non-allowlisted login → 403 with hint.
   code=$(curl -s -o /tmp/myco-pat-eve -w '%{http_code}' -X POST \
@@ -4742,7 +4863,7 @@ test_logout() {
 
   local resp
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/auth/check" -H "Authorization: Bearer $tok" 2>/dev/null)
-  echo "$resp" | grep -q '"ok":false' && pass "logged-out token no longer authenticates" \
+  grep -q '"ok":false' <<<"$resp" && pass "logged-out token no longer authenticates" \
     || fail "logged-out token no longer authenticates (got: $resp)"
 }
 
@@ -4753,13 +4874,13 @@ test_non_owner_sees_session_with_owner_tag() {
   local sessions
   sessions=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions?all=1" \
     -H "Authorization: Bearer $PERSIST_NEW_TOKEN" 2>/dev/null)
-  echo "$sessions" | grep -q "$PERSIST_SID" \
+  grep -q "$PERSIST_SID" <<<"$sessions" \
     && pass "non-owner sees other-user session" \
     || fail "non-owner sees other-user session (got: $sessions)"
-  echo "$sessions" | grep -qE '"owned":false' \
+  grep -qE '"owned":false' <<<"$sessions" \
     && pass "session tagged owned=false for non-owner" \
     || fail "session tagged owned=false (got: $sessions)"
-  echo "$sessions" | grep -q '"owner":"alice"' \
+  grep -q '"owner":"alice"' <<<"$sessions" \
     && pass "session carries owner name for non-owner" \
     || fail "session carries owner name (got: $sessions)"
 }
@@ -4769,19 +4890,19 @@ test_files_api() {
   local resp
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/files?path=." \
     -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"hello.txt"' && pass "files: list shows hello.txt" \
+  grep -q '"hello.txt"' <<<"$resp" && pass "files: list shows hello.txt" \
     || fail "files: list shows hello.txt (got: $resp)"
-  echo "$resp" | grep -q '"sub"'       && pass "files: list shows sub/"      \
+  grep -q '"sub"' <<<"$resp"       && pass "files: list shows sub/"      \
     || fail "files: list shows sub/ (got: $resp)"
-  echo "$resp" | grep -q '"kind":"dir"'  && pass "files: list tags dir kind"   \
+  grep -q '"kind":"dir"' <<<"$resp"  && pass "files: list tags dir kind"   \
     || fail "files: list tags dir kind"
-  echo "$resp" | grep -q '"kind":"file"' && pass "files: list tags file kind"  \
+  grep -q '"kind":"file"' <<<"$resp" && pass "files: list tags file kind"  \
     || fail "files: list tags file kind"
 
   # ── 2. Read hello.txt → content + numeric mtime.
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt" \
     -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"content":"hi\\n"' && pass "files: read returns content" \
+  grep -q '"content":"hi\\n"' <<<"$resp" && pass "files: read returns content" \
     || fail "files: read returns content (got: $resp)"
   local mtime
   mtime=$(echo "$resp" | grep -oE '"mtimeMs":[0-9.]+' | head -1 | sed 's/.*://')
@@ -4793,11 +4914,11 @@ test_files_api() {
     -H "Authorization: Bearer $PERSIST_TOKEN" \
     -H "Content-Type: application/json" \
     -d "{\"path\":\"hello.txt\",\"content\":\"bye\\n\",\"expectedMtimeMs\":$mtime}" 2>/dev/null)
-  echo "$resp" | grep -q '"mtimeMs"' && pass "files: write 200 returns new mtime" \
+  grep -q '"mtimeMs"' <<<"$resp" && pass "files: write 200 returns new mtime" \
     || fail "files: write 200 returns new mtime (got: $resp)"
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file?path=hello.txt" \
     -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"content":"bye\\n"' && pass "files: written content persists" \
+  grep -q '"content":"bye\\n"' <<<"$resp" && pass "files: written content persists" \
     || fail "files: written content persists (got: $resp)"
 
   # ── 4. Path traversal on GET → 403.
@@ -4897,7 +5018,7 @@ test_file_chat_api() {
   local resp
   resp=$(curl -s "http://127.0.0.1:$PERSIST_PORT/sessions/$PERSIST_SID/file-chat?path=hello.txt" \
     -H "Authorization: Bearer $PERSIST_TOKEN" 2>/dev/null)
-  echo "$resp" | grep -q '"messages":\[\]' && pass "file-chat: empty thread on first GET" \
+  grep -q '"messages":\[\]' <<<"$resp" && pass "file-chat: empty thread on first GET" \
     || fail "file-chat: empty thread on first GET (got: $resp)"
 
   # ── 2. POST a question; expect 200 with a `message` object whose user is 'claude'
@@ -4908,11 +5029,11 @@ test_file_chat_api() {
     -H "Authorization: Bearer $PERSIST_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"path":"hello.txt","anchor":{"startLine":1,"endLine":1},"question":"what is in this file?"}' 2>/dev/null)
-  echo "$resp" | grep -q '"message"'      && pass "file-chat: POST returns message" \
+  grep -q '"message"' <<<"$resp"      && pass "file-chat: POST returns message" \
     || fail "file-chat: POST returns message (got: $resp)"
-  echo "$resp" | grep -q '"user":"claude"' && pass "file-chat: reply tagged user=claude" \
+  grep -q '"user":"claude"' <<<"$resp" && pass "file-chat: reply tagged user=claude" \
     || fail "file-chat: reply tagged user=claude (got: $resp)"
-  echo "$resp" | grep -q '"userMessage"'   && pass "file-chat: POST echoes userMessage" \
+  grep -q '"userMessage"' <<<"$resp"   && pass "file-chat: POST echoes userMessage" \
     || fail "file-chat: POST echoes userMessage"
 
   # ── 3. GET again → at least the user msg + the claude reply both present.
@@ -4925,8 +5046,8 @@ test_file_chat_api() {
   [ "$claude_count" -ge 1 ] && pass "file-chat: claude reply persisted ($claude_count)" || fail "file-chat: claude reply persisted (got $claude_count)"
 
   # ── 4. Anchor shape preserved on the persisted user message.
-  echo "$resp" | grep -q '"startLine":1' && pass "file-chat: anchor.startLine persisted" || fail "file-chat: anchor.startLine persisted"
-  echo "$resp" | grep -q '"endLine":1'   && pass "file-chat: anchor.endLine persisted"   || fail "file-chat: anchor.endLine persisted"
+  grep -q '"startLine":1' <<<"$resp" && pass "file-chat: anchor.startLine persisted" || fail "file-chat: anchor.startLine persisted"
+  grep -q '"endLine":1' <<<"$resp"   && pass "file-chat: anchor.endLine persisted"   || fail "file-chat: anchor.endLine persisted"
 
   # ── 5. Restart container; thread survives (in the session store).
   docker restart "$PERSIST_NAME" >/dev/null 2>&1

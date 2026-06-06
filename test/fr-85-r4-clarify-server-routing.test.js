@@ -15,6 +15,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -49,7 +50,7 @@ t('attach.js: handleChatMessage tags message meta + sets session._pendingClarify
   const idx = ATTACH.search(/function\s+handleChatMessage\s*\(/);
   assert.ok(idx > -1, 'handleChatMessage must be defined');
   // Slice big — handleChatMessage is ~80 lines + comment-heavy.
-  const win = ATTACH.slice(idx, idx + 6000);
+  const win = sliceFn(ATTACH, idx);
   assert.ok(/opts\.meta\.kind === ['"]clarify['"]/.test(win),
     'handleChatMessage must branch on opts.meta.kind === "clarify"');
   assert.ok(/message\.meta\s*=\s*\{\s*kind:\s*['"]clarify['"]/.test(win),
@@ -138,7 +139,7 @@ t('attach.js: r2 — questionTs is round-tripped from the client meta (not serve
     'WS chat parser must whitelist meta.questionTs so it reaches handleChatMessage');
   // handleChatMessage must consume opts.meta.questionTs (with fallback).
   const idx = ATTACH.search(/function\s+handleChatMessage\s*\(/);
-  const win = ATTACH.slice(idx, idx + 6000);
+  const win = sliceFn(ATTACH, idx);
   assert.ok(/opts\.meta\.questionTs/.test(win),
     'handleChatMessage must use opts.meta.questionTs (the client-generated value)');
   assert.ok(/message\.ts/.test(win),
@@ -147,7 +148,7 @@ t('attach.js: r2 — questionTs is round-tripped from the client meta (not serve
 
 t('app.js: r2 — client passes questionTs in clarify meta', () => {
   const idx = APP.search(/function\s+_sendClarify\s*\(/);
-  const win = APP.slice(idx, idx + 4500);
+  const win = sliceFn(APP, idx);
   // The questionTs must be in the meta object that sendChatMessage
   // sees — otherwise the server picks its own and the client never
   // matches the reply.
@@ -171,7 +172,7 @@ t('attach.js: r7 — clarify branch wraps message.text with a brevity preamble b
   // the wrap is purely an LLM-facing nudge.
   const idx = ATTACH.search(/function\s+handleChatMessage\s*\(/);
   assert.ok(idx > -1, 'handleChatMessage must be defined');
-  const win = ATTACH.slice(idx, idx + 6000);
+  const win = sliceFn(ATTACH, idx);
   // The brevity instruction must be applied to message.text inside
   // the clarify branch. We anchor on any brevity wording (r7 r2
   // strengthened this to "2-3 sentences MAX / terse") so the test

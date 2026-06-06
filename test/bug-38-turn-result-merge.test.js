@@ -25,6 +25,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -46,7 +47,7 @@ t('app.js: _appendAgentEvent has a turn_result early-return inside the chrome br
   // on the unrelated turn_result branches elsewhere).
   const fnIdx = APP.search(/function\s+_appendAgentEvent\s*\(/);
   assert.ok(fnIdx > -1, '_appendAgentEvent must be defined');
-  const fn = APP.slice(fnIdx, fnIdx + 9000);
+  const fn = sliceFn(APP, fnIdx);
   // Locate the chrome-routing block.
   const chromeIdx = fn.search(/if\s*\(\s*_isChromeEvent\s*\(\s*ev\s*\)\s*\)\s*\{/);
   assert.ok(chromeIdx > -1, 'chrome-routing block must be inside _appendAgentEvent');
@@ -64,7 +65,7 @@ t('app.js: _appendAgentEvent has a turn_result early-return inside the chrome br
 
 t('app.js: turn_result branch attaches outcome chip only when prev is a chrome batch (else drops)', () => {
   const fnIdx = APP.search(/function\s+_appendAgentEvent\s*\(/);
-  const fn = APP.slice(fnIdx, fnIdx + 9000);
+  const fn = sliceFn(APP, fnIdx);
   const chromeIdx = fn.search(/if\s*\(\s*_isChromeEvent\s*\(\s*ev\s*\)\s*\)\s*\{/);
   const chromeWin = fn.slice(chromeIdx, chromeIdx + 2500);
   // Inside the turn_result branch we expect:
@@ -90,7 +91,7 @@ t('app.js: _appendToChromeBatch leaves head label alone when the incoming event 
   // batch instead of in a fresh one.
   const idx = APP.search(/function\s+_appendToChromeBatch\s*\(/);
   assert.ok(idx > -1, '_appendToChromeBatch must be defined');
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   // The function must explicitly skip the .agent-chrome-last relabel
   // when ev.type === 'turn_result'.
   assert.ok(/ev\.type\s*!==\s*['"]turn_result['"]|ev\.type\s*===\s*['"]turn_result['"]/.test(win),

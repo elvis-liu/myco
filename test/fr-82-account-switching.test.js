@@ -17,6 +17,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -119,7 +120,7 @@ t('git-tokens.js: setRepoToken rejects malformed alias (defensive)', () => {
 
 t('slashcmds.js: handleSetPat parses --as <alias> after @<target>', () => {
   const idx = SRC.search(/async\s+function\s+handleSetPat\s*\(/);
-  const win = SRC.slice(idx, idx + 4000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/aliasMatch\s*=\s*args\.match\(\s*\/\^--as\\s\+\(\[a-z0-9_-\]\+\)/i.test(win),
     'handleSetPat must parse a leading --as <alias> token (after the optional @target)');
   // Pass alias through to setRepoToken.
@@ -132,7 +133,7 @@ t('slashcmds.js: handleSetPat parses --as <alias> after @<target>', () => {
 
 t('slashcmds.js: addPlanItem parses --as <alias> after @<target> + forwards to handleRemoteIssue', () => {
   const idx = SRC.search(/function\s+addPlanItem\s*\(/);
-  const win = SRC.slice(idx, idx + 4000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/aliasMatch\s*=\s*remainder\.match\(\s*\/\^--as\\s\+\(\[a-z0-9_-\]\+\)/i.test(win),
     'addPlanItem must parse --as <alias> in the @<target> branch');
   // r5 added shouldRewrite as the 6th arg; alias stays as 5th. Accept
@@ -143,7 +144,7 @@ t('slashcmds.js: addPlanItem parses --as <alias> after @<target> + forwards to h
 
 t('slashcmds.js: handleRemoteIssue accepts alias + passes to gitHosts.getToken', () => {
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
-  const win = SRC.slice(idx, idx + 8000);
+  const win = sliceFn(SRC, idx);
   // fr-80 r5 added a 6th `shouldRewrite` arg after `alias`. Accept the
   // wider signature — what we're pinning is that `alias` is present.
   assert.ok(/async\s+function\s+handleRemoteIssue\s*\(\s*ctx\s*,\s*layer\s*,\s*targetName\s*,\s*description\s*,\s*alias\s*[,)]/.test(win),
@@ -157,7 +158,7 @@ t('slashcmds.js: "no PAT for alias" error lists which aliases ARE stored', () =>
   // listAliases() is called so the error can suggest the correct
   // alias name (catches typos).
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
-  const win = SRC.slice(idx, idx + 8000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/gitHosts\.listAliases\(/.test(win),
     'no-token-for-alias branch must call listAliases for the hint');
   assert.ok(/Aliases on file/i.test(win),
@@ -170,7 +171,7 @@ t('slashcmds.js: /listpat command registered + handleListPat defined', () => {
   assert.ok(/async\s+function\s+handleListPat\s*\(/.test(SRC),
     'handleListPat must be defined');
   const idx = SRC.search(/async\s+function\s+handleListPat\s*\(/);
-  const win = SRC.slice(idx, idx + 3000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/gitHosts\.listAliases\(/.test(win),
     'handleListPat must call gitHosts.listAliases to enumerate stored aliases');
   // Accepts both session form + @<target> form.

@@ -21,6 +21,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -94,7 +95,7 @@ t('web/public/app.js r2: _renderVerdictPanel wraps the contents in .verdict-pane
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+_renderVerdictPanel\s*\(\)/);
   assert.ok(at > -1);
-  const body = app.slice(at, at + 12000);
+  const body = sliceFn(app, at);
   assert.ok(/verdict-panel-content/.test(body),
     '_renderVerdictPanel must wrap the rendered contents in a .verdict-panel-content child div (r2 — modal layout). bug-55 keeps this visual envelope; only the dismissal wiring changed.');
   // bug-55 SUPERSEDES the prior Esc/backdrop assertions: the verdict

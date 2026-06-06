@@ -31,6 +31,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -193,7 +194,7 @@ t('attach.js: stage-done handler transitions to awaiting_verdict (_transitionSta
 t('attach.js: clearActiveRunItem clears stage state (_clearAndBroadcastStageState called)', () => {
   const src = _read('server/src/attach.js');
   const at = src.search(/function\s+clearActiveRunItem\s*\(/);
-  const body = src.slice(at, at + 2500);
+  const body = sliceFn(src, at);
   assert.ok(/_clearAndBroadcastStageState\s*\(/.test(body),
     'clearActiveRunItem must call _clearAndBroadcastStageState — that\'s the awaiting_accept → [*] cleared transition for verify-accept + discard (fr-96 hook 4).');
 });
@@ -201,7 +202,7 @@ t('attach.js: clearActiveRunItem clears stage state (_clearAndBroadcastStageStat
 t('attach.js: exports _transitionStageState + _clearAndBroadcastStageState + _findPlanItemInRec (critique.js needs them)', () => {
   const src = _read('server/src/attach.js');
   const at = src.search(/module\.exports\s*=\s*\{/);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   assert.ok(/_transitionStageState/.test(body),
     'attach.js must export _transitionStageState — critique.js calls it after the verdict broadcast.');
   assert.ok(/_clearAndBroadcastStageState/.test(body),
@@ -227,7 +228,7 @@ t('critique.js: after critic broadcast, transition to awaiting_accept (fr-96 hoo
 t('critique.js: resolveCritique branches on reason === "accept-stage" → next stage in_progress', () => {
   const src = _read('server/src/critique.js');
   const at = src.search(/function\s+resolveCritique\s*\(/);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   assert.ok(/reason\s*===\s*['"]accept-stage['"]/.test(body),
     'resolveCritique must branch on reason === "accept-stage" — the Accept Stage button (bug-56) drives the next-stage transition.');
   assert.ok(/stageStateMod\.nextStage\s*\(/.test(body),
@@ -237,7 +238,7 @@ t('critique.js: resolveCritique branches on reason === "accept-stage" → next s
 t('critique.js: resolveCritique branches on reason === "fix-stage" → same stage in_progress', () => {
   const src = _read('server/src/critique.js');
   const at = src.search(/function\s+resolveCritique\s*\(/);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   assert.ok(/reason\s*===\s*['"]fix-stage['"]/.test(body),
     'resolveCritique must branch on reason === "fix-stage" — the Ask Claude to Fix Stage button (bug-56) drives the redo-same-stage transition.');
 });
@@ -262,7 +263,7 @@ t('app.js: WS dispatcher case for kind:"plan-item-stage" updates state.planItemS
 t('app.js: _getHUDActiveStep prefers authoritative server-side stage state over heuristic fallback', () => {
   const src = _read('web/public/app.js');
   const at = src.search(/function\s+_getHUDActiveStep\s*\(\)/);
-  const body = src.slice(at, at + 2500);
+  const body = sliceFn(src, at);
   assert.ok(/state\.planItemStages/.test(body),
     '_getHUDActiveStep must read state.planItemStages — the authoritative server-side stage state (fr-96).');
   // awaiting_verdict / awaiting_accept → Critic chip
@@ -275,7 +276,7 @@ t('app.js: _rebuildPlanItemStagesFromArtifacts derives state.planItemStages from
   assert.ok(/function\s+_rebuildPlanItemStagesFromArtifacts\s*\(\)/.test(src),
     'app.js must declare _rebuildPlanItemStagesFromArtifacts — derives the planItemStages map from the cached plan items (fr-96).');
   const at = src.search(/function\s+_rebuildPlanItemStagesFromArtifacts\s*\(\)/);
-  const body = src.slice(at, at + 1500);
+  const body = sliceFn(src, at);
   assert.ok(/item\.meta\.stageState/.test(body),
     '_rebuildPlanItemStagesFromArtifacts must read item.meta.stageState (the server-persisted shape).');
   assert.ok(/state\.planItemStages\s*=/.test(body),
@@ -285,7 +286,7 @@ t('app.js: _rebuildPlanItemStagesFromArtifacts derives state.planItemStages from
 t('app.js: _onArtifactsCacheUpdated calls _rebuildPlanItemStagesFromArtifacts (on every artifact-cache mutation)', () => {
   const src = _read('web/public/app.js');
   const at = src.search(/function\s+_onArtifactsCacheUpdated\s*\(/);
-  const body = src.slice(at, at + 1500);
+  const body = sliceFn(src, at);
   assert.ok(/_rebuildPlanItemStagesFromArtifacts\s*\(\s*\)/.test(body),
     '_onArtifactsCacheUpdated must call _rebuildPlanItemStagesFromArtifacts so the HUD reflects fresh stageState on every artifacts-init + state-update kind:artifact frame.');
 });

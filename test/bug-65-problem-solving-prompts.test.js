@@ -47,6 +47,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -224,7 +225,7 @@ t('critique.js: _buildProblemBlock(item) helper exists + combines item.text + it
   assert.ok(/function\s+_buildProblemBlock\s*\(\s*item\s*\)/.test(src),
     'critique.js must define _buildProblemBlock(item) — bug-65 helper that builds the USER-REPORTED PROBLEM block.');
   const at = src.search(/function\s+_buildProblemBlock\s*\(/);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   assert.ok(/item\.text/.test(body),
     '_buildProblemBlock must read item.text (the original plan-item description).');
   assert.ok(/item\.comments/.test(body),
@@ -244,7 +245,7 @@ t('critique.js: _buildHistoryBlock no longer includes item.comments (moved to _b
   const nextFnAt = after.search(/\nfunction\s+/);
   let body = nextFnAt > -1
     ? src.slice(at, at + 30 + nextFnAt)
-    : src.slice(at, at + 3000);
+    : sliceFn(src, at);
   // Strip JS line + block comments before grepping. The body has a
   // bug-65 explanatory comment that LEGITIMATELY mentions
   // `item.comments` while documenting what was MOVED OUT. Comment

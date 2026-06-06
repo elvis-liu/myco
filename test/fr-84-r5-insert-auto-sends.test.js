@@ -17,6 +17,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -32,7 +33,7 @@ console.log('── fr-84 r5: Insert auto-submits the chat form ──');
 t('app.js: _diagramSave triggers a form submit after a successful insert', () => {
   const idx = APP.search(/async\s+function\s+_diagramSave\s*\(\s*\)/);
   assert.ok(idx > -1, '_diagramSave function must exist');
-  const win = APP.slice(idx, idx + 3500);
+  const win = sliceFn(APP, idx);
   // Auto-submit goes through the form so the existing submit handler
   // (defined in the chat-init closure) runs the real send path.
   // Either requestSubmit() OR a dispatch of a submit Event are
@@ -47,7 +48,7 @@ t('app.js: _diagramSave triggers a form submit after a successful insert', () =>
 
 t('app.js: auto-submit lives in the success path, NOT the error path', () => {
   const idx = APP.search(/async\s+function\s+_diagramSave\s*\(\s*\)/);
-  const win = APP.slice(idx, idx + 3500);
+  const win = sliceFn(APP, idx);
   // The form submit must come AFTER input.value = ... (so the value
   // is in the textarea when submitChat reads it) and BEFORE the
   // catch / finally blocks (so failures don't auto-send anything).
@@ -66,7 +67,7 @@ t('app.js: auto-submit lives in the success path, NOT the error path', () => {
 
 t('app.js: comment near the auto-submit explains WHY (so a future refactor doesn\'t strip it)', () => {
   const idx = APP.search(/async\s+function\s+_diagramSave\s*\(\s*\)/);
-  const win = APP.slice(idx, idx + 3500);
+  const win = sliceFn(APP, idx);
   // Look for explanatory text near the requestSubmit / dispatchEvent
   // mentioning the user intent.
   const submitIdx = win.search(/requestSubmit\(\)|dispatchEvent\(\s*new\s+Event\(\s*['"]submit['"]/);

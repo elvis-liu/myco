@@ -38,6 +38,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -76,7 +77,7 @@ t('server/src/artifacts.js: findProjectRoot honors rec.mainProject before fallin
   // chars (the function body).
   const at = src.search(/function\s+findProjectRoot\s*\(/);
   assert.ok(at > -1, 'findProjectRoot must still exist.');
-  const body = src.slice(at, at + 2500);
+  const body = sliceFn(src, at);
   assert.ok(/rec\.mainProject/.test(body),
     'findProjectRoot must read rec.mainProject and use it as the project root when set (fr-94 Phase 1 — explicit override beats auto-detect).');
 });
@@ -112,7 +113,7 @@ t('server/src/sessions.js: spawnSession handles opts.gitCloneUrl + opts.mainProj
   const src = _read('server/src/sessions.js');
   const at = src.search(/async\s+function\s+spawnSession\s*\(/);
   assert.ok(at > -1, 'spawnSession must exist.');
-  const body = src.slice(at, at + 5000);
+  const body = sliceFn(src, at);
   assert.ok(/opts\.gitCloneUrl/.test(body),
     'spawnSession body must read opts.gitCloneUrl (fr-94 Phase 1 — URL → git clone path).');
   assert.ok(/opts\.mainProjectName/.test(body),
@@ -161,7 +162,7 @@ t('web/public/app.js: doSpawn reads the main-project field and sniffs URL vs nam
   const app = _read('web/public/app.js');
   const at = app.search(/async\s+function\s+doSpawn\s*\(/);
   assert.ok(at > -1, 'doSpawn() must exist.');
-  const body = app.slice(at, at + 3000);
+  const body = sliceFn(app, at);
   assert.ok(/spawn-main-project/.test(body),
     'doSpawn() must read the #spawn-main-project field value (fr-94 Phase 1).');
   assert.ok(/gitCloneUrl/.test(body) && /mainProjectName/.test(body),
@@ -180,7 +181,7 @@ t('artifacts.js r1: findProjectRoot returns null + logs warning when rec.mainPro
   const src = _read('server/src/artifacts.js');
   const at = src.search(/function\s+findProjectRoot\s*\(/);
   assert.ok(at > -1, 'findProjectRoot must exist.');
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   // The body must have a `return null;` immediately after a console.warn
   // referencing rec.mainProject (the missing-dir branch).
   assert.ok(/console\.warn\([^)]*mainProject/i.test(body),
@@ -204,7 +205,7 @@ t('sessions.js r1 → Phase 3 supersession: gitCloneUrl branch no longer pins th
   const src = _read('server/src/sessions.js');
   const at = src.search(/async\s+function\s+spawnSession\s*\(/);
   assert.ok(at > -1, 'spawnSession must exist.');
-  const body = src.slice(at, at + 6000);
+  const body = sliceFn(src, at);
   // The branch dispatching on opts.gitCloneUrl must NOT call any
   // spawnSync-shaped helper. The async helper is the only allowed
   // dispatcher.

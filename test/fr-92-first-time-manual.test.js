@@ -21,6 +21,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -40,7 +41,7 @@ t('app.js: _maybeShowFirstTimeManual function defined', () => {
 
 t('app.js: _maybeShowFirstTimeManual uses localStorage key myco_manual_seen', () => {
   const idx = APP.search(/function\s+_maybeShowFirstTimeManual\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/myco_manual_seen/.test(win),
     'must persist the seen flag under localStorage key myco_manual_seen');
   assert.ok(/localStorage\.getItem/.test(win) && /localStorage\.setItem/.test(win),
@@ -49,14 +50,14 @@ t('app.js: _maybeShowFirstTimeManual uses localStorage key myco_manual_seen', ()
 
 t('app.js: _maybeShowFirstTimeManual skips viewer-mode (share-link landings)', () => {
   const idx = APP.search(/function\s+_maybeShowFirstTimeManual\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/state\.viewerMode/.test(win),
     'must early-return when state.viewerMode is true (share-link visitors don\'t need onboarding)');
 });
 
 t('app.js: _maybeShowFirstTimeManual calls openManualModal', () => {
   const idx = APP.search(/function\s+_maybeShowFirstTimeManual\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/openManualModal\(/.test(win),
     'must invoke the existing openManualModal helper');
 });
@@ -66,7 +67,7 @@ t('app.js: _maybeShowFirstTimeManual sets seen flag BEFORE opening modal', () =>
   // missing, etc.), an "open-then-set-flag" order would never set the
   // flag and trap the user in an "always opens on every reload" loop.
   const idx = APP.search(/function\s+_maybeShowFirstTimeManual\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   const setIdx = win.indexOf('localStorage.setItem');
   const openIdx = win.indexOf('openManualModal');
   assert.ok(setIdx > -1 && openIdx > -1,
@@ -78,7 +79,7 @@ t('app.js: _maybeShowFirstTimeManual sets seen flag BEFORE opening modal', () =>
 t('app.js: init() invokes _maybeShowFirstTimeManual after the rest of UI binds', () => {
   const idx = APP.search(/async\s+function\s+init\s*\(/);
   assert.ok(idx > -1, 'init() must exist');
-  const win = APP.slice(idx, idx + 4000);
+  const win = sliceFn(APP, idx);
   assert.ok(/_maybeShowFirstTimeManual\(/.test(win),
     'init() must call _maybeShowFirstTimeManual()');
   // Must come after showBuildStamp / showUserStamp / bindChatUi —

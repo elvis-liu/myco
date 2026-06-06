@@ -35,6 +35,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -54,7 +55,7 @@ console.log('── fr-78: chat input arrow-key history recall ──');
 t('app.js: _resetUiForNewSession clears chatInputHistory + chatHistoryIdx + chatHistoryDraft', () => {
   const idx = APP.search(/function\s+_resetUiForNewSession\s*\(/);
   assert.ok(idx > -1, '_resetUiForNewSession must exist');
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/state\.chatInputHistory\s*=\s*\[\]/.test(win),
     'session reset must clear chatInputHistory');
   assert.ok(/state\.chatHistoryIdx\s*=\s*null/.test(win),
@@ -70,7 +71,7 @@ t('app.js: _resetUiForNewSession clears chatInputHistory + chatHistoryIdx + chat
 t('app.js: submitChat pushes the just-sent text onto chatInputHistory', () => {
   const idx = APP.search(/function\s+submitChat\s*\(/);
   assert.ok(idx > -1);
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   assert.ok(/chatInputHistory/.test(win),
     'submitChat must touch chatInputHistory');
   assert.ok(/\.push\s*\(\s*submitted\s*\)/.test(win),
@@ -82,7 +83,7 @@ t('app.js: submitChat pushes the just-sent text onto chatInputHistory', () => {
 
 t('app.js: submitChat resets chatHistoryIdx + Draft after sending', () => {
   const idx = APP.search(/function\s+submitChat\s*\(/);
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   assert.ok(/state\.chatHistoryIdx\s*=\s*null/.test(win),
     'after send, browsing cursor must reset so next ArrowUp starts at most recent');
   assert.ok(/state\.chatHistoryDraft\s*=\s*null/.test(win),
@@ -91,7 +92,7 @@ t('app.js: submitChat resets chatHistoryIdx + Draft after sending', () => {
 
 t('app.js: submitChat skips duplicate-of-previous-entry pushes (bash readline)', () => {
   const idx = APP.search(/function\s+submitChat\s*\(/);
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   // The dup check compares the last entry vs submitted.
   assert.ok(/hist\[hist\.length\s*-\s*1\]\s*!==\s*submitted/.test(win),
     'must skip when submitted matches the last history entry');

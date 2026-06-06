@@ -13,6 +13,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -43,7 +44,7 @@ t('app.js: poll cadence is 30s (PLAN_CHANGED_FILES_POLL_MS) — safety net behin
 
 t('app.js: poll loop skips when document.hidden + when Plan view inactive', () => {
   const idx = APP.search(/function\s+_startPlanChangedFilesAutoRefresh\s*\(/);
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   assert.ok(/document\.hidden/.test(win),
     'poll tick must short-circuit when document.hidden (backgrounded tab)');
   assert.ok(/state\.artifactView[\s\S]{0,80}plan/.test(win),
@@ -54,7 +55,7 @@ t('app.js: poll loop skips when document.hidden + when Plan view inactive', () =
 
 t('app.js: stop handler is idempotent (no double-clear) + clears the handle', () => {
   const idx = APP.search(/function\s+_stopPlanChangedFilesAutoRefresh\s*\(/);
-  const win = APP.slice(idx, idx + 500);
+  const win = sliceFn(APP, idx);
   assert.ok(/if\s*\(\s*!_planChangedFilesPollHandle\s*\)\s*return/.test(win),
     'stop must early-return when handle is already null');
   assert.ok(/clearInterval/.test(win),
@@ -65,7 +66,7 @@ t('app.js: stop handler is idempotent (no double-clear) + clears the handle', ()
 
 t('app.js: showArtifactView("plan") starts polling; non-plan branch stops it', () => {
   const idx = APP.search(/function\s+showArtifactView\s*\(/);
-  const win = APP.slice(idx, idx + 3500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_startPlanChangedFilesAutoRefresh\(/.test(win),
     'showArtifactView must call _startPlanChangedFilesAutoRefresh on the plan branch');
   assert.ok(/_stopPlanChangedFilesAutoRefresh\(/.test(win),
@@ -74,7 +75,7 @@ t('app.js: showArtifactView("plan") starts polling; non-plan branch stops it', (
 
 t('app.js: hideArtifactView stops polling when Plan view is closing', () => {
   const idx = APP.search(/function\s+hideArtifactView\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_stopPlanChangedFilesAutoRefresh\(/.test(win),
     'hideArtifactView must stop the poller when type === "plan"');
 });

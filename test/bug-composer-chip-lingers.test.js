@@ -23,6 +23,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -39,7 +40,7 @@ t('app.js: _renderComposerChips helper exists + reads from #chat-input', () => {
   assert.ok(/function\s+_renderComposerChips\s*\(\s*\)/.test(APP),
     '_renderComposerChips helper must be defined');
   const idx = APP.search(/function\s+_renderComposerChips\s*\(\s*\)/);
-  const win = APP.slice(idx, idx + 400);
+  const win = sliceFn(APP, idx);
   assert.ok(/getElementById\(['"]chat-input['"]\)/.test(win),
     'helper must read from #chat-input to know what chips to render');
   assert.ok(/getElementById\(['"]composer-chips['"]\)/.test(win),
@@ -53,7 +54,7 @@ t('app.js: submitChat clears input.value AND calls _renderComposerChips', () => 
   assert.ok(idx > -1, 'submitChat function must exist');
   // Slice from submitChat through its closing brace area. The clear
   // and the chip-rebuild call must both live inside this function.
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   assert.ok(/input\.value\s*=\s*['"]['"]/.test(win),
     'submitChat must clear input.value after a successful send');
   assert.ok(/_renderComposerChips\(\)/.test(win),

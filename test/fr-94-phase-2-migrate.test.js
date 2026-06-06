@@ -24,6 +24,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -59,7 +60,7 @@ t('migrateMainProjectIfNeeded is a no-op when rec.mainProject is already set', (
   const src = _read('server/src/artifacts.js');
   const at = src.search(/function\s+migrateMainProjectIfNeeded\s*\(/);
   assert.ok(at > -1, 'helper must exist.');
-  const body = src.slice(at, at + 3500);
+  const body = sliceFn(src, at);
   // Early return when rec.mainProject is truthy.
   assert.ok(/rec\.mainProject\s*&&\s*String\(rec\.mainProject\)\.trim\(\)/.test(body) ||
             /rec\.mainProject\s*&&[\s\S]{0,80}return\s+false/.test(body),
@@ -69,7 +70,7 @@ t('migrateMainProjectIfNeeded is a no-op when rec.mainProject is already set', (
 t('migrateMainProjectIfNeeded is a no-op when session.absCwd itself contains .git/ (session IS the project)', () => {
   const src = _read('server/src/artifacts.js');
   const at = src.search(/function\s+migrateMainProjectIfNeeded\s*\(/);
-  const body = src.slice(at, at + 3500);
+  const body = sliceFn(src, at);
   // The helper must check fs.statSync(path.join(rec.absCwd, '.git'))
   // BEFORE falling into the subdir scan. When session-root IS the
   // repo, mainProject stays unset (findProjectRoot already returns
@@ -81,7 +82,7 @@ t('migrateMainProjectIfNeeded is a no-op when session.absCwd itself contains .gi
 t('migrateMainProjectIfNeeded scans subdirs for .git/ + filters with NESTED_SCAN_SKIP', () => {
   const src = _read('server/src/artifacts.js');
   const at = src.search(/function\s+migrateMainProjectIfNeeded\s*\(/);
-  const body = src.slice(at, at + 3500);
+  const body = sliceFn(src, at);
   assert.ok(/fs\.readdirSync\s*\(\s*rec\.absCwd/.test(body),
     'migrateMainProjectIfNeeded must scan subdirs of rec.absCwd via fs.readdirSync.');
   assert.ok(/NESTED_SCAN_SKIP/.test(body),
@@ -91,7 +92,7 @@ t('migrateMainProjectIfNeeded scans subdirs for .git/ + filters with NESTED_SCAN
 t('migrateMainProjectIfNeeded warns + leaves unset when multiple candidates exist', () => {
   const src = _read('server/src/artifacts.js');
   const at = src.search(/function\s+migrateMainProjectIfNeeded\s*\(/);
-  const body = src.slice(at, at + 3500);
+  const body = sliceFn(src, at);
   // The helper must distinguish "exactly one" from "multiple" — the
   // multi-candidate path must NOT set mainProject (would silently
   // pick one repo over another) and must log a warn so the user
@@ -105,7 +106,7 @@ t('migrateMainProjectIfNeeded warns + leaves unset when multiple candidates exis
 t('migrateMainProjectIfNeeded persists via the saveStoreFn callback on success', () => {
   const src = _read('server/src/artifacts.js');
   const at = src.search(/function\s+migrateMainProjectIfNeeded\s*\(/);
-  const body = src.slice(at, at + 3500);
+  const body = sliceFn(src, at);
   // saveStoreFn is invoked on the success path so the rec.mainProject
   // mutation actually lands in /data/sessions.json.
   assert.ok(/saveStoreFn\s*\(\s*\)/.test(body) || /typeof\s+saveStoreFn\s*===\s*['"]function['"][\s\S]{0,200}saveStoreFn/.test(body),
@@ -118,7 +119,7 @@ t('server/src/attach.js: _attachAgentWebSocket calls migrateMainProjectIfNeeded'
   const src = _read('server/src/attach.js');
   const at = src.search(/function\s+_attachAgentWebSocket\s*\(/);
   assert.ok(at > -1, '_attachAgentWebSocket must exist.');
-  const body = src.slice(at, at + 2000);
+  const body = sliceFn(src, at);
   assert.ok(/migrateMainProjectIfNeeded\s*\(/.test(body),
     '_attachAgentWebSocket must call migrateMainProjectIfNeeded(rec, …) so every WS attach gives a legacy session a chance to settle its mainProject (Phase 2 lazy migration).');
   // The saveStore callback must be a function passed in — verifies

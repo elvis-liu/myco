@@ -30,6 +30,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -49,7 +50,7 @@ t('app.js: verdict-btn-ask exists as the askCriticBtn constant inside _renderVer
   const src = _read('web/public/app.js');
   const at = src.search(/function\s+_renderVerdictPanel\s*\(\)/);
   assert.ok(at > -1);
-  const body = src.slice(at, at + 12000);
+  const body = sliceFn(src, at);
   // The button HTML must be a named constant (so the same string can
   // be embedded into all three actionsHtml branches without
   // copy-paste drift between them).

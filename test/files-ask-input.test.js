@@ -23,6 +23,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -74,7 +75,7 @@ t('app.js: onSelectionChange bails while focus is inside the action bar', () => 
   // hideActionBar() + null v.selection, destroying the anchor mid-type.
   const idx = APP.search(/function\s+onSelectionChange\s*\(/);
   assert.ok(idx > -1, 'onSelectionChange must be defined');
-  const win = APP.slice(idx, idx + 900);
+  const win = sliceFn(APP, idx);
   // Guard: an early return when the focused element is within
   // #files-action-bar (or specifically the ask input).
   assert.ok(

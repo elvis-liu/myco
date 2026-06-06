@@ -30,6 +30,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -73,7 +74,7 @@ t('chrome-routing block invokes the helper for always-fold events', () => {
   // The call must sit inside _appendAgentEvent, gated on alwaysFolds.
   const fnStart = APP.search(/function\s+_appendAgentEvent\s*\(/);
   assert.ok(fnStart > -1, '_appendAgentEvent must exist');
-  const fnSlice = APP.slice(fnStart, fnStart + 80000);
+  const fnSlice = sliceFn(APP, fnStart);
   assert.ok(/_findChromeBatchAcrossMenus\s*\(\s*pane\s*\)/.test(fnSlice),
     '_appendAgentEvent must call _findChromeBatchAcrossMenus(pane)');
   // bug-67 r4: the call must be inside an `else if` that gates on
@@ -96,7 +97,7 @@ t('bug-67 r1 chrome-batch direct-prev path still exists (fast path preserved)', 
   // (the existing prev.dataset.evType === '_chrome_batch' check
   // handles it).
   const fnStart = APP.search(/function\s+_appendAgentEvent\s*\(/);
-  const fnSlice = APP.slice(fnStart, fnStart + 80000);
+  const fnSlice = sliceFn(APP, fnStart);
   assert.ok(/prev\.dataset\.evType\s*===\s*['"]_chrome_batch['"]/.test(fnSlice),
     'direct-prev chrome-batch check must remain in _appendAgentEvent — the lookback is the fallback only');
 });

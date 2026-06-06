@@ -15,6 +15,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -59,7 +60,7 @@ t('CHAT_SCROLL_BOTTOM_THRESHOLD constant declared (50px standard)', () => {
 t('_chatUserIsAtBottom helper uses the threshold + treats 0-height as bottom', () => {
   const helpIdx = APP.search(/function\s+_chatUserIsAtBottom\s*\(/);
   assert.ok(helpIdx > -1, '_chatUserIsAtBottom helper must exist');
-  const body = APP.slice(helpIdx, helpIdx + 800);
+  const body = sliceFn(APP, helpIdx);
   assert.ok(/clientHeight\s*===\s*0/.test(body),
     'zero-height check: 0-height list (display:none / pre-layout) is considered at-bottom so initial scrolls still pin');
   assert.ok(/scrollHeight\s*-\s*list\.scrollTop\s*-\s*list\.clientHeight\s*\)?\s*<\s*CHAT_SCROLL_BOTTOM_THRESHOLD/.test(body),
@@ -109,7 +110,7 @@ t('scroll listener is bind-once-guarded so session switches don\'t double-bind',
 
 t('setChatPane(true) clears chatUserScrolledUp + force-scrolls', () => {
   const start = APP.search(/function\s+setChatPane\s*\(/);
-  const body = APP.slice(start, start + 1500);
+  const body = sliceFn(APP, start);
   // Opening the pane is a user-initiated event; should always land at bottom.
   assert.ok(/state\.chatUserScrolledUp\s*=\s*false[\s\S]{0,200}?scrollChatToLatest\(\s*\{\s*force:\s*true\s*\}\s*\)/.test(body),
     'setChatPane(true) must clear chatUserScrolledUp BEFORE calling scrollChatToLatest({ force: true })');
@@ -117,7 +118,7 @@ t('setChatPane(true) clears chatUserScrolledUp + force-scrolls', () => {
 
 t('_resetUiForNewSession clears chatUserScrolledUp', () => {
   const start = APP.search(/function\s+_resetUiForNewSession\s*\(/);
-  const body = APP.slice(start, start + 2500);
+  const body = sliceFn(APP, start);
   assert.ok(/state\.chatUserScrolledUp\s*=\s*false/.test(body),
     'session switch must reset chatUserScrolledUp so the new session starts at the bottom');
 });

@@ -23,6 +23,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -90,7 +91,7 @@ t('renderViewerHeader is what sets the Edit button hidden attribute (gate locati
   // the call site.
   const start = APP.search(/function\s+renderViewerHeader\s*\(/);
   assert.ok(start > -1, 'renderViewerHeader must exist');
-  const body = APP.slice(start, start + 2500);
+  const body = sliceFn(APP, start);
   assert.ok(/document\.getElementById\(\s*['"]files-edit['"]\s*\)\.hidden/.test(body),
     'renderViewerHeader must set #files-edit.hidden — the Edit button visibility is gated here');
   assert.ok(/editable\s*=\s*!state\.viewerMode\s*&&\s*v\s*&&\s*v\.content/.test(body),

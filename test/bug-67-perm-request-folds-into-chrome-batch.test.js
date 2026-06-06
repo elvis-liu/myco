@@ -33,6 +33,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -73,7 +74,7 @@ t('pre-routing finish gate (in _appendAgentEvent) references the helper', () => 
   assert.ok(startIdx > -1, '_appendAgentEvent must exist');
   // Slice up to a generous upper bound — the function is long but
   // not unbounded. 60k chars is far past its actual end.
-  const body = APP.slice(startIdx, startIdx + 60000);
+  const body = sliceFn(APP, startIdx);
   // The pre-routing block sits inside `if (prevRunning) { ... }`.
   // It must invoke _chromeEventAlwaysFolds.
   const preRoutingMatch = body.match(/if\s*\(\s*prevRunning\s*\)\s*\{[\s\S]*?\n\s*\}/);
@@ -87,7 +88,7 @@ t('chrome-routing fold gate (in _appendAgentEvent) references the helper', () =>
   // `if (_isChromeEvent(ev))` block. We grep for the same helper
   // call appearing OUTSIDE the pre-routing block.
   const startIdx = APP.search(/function\s+_appendAgentEvent\s*\(/);
-  const body = APP.slice(startIdx, startIdx + 60000);
+  const body = sliceFn(APP, startIdx);
   // Count helper references — must be ≥2 (one in each gate).
   const refs = (body.match(/_chromeEventAlwaysFolds\s*\(/g) || []).length;
   assert.ok(refs >= 2,
@@ -114,7 +115,7 @@ t('seq-consecutive check stays in place for non-always-fold events (regression g
   // hook_allow, system_event, etc.) still need the seq check to
   // detect intervening non-chrome renders.
   const startIdx = APP.search(/function\s+_appendAgentEvent\s*\(/);
-  const body = APP.slice(startIdx, startIdx + 60000);
+  const body = sliceFn(APP, startIdx);
   assert.ok(/seqsConsecutive/.test(body),
     'seqsConsecutive variable must still exist in _appendAgentEvent — the seq gate is still authoritative for non-always-fold chrome events');
 });

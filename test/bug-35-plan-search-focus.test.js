@@ -35,6 +35,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -65,7 +66,7 @@ t('app.js: _capturePlanSearchFocus gates on activeElement === #plan-search', () 
   // The capture must check document.activeElement so we don't refocus
   // when the user is typing elsewhere.
   const idx = APP.search(/function\s+_capturePlanSearchFocus\s*\(/);
-  const win = APP.slice(idx, idx + 800);
+  const win = sliceFn(APP, idx);
   assert.ok(/plan-search/.test(win),
     'capture must reference the plan-search element id');
   assert.ok(/document\.activeElement/.test(win),
@@ -76,7 +77,7 @@ t('app.js: _capturePlanSearchFocus gates on activeElement === #plan-search', () 
 
 t('app.js: _restorePlanSearchFocus calls .focus() + setSelectionRange', () => {
   const idx = APP.search(/function\s+_restorePlanSearchFocus\s*\(/);
-  const win = APP.slice(idx, idx + 800);
+  const win = sliceFn(APP, idx);
   assert.ok(/\.focus\s*\(\s*\)/.test(win),
     'restore must call input.focus() to put the cursor back');
   assert.ok(/setSelectionRange/.test(win),

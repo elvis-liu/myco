@@ -22,6 +22,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -37,7 +38,7 @@ console.log('── fr-84 r4: agent-readable filesystem path appended to diagram
 t('app.js: _diagramSave appends `(saved at: _myco_/diagrams/...)` after the markdown image', () => {
   const idx = APP.search(/async\s+function\s+_diagramSave\s*\(\s*\)/);
   assert.ok(idx > -1, '_diagramSave function must exist');
-  const win = APP.slice(idx, idx + 3000);
+  const win = sliceFn(APP, idx);
   // Pin the literal "saved at:" hint phrase + that it references
   // body.path (the relative filesystem path the server returned).
   assert.ok(/saved at:/i.test(win),
@@ -51,7 +52,7 @@ t('app.js: the hint is a separate line from the markdown image (newline-separate
   // sits on the next line as plain text. Both must be present in
   // the value the textarea ends up with.
   const idx = APP.search(/async\s+function\s+_diagramSave\s*\(\s*\)/);
-  const win = APP.slice(idx, idx + 3000);
+  const win = sliceFn(APP, idx);
   // Look for a template literal / string concat that includes BOTH
   // `![diagram]` AND a newline AND `(saved at:`.
   assert.ok(
@@ -63,7 +64,7 @@ t('app.js: the hint is a separate line from the markdown image (newline-separate
 
 t('app.js: hint uses the RELATIVE path (not the URL form) so Read works from session cwd', () => {
   const idx = APP.search(/async\s+function\s+_diagramSave\s*\(\s*\)/);
-  const win = APP.slice(idx, idx + 3000);
+  const win = sliceFn(APP, idx);
   // The relative path starts with `_myco_/diagrams/` — that's what
   // the agent's Read tool resolves against its cwd (the session
   // workspace).

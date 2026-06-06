@@ -24,6 +24,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -64,7 +65,7 @@ t('slashcmds.js: REMOTE_LABEL_BY_LAYER maps Feature/Bug/Todo to issue labels', (
 t('slashcmds.js: addPlanItem detects @<target> prefix + routes to handleRemoteIssue', () => {
   const idx = SRC.search(/function\s+addPlanItem\s*\(/);
   assert.ok(idx > -1);
-  const win = SRC.slice(idx, idx + 3500);
+  const win = sliceFn(SRC, idx);
   // The regex match for `@<target>`.
   assert.ok(/text\.match\(\s*\/\^@\(\[a-z0-9_-\]\+\)/i.test(win),
     'must match a leading @<target> token in args');
@@ -84,7 +85,7 @@ t('slashcmds.js: handleRemoteIssue is defined + uses gitHosts.{getToken,createIs
     'handleRemoteIssue must be defined');
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
   // r4 added the probe branch + r5 added rewrite block → bump again.
-  const win = SRC.slice(idx, idx + 10000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/gitHosts\.getToken\(\s*ctx\.user/.test(win),
     'must call gitHosts.getToken(ctx.user, provider, owner, repo)');
   assert.ok(/gitHosts\.createIssue\(/.test(win),
@@ -101,7 +102,7 @@ t('slashcmds.js: handleRemoteIssue title is the first line, capped at 80 chars',
   // Long body lines shouldn't bleed into the issue title — the GitHub
   // issue list is scannable when titles stay short.
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
-  const win = SRC.slice(idx, idx + 3000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/firstLine\.length\s*>\s*80/.test(win),
     'must cap the title at 80 chars (truncate with ellipsis)');
   assert.ok(/split\(\s*\/\[\\r\\n\]\/,\s*1\)/.test(win),
@@ -112,7 +113,7 @@ t('slashcmds.js: handleRemoteIssue body includes user attribution + cmd marker',
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
   // r5+r6 (rewrite + TITLE/DESCRIPTION parse) pushed the body block
   // past the original 3000-char window. Slice bigger to keep finding it.
-  const win = SRC.slice(idx, idx + 6000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/Filed by/.test(win),
     'body must include "Filed by **@<user>**" attribution');
   assert.ok(/\/\$\{cmdName\} @\$\{targetName\}/.test(win),
@@ -128,7 +129,7 @@ t('slashcmds.js: r2 — handleRemoteIssue 403 hint suggests re-sign-in FIRST (ch
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
   // r3+r4+fr-82 grew the function; bump window so the slice still
   // includes the `return;` boundary.
-  const win = SRC.slice(idx, idx + 10000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/result\.status\s*===\s*403/.test(win),
     'must branch on the 403 status specifically');
   assert.ok(/Re-sign-in/i.test(win),
@@ -154,7 +155,7 @@ t('slashcmds.js: r4 — empty-scopes path probes GET /user to distinguish revoke
   // (probe fails). The 403 branch runs a follow-up GET /user probe
   // to disambiguate, and reports DIFFERENT fix paths per outcome.
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
-  const win = SRC.slice(idx, idx + 7500);
+  const win = sliceFn(SRC, idx);
   // Probe is gated on "have === '(none reported)'" or empty.
   assert.ok(/none reported/.test(win) && /have/.test(win),
     'must check for empty scopes before probing');
@@ -177,7 +178,7 @@ t('slashcmds.js: r3 — 403 hint surfaces the actual X-OAuth-Scopes from the res
   // of guessing.
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
   // fr-82 grew the function further; bump window from 5000 to 10000.
-  const win = SRC.slice(idx, idx + 10000);
+  const win = sliceFn(SRC, idx);
   // 403 branch reads result.scopes + result.acceptedScopes.
   assert.ok(/result\.scopes/.test(win),
     '403 branch must read result.scopes from the response');
@@ -214,7 +215,7 @@ t('slashcmds.js: r2 — /setpat @<target> <token> path stores PAT without needin
   // origin` to point at the target repo. r2 lets the user paste a
   // PAT for a registered REMOTE_TARGETS entry from any session.
   const idx = SRC.search(/async\s+function\s+handleSetPat\s*\(/);
-  const win = SRC.slice(idx, idx + 3500);
+  const win = sliceFn(SRC, idx);
   // /setpat parses @<target> at the start of args.
   assert.ok(/args\.match\(\s*\/\^@\(\[a-z0-9_-\]\+\)/i.test(win),
     '/setpat must parse a leading @<target> token');
@@ -245,7 +246,7 @@ t('slashcmds.js: r5 + fr-81 r1 — /fr @<target> ALWAYS rewrites the body via cl
   // Pin: addPlanItem's @<target> branch computes shouldRewrite = true
   // AND forwards it to handleRemoteIssue.
   const idxAdd = SRC.search(/function\s+addPlanItem\s*\(/);
-  const winAdd = SRC.slice(idxAdd, idxAdd + 5000);
+  const winAdd = sliceFn(SRC, idxAdd);
   // The remote branch's shouldRewrite is the LAST const-shouldRewrite
   // assignment BEFORE the `return handleRemoteIssue(...)` call. It
   // must equal `true` post-fr-81 r1 (the threshold expression was the
@@ -263,7 +264,7 @@ t('slashcmds.js: r5 + fr-81 r1 — /fr @<target> ALWAYS rewrites the body via cl
   // Pin: handleRemoteIssue signature accepts shouldRewrite + runs the
   // _PLAN_REWRITE_SYSTEM prompt via btw.runClaudeP before POSTing.
   const idxRem = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
-  const winRem = SRC.slice(idxRem, idxRem + 10000);
+  const winRem = sliceFn(SRC, idxRem);
   assert.ok(/async\s+function\s+handleRemoteIssue\s*\(\s*ctx\s*,\s*layer\s*,\s*targetName\s*,\s*description\s*,\s*alias\s*,\s*shouldRewrite\s*\)/.test(winRem),
     'handleRemoteIssue signature must include the shouldRewrite parameter');
   assert.ok(/if\s*\(\s*shouldRewrite\s*\)/.test(winRem),
@@ -365,7 +366,7 @@ t('slashcmds.js: r6 — _applyPlanItemRewrite writes title→item.text, body→i
   // shows up as a single TITLE-prefixed blob in item.text.
   const idx = SRC.search(/function\s+_applyPlanItemRewrite\s*\(/);
   assert.ok(idx > -1, '_applyPlanItemRewrite must be defined');
-  const win = SRC.slice(idx, idx + 2000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/_parseIssueRewrite\(/.test(win),
     '_applyPlanItemRewrite must call _parseIssueRewrite to split the response');
   assert.ok(/item\.text\s*=\s*parsed\.title/.test(win),
@@ -384,7 +385,7 @@ t('slashcmds.js: r6 — handleRemoteIssue uses parsed.title for the GH issue tit
   // (`parsed.description`). The first-line-strip fallback only fires
   // when the rewrite was skipped or didn\'t parse.
   const idx = SRC.search(/async\s+function\s+handleRemoteIssue\s*\(/);
-  const win = SRC.slice(idx, idx + 10000);
+  const win = sliceFn(SRC, idx);
   assert.ok(/_parseIssueRewrite\(/.test(win),
     'handleRemoteIssue must call _parseIssueRewrite on the rewrite output');
   assert.ok(/issueTitle\s*=\s*parsed\.title/.test(win),
@@ -400,7 +401,7 @@ t('app.js: r6 — _planItemDescriptionHtml renders item.description below the ti
     '_planItemDescriptionHtml helper must be defined');
   // Helper renders item.description as markdown.
   const idx = APP.search(/function\s+_planItemDescriptionHtml\s*\(it\)/);
-  const win = APP.slice(idx, idx + 600);
+  const win = sliceFn(APP, idx);
   assert.ok(/it\.description/.test(win),
     'helper must read it.description');
   assert.ok(/renderMd\(/.test(win),

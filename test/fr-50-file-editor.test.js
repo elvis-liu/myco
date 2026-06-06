@@ -30,6 +30,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -77,7 +78,7 @@ t('index.html loads the vendor bundle before app.js consumers run', () => {
 t('_enterFileEditMode prefers CodeMirror 6 when MycoCM.createEditor is available', () => {
   const start = APP.search(/function\s+_enterFileEditMode\s*\(/);
   assert.ok(start > -1, '_enterFileEditMode must exist');
-  const body = APP.slice(start, start + 4000);
+  const body = sliceFn(APP, start);
   assert.ok(/window\.MycoCM/.test(body),
     'editor entry must check for window.MycoCM');
   assert.ok(/createEditor\s*\(/.test(body),
@@ -86,7 +87,7 @@ t('_enterFileEditMode prefers CodeMirror 6 when MycoCM.createEditor is available
 
 t('CM6 init failure falls back to textarea so editing stays online', () => {
   const start = APP.search(/function\s+_enterFileEditMode\s*\(/);
-  const body = APP.slice(start, start + 4000);
+  const body = sliceFn(APP, start);
   // Look for the catch block and a subsequent createElement('textarea')
   // call — the fallback path.
   assert.ok(/catch\s*\([^)]*\)\s*\{[^}]*CM6/i.test(body) || /CM6 init failed.*fallback/i.test(body),
@@ -95,7 +96,7 @@ t('CM6 init failure falls back to textarea so editing stays online', () => {
 
 t('_exitFileEditMode destroys the CM6 view to release listeners + DOM', () => {
   const start = APP.search(/function\s+_exitFileEditMode\s*\(/);
-  const body = APP.slice(start, start + 1500);
+  const body = sliceFn(APP, start);
   assert.ok(/cmView/.test(body) && /destroy/.test(body),
     'exit handler must call cmView.destroy() so listeners/DOM are released');
 });
@@ -103,7 +104,7 @@ t('_exitFileEditMode destroys the CM6 view to release listeners + DOM', () => {
 t('_currentEditedContent reads from CM6 view (preferred) or textarea (fallback)', () => {
   const start = APP.search(/function\s+_currentEditedContent\s*\(/);
   assert.ok(start > -1, '_currentEditedContent helper must exist (one read path for both surfaces)');
-  const body = APP.slice(start, start + 1000);
+  const body = sliceFn(APP, start);
   assert.ok(/cmView/.test(body), 'must read CM6 doc when present');
   assert.ok(/files-edit-textarea/.test(body), 'must fall back to textarea value');
 });
@@ -131,7 +132,7 @@ t('styles.css carries the file-conflict-modal CSS', () => {
 t('_saveFileEdit opens the conflict modal on 409 (instead of alert)', () => {
   const start = APP.search(/async\s+function\s+_saveFileEdit\s*\(/);
   assert.ok(start > -1, '_saveFileEdit must exist');
-  const body = APP.slice(start, start + 4500);
+  const body = sliceFn(APP, start);
   assert.ok(/res\.status\s*===\s*409/.test(body),
     'save handler must branch on 409 (ERR_MTIME_CONFLICT)');
   assert.ok(/_showFileConflictModal\s*\(/.test(body),
@@ -140,7 +141,7 @@ t('_saveFileEdit opens the conflict modal on 409 (instead of alert)', () => {
 
 t('Force overwrite re-fetches mtime before retry (so second save passes server check)', () => {
   const start = APP.search(/async\s+function\s+_saveFileEdit\s*\(/);
-  const body = APP.slice(start, start + 4500);
+  const body = sliceFn(APP, start);
   assert.ok(/force/.test(body) && /\/file\?path=/.test(body),
     'force-overwrite branch must re-stat the file via GET /file?path= before retrying the PUT');
 });

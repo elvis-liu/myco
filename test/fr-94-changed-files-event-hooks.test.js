@@ -9,6 +9,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -36,21 +37,21 @@ t('app.js: tool-name registry covers Edit + Write + MultiEdit + Bash', () => {
 
 t('app.js: agent-event hook only fires on tool_result (not tool_use)', () => {
   const idx = APP.search(/function\s+_maybeAutoRefreshOnAgentEvent\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/ev\.type\s*!==\s*['"]tool_result['"]/.test(win),
     'must short-circuit when ev.type !== "tool_result" (tool_use fires before the write completes)');
 });
 
 t('app.js: agent-event hook skips when Plan view not active', () => {
   const idx = APP.search(/function\s+_maybeAutoRefreshOnAgentEvent\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/state\.artifactView[\s\S]{0,80}plan/.test(win),
     'must skip refresh when state.artifactView.active !== "plan"');
 });
 
 t('app.js: agent-event hook debounces bursts (no fetch per MultiEdit tick)', () => {
   const idx = APP.search(/function\s+_maybeAutoRefreshOnAgentEvent\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_autoRefreshDebounce/.test(win),
     'must use a debounce handle to coalesce bursts');
   assert.ok(/clearTimeout|setTimeout/.test(win),
@@ -61,14 +62,14 @@ t('app.js: agent-event hook debounces bursts (no fetch per MultiEdit tick)', () 
 
 t('app.js: _appendAgentEvent calls _maybeAutoRefreshOnAgentEvent on every event', () => {
   const idx = APP.search(/function\s+_appendAgentEvent\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_maybeAutoRefreshOnAgentEvent\(\s*ev\s*\)/.test(win),
     '_appendAgentEvent must invoke _maybeAutoRefreshOnAgentEvent(ev) so file writes auto-refresh the list');
 });
 
 t('app.js: /git hook recognises /git + skips when Plan view not active', () => {
   const idx = APP.search(/function\s+_maybeAutoRefreshOnGitCommand\s*\(/);
-  const win = APP.slice(idx, idx + 1000);
+  const win = sliceFn(APP, idx);
   assert.ok(/\/\^\\\/git\(\\s\|\$\)\/i/.test(win),
     'must match /^\\/git(\\s|$)/i (the exact /git command shape)');
   assert.ok(/state\.artifactView[\s\S]{0,80}plan/.test(win),
@@ -79,7 +80,7 @@ t('app.js: /git hook recognises /git + skips when Plan view not active', () => {
 
 t('app.js: submitChat invokes _maybeAutoRefreshOnGitCommand after a successful send', () => {
   const idx = APP.search(/function\s+submitChat\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_maybeAutoRefreshOnGitCommand\(\s*submitted\s*\)/.test(win),
     'submitChat must call _maybeAutoRefreshOnGitCommand(submitted) so /git triggers a refresh');
 });

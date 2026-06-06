@@ -27,6 +27,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -104,7 +105,7 @@ t('attach.js: clearActiveRunItem(sessionId, session, opts) helper is defined + e
 t('attach.js: clearActiveRunItem performs idempotent itemId check + advances queue', () => {
   const src = _read('server/src/attach.js');
   const at = src.search(/function\s+clearActiveRunItem\s*\(/);
-  const body = src.slice(at, at + 2500);
+  const body = sliceFn(src, at);
   // Idempotency: if request itemId doesn't match the current active
   // item, no-op (return false). Without this guard, a stale request
   // could nuke an unrelated run.

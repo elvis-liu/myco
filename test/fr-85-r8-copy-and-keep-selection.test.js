@@ -25,6 +25,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -63,7 +64,7 @@ t('web/public/app.js: _copyClarifySelection helper is defined + uses navigator.c
   assert.ok(/function\s+_copyClarifySelection\s*\(/.test(app),
     '_copyClarifySelection helper must be defined (fr-85 r8 — copy-to-clipboard action).');
   const at = app.search(/function\s+_copyClarifySelection\s*\(/);
-  const body = app.slice(at, at + 2500);
+  const body = sliceFn(app, at);
   assert.ok(/navigator\.clipboard\.writeText/.test(body),
     '_copyClarifySelection must use navigator.clipboard.writeText for the modern clipboard path (fr-85 r8).');
   // Fallback for non-secure contexts: execCommand path.
@@ -92,7 +93,7 @@ t('web/public/app.js: the popover OPEN path wraps the selected Range in <span cl
   // path can identify "user never sent" and unwrap.
   const openAt = app.search(/function\s+_openClarifyPopover\s*\(/);
   assert.ok(openAt > -1, '_openClarifyPopover must exist.');
-  const openBody = app.slice(openAt, openAt + 8000);
+  const openBody = sliceFn(app, openAt);
   assert.ok(/surroundContents\(/.test(openBody),
     '_openClarifyPopover must call surroundContents to wrap the range at open (fr-85 r8 — keeps selection visually).');
   assert.ok(/chat-clarify-anchor-pending/.test(openBody),
@@ -102,7 +103,7 @@ t('web/public/app.js: the popover OPEN path wraps the selected Range in <span cl
 t('web/public/app.js: _sendClarify drops the -pending class (graduates the wrap from pre-send to post-send) instead of creating a new wrap', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+_sendClarify\s*\(/);
-  const body = app.slice(at, at + 3500);
+  const body = sliceFn(app, at);
   assert.ok(/classList\.remove\s*\(\s*['"]chat-clarify-anchor-pending['"]\)/.test(body),
     '_sendClarify must drop the chat-clarify-anchor-pending class so the wrap graduates to the post-send anchor look (fr-85 r8 — instead of creating a second wrap).');
 });
@@ -110,7 +111,7 @@ t('web/public/app.js: _sendClarify drops the -pending class (graduates the wrap 
 t('web/public/app.js: _closeClarifyPopover unwraps the pending-anchor span if the user closed without sending', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+_closeClarifyPopover\s*\(/);
-  const body = app.slice(at, at + 2500);
+  const body = sliceFn(app, at);
   assert.ok(/chat-clarify-anchor-pending/.test(body),
     '_closeClarifyPopover must check for the chat-clarify-anchor-pending class to detect "user never sent" (fr-85 r8).');
   assert.ok(/_unwrapClarifyAnchor\s*\(/.test(body),
@@ -122,7 +123,7 @@ t('web/public/app.js: _unwrapClarifyAnchor helper is defined + restores the wrap
   assert.ok(/function\s+_unwrapClarifyAnchor\s*\(/.test(app),
     '_unwrapClarifyAnchor helper must be defined (fr-85 r8 — reverts the open-time wrap on cancel).');
   const at = app.search(/function\s+_unwrapClarifyAnchor\s*\(/);
-  const body = app.slice(at, at + 1500);
+  const body = sliceFn(app, at);
   // Either: lift child nodes out + remove the wrap, or use
   // replaceWith / outerHTML — anything that drops the span.
   assert.ok(/insertBefore[\s\S]{0,200}removeChild|replaceChild|replaceWith/.test(body),

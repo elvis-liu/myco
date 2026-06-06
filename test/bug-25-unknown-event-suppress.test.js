@@ -20,6 +20,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -58,7 +59,7 @@ function _appendBody() {
   // Window large enough to reach the chrome-routing branch (~6500
   // chars into the function — measured by where `_isChromeEvent(`
   // appears in the body).
-  return APP.slice(start, start + 7000);
+  return sliceFn(APP, start);
 }
 
 t('_appendAgentEvent short-circuits unknown_event at the top', () => {

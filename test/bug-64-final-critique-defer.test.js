@@ -44,6 +44,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -116,7 +117,7 @@ t('critique.js: resolveCritique fires deferred final critique on reason === "acc
   // Locate the bug-64 marker inside resolveCritique.
   const fnAt = src.search(/function\s+resolveCritique\s*\(/);
   assert.ok(fnAt > -1, 'resolveCritique must exist.');
-  const body = src.slice(fnAt, fnAt + 5000);
+  const body = sliceFn(src, fnAt);
   // The bug-64 hook must branch on reason === 'accept-stage'.
   assert.ok(/reason\s*===\s*['"]accept-stage['"]/.test(body),
     'resolveCritique bug-64 hook must branch on reason === "accept-stage" (user moved forward through the intermediate verdict).');
@@ -131,7 +132,7 @@ t('critique.js: resolveCritique fires deferred final critique on reason === "acc
 t('critique.js: resolveCritique clears rec._deferredFinalCritique after firing', () => {
   const src = _read('server/src/critique.js');
   const fnAt = src.search(/function\s+resolveCritique\s*\(/);
-  const body = src.slice(fnAt, fnAt + 5000);
+  const body = sliceFn(src, fnAt);
   // The fire path must set rec._deferredFinalCritique = null before
   // (or right after) the fire so the deferred doesn't re-fire on a
   // subsequent resolve.
@@ -145,7 +146,7 @@ t('attach.js: clearActiveRunItem clears rec._deferredFinalCritique (Discard + ve
   const src = _read('server/src/attach.js');
   const fnAt = src.search(/function\s+clearActiveRunItem\s*\(/);
   assert.ok(fnAt > -1, 'clearActiveRunItem must exist (bug-57).');
-  const body = src.slice(fnAt, fnAt + 3000);
+  const body = sliceFn(src, fnAt);
   assert.ok(/\[bug-64\][\s\S]{0,300}_deferredFinalCritique\s*=\s*null/.test(body),
     'clearActiveRunItem must clear rec._deferredFinalCritique = null on Discard / verify-Accept — the run is abandoned/done, the deferred is stale.');
 });
@@ -193,7 +194,7 @@ t('app.js: _replayDeferredFinalCritique helper exists + reads state.deferredFina
   assert.ok(/function\s+_replayDeferredFinalCritique\s*\(\)/.test(src),
     'app.js must declare _replayDeferredFinalCritique() helper (bug-64).');
   const at = src.search(/function\s+_replayDeferredFinalCritique\s*\(\)/);
-  const body = src.slice(at, at + 1000);
+  const body = sliceFn(src, at);
   assert.ok(/state\.deferredFinalCritique/.test(body),
     'helper must read state.deferredFinalCritique.');
   assert.ok(/state\.critiqueReview\s*=/.test(body),

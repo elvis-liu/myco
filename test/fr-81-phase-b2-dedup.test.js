@@ -23,6 +23,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -47,7 +48,7 @@ t('server/src/remote-issues.js: _collectLinkedRemoteUrls helper exists and reads
   assert.ok(/function\s+_collectLinkedRemoteUrls\s*\(/.test(src),
     '_collectLinkedRemoteUrls helper must be defined (Phase B.2 — collects local meta.remoteUrls for dedup).');
   const at = src.search(/function\s+_collectLinkedRemoteUrls\s*\(/);
-  const body = src.slice(at, at + 1200);
+  const body = sliceFn(src, at);
   assert.ok(/rec\.artifacts\.plan\.items/.test(body),
     '_collectLinkedRemoteUrls must read rec.artifacts.plan.items.');
   assert.ok(/meta\.remoteUrl/.test(body),
@@ -202,7 +203,7 @@ t('web/public/app.js: _loadAndRenderRemoteIssues surfaces "(N linked above)" suf
   const app = _read('web/public/app.js');
   const at = app.search(/async\s+function\s+_loadAndRenderRemoteIssues\s*\(/);
   assert.ok(at > -1);
-  const body = app.slice(at, at + 6000);
+  const body = sliceFn(app, at);
   assert.ok(/linkedCount/.test(body),
     '_loadAndRenderRemoteIssues must read data.linkedCount to render the visible-dedup hint (Phase B.2).');
   assert.ok(/linked above/.test(body),

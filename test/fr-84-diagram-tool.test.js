@@ -21,6 +21,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -116,7 +117,7 @@ t('app.js: composer "Draw" button wired to openDiagramModal', () => {
 t('app.js: save flow POSTs to /sessions/:id/diagrams and inserts markdown into composer', () => {
   const idx = APP.search(/async\s+function\s+_diagramSave\s*\(\s*\)/);
   assert.ok(idx > -1, '_diagramSave must be defined');
-  const win = APP.slice(idx, idx + 2500);
+  const win = sliceFn(APP, idx);
   assert.ok(/\/sessions\/\$\{[^}]*sid[^}]*\}\/diagrams/.test(win) ||
             /\/sessions\/.+\/diagrams/.test(win),
     '_diagramSave must POST to /sessions/:id/diagrams');
@@ -163,7 +164,7 @@ t('vendor: rough.umd.js exists + is reasonably small (≤ 50 KB)', () => {
 
 t('app.js: rough.js bound to canvas on modal open + cleared on close-tool-switch', () => {
   const idx = APP.search(/function\s+openDiagramModal\s*\(\s*\)/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/window\.rough\.svg\(/.test(win),
     'openDiagramModal must call window.rough.svg(canvas) to init the generator');
   assert.ok(/_diagramRough\s*=/.test(win),
@@ -203,7 +204,7 @@ t('app.js: drawing engine has hit-test + rubber-band + drag-to-move helpers', ()
 
 t('app.js: Delete / Backspace key removes selected shapes', () => {
   const idx = APP.search(/function\s+_diagramOnKeyDown\s*\(/);
-  const win = APP.slice(idx, idx + 800);
+  const win = sliceFn(APP, idx);
   assert.ok(/(['"]Delete['"]|['"]Backspace['"])/.test(win),
     'keydown handler must branch on Delete or Backspace');
   assert.ok(/_diagramDeleteSelection\(/.test(win),
@@ -212,7 +213,7 @@ t('app.js: Delete / Backspace key removes selected shapes', () => {
 
 t('app.js: rough.js wrappers used for rect / ellipse / diamond / line in pointer-down', () => {
   const idx = APP.search(/function\s+_diagramOnPointerDown\s*\(/);
-  const win = APP.slice(idx, idx + 4000);
+  const win = sliceFn(APP, idx);
   // _diagramReplaceCurrent is the single funnel — verify each shape
   // tool flows through it.
   for (const shape of ['rectangle', 'ellipse', 'polygon', 'line']) {
@@ -226,7 +227,7 @@ t('app.js: arrow tool uses plain SVG line + marker-end (rough.js + markers is br
   // Arrow stays vanilla so the arrowhead lands at the actual tip,
   // not at every sketchy sub-stroke that rough.js would generate.
   const idx = APP.search(/function\s+_diagramOnPointerDown\s*\(/);
-  const win = APP.slice(idx, idx + 4000);
+  const win = sliceFn(APP, idx);
   assert.ok(/s\.tool === ['"]arrow['"][\s\S]{0,500}marker-end[\s\S]{0,100}#diagram-arrowhead/.test(win),
     'arrow branch must set marker-end="url(#diagram-arrowhead)" on a plain <line>');
 });

@@ -39,6 +39,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -57,7 +58,7 @@ t('server/src/sessions.js: _kickoffGitCloneAsync defined and returns synchronous
   const at = src.search(/function\s+_kickoffGitCloneAsync\s*\(/);
   assert.ok(at > -1, '_kickoffGitCloneAsync must be defined.');
   // Function body span — grab a generous window.
-  const body = src.slice(at, at + 2500);
+  const body = sliceFn(src, at);
   // The helper must NOT be async (it returns the projectName
   // immediately so spawnSession's caller doesn't await a clone).
   assert.ok(!/async\s+function\s+_kickoffGitCloneAsync/.test(src.slice(at - 20, at + 80)),
@@ -71,7 +72,7 @@ t('server/src/sessions.js: _runGitCloneInBackground uses child_process.spawn (NO
   const src = _read('server/src/sessions.js');
   const at = src.search(/function\s+_runGitCloneInBackground\s*\(/);
   assert.ok(at > -1, '_runGitCloneInBackground must be defined (the background driver).');
-  const body = src.slice(at, at + 4000);
+  const body = sliceFn(src, at);
   assert.ok(/require\s*\(\s*['"]child_process['"]\s*\)/.test(body) && /\{\s*spawn\s*\}/.test(body),
     '_runGitCloneInBackground must destructure `spawn` from require("child_process") — Phase 3 replaces the blocking spawnSync with the async spawn.');
   assert.ok(/spawn\s*\(\s*['"]git['"]\s*,\s*\[[^\]]*['"]clone['"]/.test(body),
@@ -86,7 +87,7 @@ t('server/src/sessions.js: _runGitCloneInBackground uses child_process.spawn (NO
 t('server/src/sessions.js: background driver streams stderr to appendChatMessage', () => {
   const src = _read('server/src/sessions.js');
   const at = src.search(/function\s+_runGitCloneInBackground\s*\(/);
-  const body = src.slice(at, at + 4000);
+  const body = sliceFn(src, at);
   // The handler must consume the child's stderr stream and route the
   // lines through _emitCloneMsg (which in turn calls
   // appendChatMessage). The throttle + line-split machinery is the
@@ -101,7 +102,7 @@ t('server/src/sessions.js: _emitCloneMsg dual-pipes via appendChatMessage AND at
   const src = _read('server/src/sessions.js');
   const at = src.search(/function\s+_emitCloneMsg\s*\(/);
   assert.ok(at > -1, '_emitCloneMsg must be defined.');
-  const body = src.slice(at, at + 1500);
+  const body = sliceFn(src, at);
   assert.ok(/appendChatMessage\s*\(/.test(body),
     '_emitCloneMsg must call appendChatMessage so the row persists to rec.chat (chat-history catch-up on fresh attach — Phase 3).');
   assert.ok(/require\s*\(\s*['"]\.\/attach['"]\s*\)/.test(body),
@@ -114,7 +115,7 @@ t('server/src/sessions.js: spawnSession sets rec.cloneState="pending" + rec.clon
   const src = _read('server/src/sessions.js');
   const at = src.search(/async\s+function\s+spawnSession\s*\(/);
   assert.ok(at > -1, 'spawnSession must exist.');
-  const body = src.slice(at, at + 6000);
+  const body = sliceFn(src, at);
   assert.ok(/cloneState\s*=\s*['"]pending['"]/.test(body),
     "spawnSession must set cloneState='pending' for the gitCloneUrl branch — clients use this to render \"⏳ Cloning…\" until the background driver flips to 'success' / 'failed' (Phase 3).");
   assert.ok(/record\.cloneUrl\s*=/.test(body) || /cloneUrl\s*=\s*opts\.gitCloneUrl/.test(body),
@@ -124,7 +125,7 @@ t('server/src/sessions.js: spawnSession sets rec.cloneState="pending" + rec.clon
 t('server/src/sessions.js: spawnSession skips pre-spawn CLAUDE.md inject when cloneState is pending (so the empty project dir can host git clone)', () => {
   const src = _read('server/src/sessions.js');
   const at = src.search(/async\s+function\s+spawnSession\s*\(/);
-  const body = src.slice(at, at + 6000);
+  const body = sliceFn(src, at);
   // The inject call must be guarded by a cloneState check — without
   // it, git clone would fail on "destination not empty" because
   // CLAUDE.md would already be in the project dir.
@@ -134,7 +135,7 @@ t('server/src/sessions.js: spawnSession skips pre-spawn CLAUDE.md inject when cl
   // And the success branch in _runGitCloneInBackground must re-call
   // the inject post-clone so the next iteration sees CLAUDE.md.
   const bgAt = src.search(/function\s+_runGitCloneInBackground\s*\(/);
-  const bgBody = src.slice(bgAt, bgAt + 4500);
+  const bgBody = sliceFn(src, bgAt);
   assert.ok(/injectBestPracticesIntoClaudeMd\s*\(/.test(bgBody),
     '_runGitCloneInBackground must call injectBestPracticesIntoClaudeMd on the success branch so the post-clone iteration picks up the best-practices block (Phase 3 — the pre-spawn inject is skipped, so the post-clone inject is the only one that runs).');
 });

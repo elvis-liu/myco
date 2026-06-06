@@ -41,6 +41,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -108,7 +109,7 @@ t('web/public/app.js: _chromeEventLine handles ev.type === `system_event`', () =
   // / task_id rather than the fall-through JSON.stringify(ev).
   const at = app.search(/function\s+_chromeEventLine\s*\(/);
   assert.ok(at > -1, '_chromeEventLine must exist.');
-  const body = app.slice(at, at + 4000);
+  const body = sliceFn(app, at);
   assert.ok(/ev\.type\s*===\s*['"`]system_event['"`]/.test(body),
     "_chromeEventLine must have a `ev.type === 'system_event'` branch so the expanded row surfaces the description / subtype (bug-48).");
 });
@@ -120,7 +121,7 @@ t('web/public/app.js: _chromeShortLabel handles ev.type === `system_event`', () 
   // most recent task lifecycle event ("task_progress · Deploy …").
   const at = app.search(/function\s+_chromeShortLabel\s*\(/);
   assert.ok(at > -1, '_chromeShortLabel must exist.');
-  const body = app.slice(at, at + 3000);
+  const body = sliceFn(app, at);
   assert.ok(/ev\.type\s*===\s*['"`]system_event['"`]/.test(body),
     "_chromeShortLabel must have a `ev.type === 'system_event'` branch so the live status strip + batch head label the event (bug-48).");
 });

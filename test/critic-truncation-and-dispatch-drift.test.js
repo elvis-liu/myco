@@ -29,6 +29,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -83,7 +84,7 @@ t('server/src/attach.js: _snapshotRunBaseline helper exists and captures dirty p
   assert.ok(/function\s+_snapshotRunBaseline\s*\(/.test(src),
     '_snapshotRunBaseline must be defined (dispatch-drift fix — captures baseline state at run-start).');
   const at = src.search(/function\s+_snapshotRunBaseline\s*\(/);
-  const body = src.slice(at, at + 2500);
+  const body = sliceFn(src, at);
   assert.ok(/execFileSync/.test(body),
     '_snapshotRunBaseline must use execFileSync — sync because it runs on the chat-message hot path and async would race the upcoming turn_result.');
   assert.ok(/git[\s\S]{0,80}rev-parse/.test(body),

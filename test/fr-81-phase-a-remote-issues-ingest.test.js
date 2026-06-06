@@ -46,6 +46,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -301,7 +302,7 @@ t('web/public/app.js: _loadAndRenderRemoteIssues exists and fetches /remote-issu
     '_loadAndRenderRemoteIssues must be defined in app.js (fr-81 Phase A — client-side render of the remote-issues section).');
   // The helper must fetch the new server route.
   const at = app.search(/async\s+function\s+_loadAndRenderRemoteIssues\s*\(/);
-  const body = app.slice(at, at + 5000);
+  const body = sliceFn(app, at);
   assert.ok(/\/sessions\/\$\{[^}]+\}\/remote-issues/.test(body),
     "_loadAndRenderRemoteIssues must GET /sessions/<sid>/remote-issues (fr-81 Phase A).");
   // It must render into #remote-issues-section.
@@ -331,13 +332,13 @@ t('web/public/app.js r1: refreshArtifact passes force:true so the Refresh button
   const app = _read('web/public/app.js');
   const at = app.search(/async\s+function\s+_loadAndRenderRemoteIssues\s*\(/);
   assert.ok(at > -1, '_loadAndRenderRemoteIssues must exist.');
-  const helperBody = app.slice(at, at + 5000);
+  const helperBody = sliceFn(app, at);
   assert.ok(/\?force=1/.test(helperBody),
     '_loadAndRenderRemoteIssues must append ?force=1 to the fetch URL when force is set (Phase A r1).');
   // And refreshArtifact must pass {force: true}.
   const refreshAt = app.search(/async\s+function\s+refreshArtifact\s*\(/);
   if (refreshAt > -1) {
-    const refreshBody = app.slice(refreshAt, refreshAt + 4000);
+    const refreshBody = sliceFn(app, refreshAt);
     assert.ok(/_loadAndRenderRemoteIssues\s*\(\s*sid\s*,\s*\{\s*force\s*:\s*true\s*\}/.test(refreshBody),
       'refreshArtifact must call _loadAndRenderRemoteIssues(sid, { force: true }) so the Refresh button does what its label promises (Phase A r1).');
   }

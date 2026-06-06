@@ -26,6 +26,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -79,7 +80,7 @@ t('static guard: setChatPane(true) is the canonical "show chat pane" call', () =
   // meaning "show") breaks loudly.
   const setStart = APP.search(/function\s+setChatPane\s*\(/);
   assert.ok(setStart > -1, 'setChatPane must exist');
-  const body = APP.slice(setStart, setStart + 1200);
+  const body = sliceFn(APP, setStart);
   assert.ok(/pane\.hidden\s*=\s*!visible/.test(body),
     'setChatPane(true) must un-hide the chat pane (pane.hidden = !visible)');
   assert.ok(/state\.chatPaneVisible\s*=\s*!!visible/.test(body),

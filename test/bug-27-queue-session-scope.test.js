@@ -18,6 +18,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -104,7 +105,7 @@ t('runQueue module is imported (we use it directly in the snapshot)', () => {
 
 t('_renderRunQueueStrip handles null/empty runQueue (hides + clears DOM)', () => {
   const start = APP.search(/function\s+_renderRunQueueStrip\s*\(/);
-  const body = APP.slice(start, start + 800);
+  const body = sliceFn(APP, start);
   assert.ok(/!q\s*\|\|\s*!Array\.isArray\(q\.entries\)\s*\|\|\s*!q\.entries\.length/.test(body),
     '_renderRunQueueStrip must short-circuit on null / empty entries — otherwise the client-side clear would throw');
   assert.ok(/host\.hidden\s*=\s*true/.test(body),

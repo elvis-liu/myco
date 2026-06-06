@@ -44,6 +44,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -89,7 +90,7 @@ t('web/public/app.js: _getHUDActiveStep falls back to state.lastToolPhase when n
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+_getHUDActiveStep\s*\(/);
   assert.ok(at > -1, '_getHUDActiveStep must exist.');
-  const body = app.slice(at, at + 2500);
+  const body = sliceFn(app, at);
   assert.ok(/lastToolPhase\s*===\s*['"]verify['"]/.test(body),
     '_getHUDActiveStep must check state.lastToolPhase === "verify" for sticky-fallback (bug-53).');
   assert.ok(/lastToolPhase\s*===\s*['"]code['"]/.test(body),
@@ -107,7 +108,7 @@ t('web/public/app.js: turn_start agent event resets state.lastToolPhase to null'
   // The reset lives in _appendAgentEvent's turn_start branch.
   const at = app.search(/function\s+_appendAgentEvent\s*\(/);
   assert.ok(at > -1, '_appendAgentEvent must exist.');
-  const body = app.slice(at, at + 3000);
+  const body = sliceFn(app, at);
   assert.ok(/turn_start[\s\S]{0,200}lastToolPhase\s*=\s*null/.test(body) ||
             /lastToolPhase\s*=\s*null[\s\S]{0,200}turn_start/.test(body),
     '_appendAgentEvent must reset state.lastToolPhase = null on turn_start so each new turn begins in "Analyze" (bug-53 — guards against a stale phase from the previous turn leaking in).');

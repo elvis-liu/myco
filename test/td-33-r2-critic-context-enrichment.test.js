@@ -30,6 +30,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -79,7 +80,7 @@ t('server/src/critique.js: prompt-budget caps are named constants with reasonabl
 t('server/src/critique.js: _buildFileContextBlock reads files relative to recAbsCwd + per-file cap kicks in', () => {
   const src = _read('server/src/critique.js');
   const at = src.search(/function\s+_buildFileContextBlock\s*\(/);
-  const body = src.slice(at, at + 3500);
+  const body = sliceFn(src, at);
   assert.ok(/fs\.readFileSync\s*\(\s*path\.join\s*\(\s*recAbsCwd\s*,\s*entry\.path\s*\)/.test(body),
     '_buildFileContextBlock must read each file via fs.readFileSync(path.join(recAbsCwd, entry.path)) — the same resolution attach.js uses.');
   // The block must declare a "FULL FILE CONTEXT" header so the
@@ -95,7 +96,7 @@ t('server/src/critique.js: _buildFileContextBlock reads files relative to recAbs
 t('server/src/critique.js: _buildFileContextBlock returns an empty string when no entries are passed (intermediate-critique fallback)', () => {
   const src = _read('server/src/critique.js');
   const at = src.search(/function\s+_buildFileContextBlock\s*\(/);
-  const body = src.slice(at, at + 3500);
+  const body = sliceFn(src, at);
   // The first guard returns empty for non-array / empty entries.
   assert.ok(/changedEntries\s*\)\s*\|\|\s*changedEntries\.length\s*===\s*0[\s\S]{0,80}return\s*['"]['"]/.test(body) ||
             /!Array\.isArray\s*\(\s*changedEntries\s*\)[\s\S]{0,300}return\s*['"]['"]/.test(body),
@@ -107,6 +108,11 @@ t('server/src/critique.js: _buildFileContextBlock returns an empty string when n
 t('server/src/critique.js: _buildHistoryBlock reads item.runs + item.comments and includes both in the block', () => {
   const src = _read('server/src/critique.js');
   const at = src.search(/function\s+_buildHistoryBlock\s*\(/);
+  // NOTE: same caveat as the HISTORY_*_MAX assertion below — the
+  // runs handling lives in `_buildHistoryBlock`, the comments handling
+  // is in the sibling helper right after it. Keep the 3500-char window
+  // (don't migrate to sliceFn) so the `item.comments` assertion still
+  // hits the sibling helper.
   const body = src.slice(at, at + 3500);
   assert.ok(/item\.runs/.test(body),
     '_buildHistoryBlock must read item.runs (td-33 r2 — most recent N for the critic to see what was tried).');
@@ -119,6 +125,13 @@ t('server/src/critique.js: _buildHistoryBlock reads item.runs + item.comments an
 t('server/src/critique.js: _buildHistoryBlock caps runs at HISTORY_RUNS_MAX (most recent first) + comments at HISTORY_COMMENTS_MAX', () => {
   const src = _read('server/src/critique.js');
   const at = src.search(/function\s+_buildHistoryBlock\s*\(/);
+  // NOTE: this test deliberately scopes its body to a 3500-char window
+  // that extends *past* the end of `_buildHistoryBlock` itself — the
+  // runs cap lives inside that function but the comments cap is in a
+  // sibling helper right after it. Do NOT migrate this site to
+  // `sliceFn(...)`, which stops at the first column-0 `}` — the
+  // `slice(-HISTORY_COMMENTS_MAX)` assertion below would then miss
+  // its target (the comments helper).
   const body = src.slice(at, at + 3500);
   // Caps must be applied via slice with the named constants.
   assert.ok(/slice\s*\(\s*-\s*HISTORY_RUNS_MAX\s*\)/.test(body),
@@ -173,7 +186,7 @@ t('server/src/critique.js: retryLastCritique forwards changedEntries to triggerG
   const src = _read('server/src/critique.js');
   const at = src.search(/async\s+function\s+retryLastCritique\s*\(/);
   assert.ok(at > -1);
-  const body = src.slice(at, at + 1500);
+  const body = sliceFn(src, at);
   assert.ok(/changedEntries\s*:/.test(body),
     'retryLastCritique must forward changedEntries through to triggerGeminiCritique so retries get the same context (td-33 r2).');
 });

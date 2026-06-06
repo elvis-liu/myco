@@ -27,6 +27,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -68,7 +69,7 @@ t('web/public/app.js: doSpawn aborts with an inline error when the main-project 
   const app = _read('web/public/app.js');
   const at = app.search(/async\s+function\s+doSpawn\s*\(/);
   assert.ok(at > -1, 'doSpawn() must exist.');
-  const body = app.slice(at, at + 3500);
+  const body = sliceFn(app, at);
   // The body must read mainProjectRaw and short-circuit on empty
   // BEFORE the POST. Loose-match the empty check + error path.
   assert.ok(/mainProjectRaw/.test(body),

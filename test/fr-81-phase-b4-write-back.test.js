@@ -23,6 +23,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -56,7 +57,7 @@ t('server/src/git-hosts.js: _closeIssueGithub uses PATCH /repos/<o>/<r>/issues/<
   const src = _read('server/src/git-hosts.js');
   const at = src.search(/async\s+function\s+_closeIssueGithub\s*\(/);
   assert.ok(at > -1, '_closeIssueGithub must exist.');
-  const body = src.slice(at, at + 2000);
+  const body = sliceFn(src, at);
   assert.ok(/method\s*:\s*['"]PATCH['"]/.test(body),
     'GitHub close must use HTTP PATCH (REST convention).');
   assert.ok(/\/repos\/\$\{[^}]+\}\/\$\{[^}]+\}\/issues\/\$\{[^}]+\}/.test(body),
@@ -69,7 +70,7 @@ t('server/src/git-hosts.js: _closeIssueGitee uses PATCH /api/v5/repos/<owner>/is
   const src = _read('server/src/git-hosts.js');
   const at = src.search(/async\s+function\s+_closeIssueGitee\s*\(/);
   assert.ok(at > -1);
-  const body = src.slice(at, at + 2000);
+  const body = sliceFn(src, at);
   assert.ok(/method\s*:\s*['"]PATCH['"]/.test(body),
     'Gitee close must use HTTP PATCH.');
   assert.ok(/\/api\/v5\/repos\/\$\{[^}]+\}\/issues\/\$\{[^}]+\}/.test(body),
@@ -153,7 +154,7 @@ t('server/src/artifacts.js: write-back only applies to type="plan" (test/arch it
 t('server/src/artifacts.js: _fireRemoteCloseAsync stamps meta.closedUpstreamAt on success + skips with a log when no token is on file', () => {
   const src = _read('server/src/artifacts.js');
   const at = src.search(/function\s+_fireRemoteCloseAsync\s*\(/);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   assert.ok(/closedUpstreamAt\s*=\s*new Date\(\)\.toISOString\(\)/.test(body),
     'on closeIssue success, the helper must stamp meta.closedUpstreamAt with an ISO ts (Phase B.4 — used by B.3\'s "already closed" guard).');
   assert.ok(/no token on file/.test(body),

@@ -35,6 +35,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -80,7 +81,7 @@ t('server/src/sessions.js resolveAccessTier returns the three documented values'
   // and null (or end-of-function fall-through).
   const at = src.search(/function\s+resolveAccessTier\s*\(/);
   assert.ok(at > -1, 'resolveAccessTier must exist.');
-  const body = src.slice(at, at + 1500);
+  const body = sliceFn(src, at);
   assert.ok(/['"`]owner['"`]/.test(body),
     "resolveAccessTier must be able to return 'owner' (bug-47 r3).");
   assert.ok(/['"`]viewer['"`]/.test(body),
@@ -93,7 +94,7 @@ t('server/src/sessions.js isOwnerAdminOrViewer delegates to resolveAccessTier', 
   const src = _read('server/src/sessions.js');
   const at = src.search(/function\s+isOwnerAdminOrViewer\s*\(/);
   assert.ok(at > -1, 'isOwnerAdminOrViewer must still exist (used by other callers).');
-  const body = src.slice(at, at + 600);
+  const body = sliceFn(src, at);
   assert.ok(/resolveAccessTier\s*\(/.test(body),
     'isOwnerAdminOrViewer must delegate to resolveAccessTier so the carve-out + ACL rules stay in ONE place (bug-47 r3). Two duplicate implementations drift — this was the original bug.');
 });
@@ -120,7 +121,7 @@ t('server/src/index.js fileApiPreamble references resolveAccessTier', () => {
   const src = _read('server/src/index.js');
   const at = src.search(/function\s+fileApiPreamble\s*\(/);
   assert.ok(at > -1, 'fileApiPreamble must exist.');
-  const body = src.slice(at, at + 3500);
+  const body = sliceFn(src, at);
   assert.ok(/resolveAccessTier\s*\(/.test(body),
     'fileApiPreamble must call resolveAccessTier instead of its own inline access check — that\'s the WHOLE POINT of bug-47 r3 (single source of truth so labxnow + future carve-outs apply uniformly).');
 });

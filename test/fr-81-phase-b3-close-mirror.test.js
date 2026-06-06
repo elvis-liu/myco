@@ -24,6 +24,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -50,7 +51,7 @@ t('server/src/remote-issues.js: _mirrorClosedRemoteIssues helper exists and fetc
   assert.ok(/async\s+function\s+_mirrorClosedRemoteIssues\s*\(/.test(src),
     '_mirrorClosedRemoteIssues helper must be defined (Phase B.3 — close-detection mirror).');
   const at = src.search(/async\s+function\s+_mirrorClosedRemoteIssues\s*\(/);
-  const body = src.slice(at, at + 4000);
+  const body = sliceFn(src, at);
   assert.ok(/state\s*:\s*['"]closed['"]/.test(body),
     '_mirrorClosedRemoteIssues must call gitHosts.fetchIssues with state="closed" so it sees the upstream-closed set (Phase B.3).');
 });
@@ -58,7 +59,7 @@ t('server/src/remote-issues.js: _mirrorClosedRemoteIssues helper exists and fetc
 t('server/src/remote-issues.js: mirror sets done=true, meta.closedRemotely=true, meta.closedRemotelyAt=<iso>', () => {
   const src = _read('server/src/remote-issues.js');
   const at = src.search(/async\s+function\s+_mirrorClosedRemoteIssues\s*\(/);
-  const body = src.slice(at, at + 4000);
+  const body = sliceFn(src, at);
   assert.ok(/localItem\.done\s*=\s*true/.test(body),
     'the mirror must set localItem.done = true (Phase B.3 — that\'s the visible "the issue is resolved upstream" signal).');
   assert.ok(/closedRemotely\s*=\s*true/.test(body),
@@ -70,7 +71,7 @@ t('server/src/remote-issues.js: mirror sets done=true, meta.closedRemotely=true,
 t('server/src/remote-issues.js: mirror SKIPS items that are already done (no double-flip on subsequent refreshes)', () => {
   const src = _read('server/src/remote-issues.js');
   const at = src.search(/async\s+function\s+_mirrorClosedRemoteIssues\s*\(/);
-  const body = src.slice(at, at + 4000);
+  const body = sliceFn(src, at);
   assert.ok(/if\s*\(\s*localItem\.done\s*\)\s*continue/.test(body),
     'the mirror must short-circuit on already-done items so the next refresh after a close doesn\'t re-stamp closedRemotelyAt with a fresher timestamp (Phase B.3 — idempotency guard).');
 });
@@ -78,7 +79,7 @@ t('server/src/remote-issues.js: mirror SKIPS items that are already done (no dou
 t('server/src/remote-issues.js: mirror persists via sessions.saveStore + emits a plan state-update on the live session bus', () => {
   const src = _read('server/src/remote-issues.js');
   const at = src.search(/async\s+function\s+_mirrorClosedRemoteIssues\s*\(/);
-  const body = src.slice(at, at + 4000);
+  const body = sliceFn(src, at);
   assert.ok(/saveStore/.test(body),
     'the mirror must call sessions.saveStore so the closed-state survives a container restart (Phase B.3).');
   assert.ok(/emit\s*\(\s*['"]state-update['"]/.test(body),

@@ -22,6 +22,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -74,7 +75,7 @@ t('index.html loads katex.min.js + katex.min.css from /vendor', () => {
 t('renderMd protects math before marked.parse and restores after sanitize', () => {
   const idx = APP.search(/function\s+renderMd\s*\(/);
   assert.ok(idx > -1, 'renderMd must be defined');
-  const fn = APP.slice(idx, idx + 1200);
+  const fn = sliceFn(APP, idx);
   const extractIdx = fn.search(/_extractMath\s*\(/);
   const parseIdx = fn.search(/marked\.parse\s*\(/);
   const postIdx = fn.search(/_postProcessRenderedMd\s*\(/);
@@ -90,7 +91,7 @@ t('renderMd protects math before marked.parse and restores after sanitize', () =
 t('_extractMath handles $$…$$ / \\[…\\] / \\(…\\) / $…$ via katex.renderToString', () => {
   const idx = APP.search(/function\s+_extractMath\s*\(/);
   assert.ok(idx > -1, '_extractMath must be defined');
-  const fn = APP.slice(idx, idx + 2000);
+  const fn = sliceFn(APP, idx);
   assert.ok(/katex\.renderToString/.test(fn),
     '_extractMath must render via katex.renderToString');
   // Display + inline delimiter handling.

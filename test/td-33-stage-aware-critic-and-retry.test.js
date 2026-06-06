@@ -24,6 +24,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -54,7 +55,7 @@ t('server/src/critique.js: _looksLikeCriticError helper detects "(failed)" / "(m
   assert.ok(/function\s+_looksLikeCriticError\s*\(/.test(src),
     '_looksLikeCriticError helper must be defined (td-33 A — the gate the Retry button keys on).');
   const at = src.search(/function\s+_looksLikeCriticError\s*\(/);
-  const body = src.slice(at, at + 1200);
+  const body = sliceFn(src, at);
   // The helper's body must reference the common SDK failure shapes
   // so a future restyle can't silently regress to "any "(...)" is
   // an error" (too broad) or "only 'failed' is an error" (too
@@ -236,7 +237,7 @@ t('web/public/app.js: _renderVerdictPanel renders ↻ Retry on review.isError', 
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+_renderVerdictPanel\s*\(\)/);
   assert.ok(at > -1, '_renderVerdictPanel must exist.');
-  const body = app.slice(at, at + 12000);
+  const body = sliceFn(app, at);
   assert.ok(/verdict-btn-retry/.test(body),
     '_renderVerdictPanel must render .verdict-btn-retry when review.isError (td-33 A).');
   assert.ok(/review\.isError/.test(body),
@@ -254,7 +255,7 @@ t('web/public/app.js: Retry click POSTs to /sessions/:id/critique/retry', () => 
   // window. The window was arbitrary; this test asserts a wiring
   // CONTRACT (Retry → POST /critique/retry), not a function-size
   // constraint, so widening is the right move.
-  const body = app.slice(at, at + 16000);
+  const body = sliceFn(app, at);
   assert.ok(/\/sessions\/\$\{[^}]+\}\/critique\/retry/.test(body),
     'Retry click handler must POST to /sessions/:id/critique/retry (td-33 A wiring).');
   assert.ok(/method:\s*['"]POST['"]/.test(body),
@@ -264,7 +265,7 @@ t('web/public/app.js: Retry click POSTs to /sessions/:id/critique/retry', () => 
 t('web/public/app.js: _renderVerdictPanel renders [Checkpoint: <stage>] badge on review.isIntermediate', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+_renderVerdictPanel\s*\(\)/);
-  const body = app.slice(at, at + 12000);
+  const body = sliceFn(app, at);
   assert.ok(/review\.isIntermediate/.test(body),
     '_renderVerdictPanel must branch on review.isIntermediate (td-33 B).');
   assert.ok(/verdict-intermediate-badge/.test(body),
@@ -301,7 +302,7 @@ t('server/src/critique.js r1: queue-pause runs AFTER the critic returns + skips 
 t('web/public/app.js r1: error path renders BOTH ↻ Retry AND ✗ Dismiss (no stuck-on-Retry state)', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+_renderVerdictPanel\s*\(\)/);
-  const body = app.slice(at, at + 12000);
+  const body = sliceFn(app, at);
   // Anchor on the actionsHtml-assignment in the isError branch (the
   // other `if (isError) {` block earlier in the function just sets
   // titleText). Slice from `actionsHtml =` to the next `actionsHtml =`

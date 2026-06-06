@@ -19,6 +19,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -62,7 +63,7 @@ t('_isChromeEvent classifies tool_result as chrome (via the set, no special-case
   // the function still consults the set first.
   const fnIdx = APP.search(/function\s+_isChromeEvent\s*\(/);
   assert.ok(fnIdx > -1, '_isChromeEvent must be defined');
-  const body = APP.slice(fnIdx, fnIdx + 400);
+  const body = sliceFn(APP, fnIdx);
   assert.ok(/AGENT_CHROME_TYPES\.has\(\s*ev\.type\s*\)/.test(body),
     '_isChromeEvent must consult AGENT_CHROME_TYPES (which now contains tool_result)');
 });

@@ -27,6 +27,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -50,7 +51,7 @@ t('server/src/slashcmds.js: helper sets meta.remoteUrl on the new plan item', ()
   const src = _read('server/src/slashcmds.js');
   const at = src.search(/function\s+_autoPromoteRemoteIssueToPlan\s*\(/);
   assert.ok(at > -1);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   // The constructed item must include meta.remoteUrl. Loose match on
   // the object literal pattern: meta: { … remoteUrl … }.
   assert.ok(/meta\s*:\s*\{[\s\S]{0,400}remoteUrl/.test(body),
@@ -60,7 +61,7 @@ t('server/src/slashcmds.js: helper sets meta.remoteUrl on the new plan item', ()
 t('server/src/slashcmds.js: helper is idempotent — second call with same remoteUrl returns the existing item, not a duplicate', () => {
   const src = _read('server/src/slashcmds.js');
   const at = src.search(/function\s+_autoPromoteRemoteIssueToPlan\s*\(/);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   // The idempotency guard scans existing items for a matching
   // meta.remoteUrl BEFORE inserting.
   assert.ok(/find\s*\(\s*\(it\)\s*=>\s*it\.meta[\s\S]{0,100}remoteUrl\s*===\s*remoteUrl/.test(body),
@@ -70,7 +71,7 @@ t('server/src/slashcmds.js: helper is idempotent — second call with same remot
 t('server/src/slashcmds.js: helper tags the new item source="auto-promote" (distinguishable from manually-typed /fr items)', () => {
   const src = _read('server/src/slashcmds.js');
   const at = src.search(/function\s+_autoPromoteRemoteIssueToPlan\s*\(/);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   assert.ok(/source\s*:\s*['"]auto-promote['"]/.test(body),
     'the new plan item must be tagged source="auto-promote" so a future Plan-tab filter can distinguish promoted items from manually-typed ones.');
 });
@@ -78,7 +79,7 @@ t('server/src/slashcmds.js: helper tags the new item source="auto-promote" (dist
 t('server/src/slashcmds.js: helper persists via _persistPlanArtifact (rides the same write path as /fr /td /bug)', () => {
   const src = _read('server/src/slashcmds.js');
   const at = src.search(/function\s+_autoPromoteRemoteIssueToPlan\s*\(/);
-  const body = src.slice(at, at + 3000);
+  const body = sliceFn(src, at);
   assert.ok(/_persistPlanArtifact\s*\(\s*rec\s*,\s*sessionId\s*\)/.test(body),
     'auto-promote must persist via _persistPlanArtifact so plan.json + the state-update broadcast ride the same path as manually-typed plan items.');
 });

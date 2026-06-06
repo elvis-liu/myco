@@ -31,6 +31,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -50,7 +51,7 @@ t('web/public/app.js: touchstart listener registered on the composer input', () 
   // wiring on input (the local variable that resolves to #chat-input).
   const at = app.search(/function\s+bindChatUi\s*\(/);
   assert.ok(at > -1, 'bindChatUi must exist (anchor for the swipe-handler scan).');
-  const body = app.slice(at, at + 30000);
+  const body = sliceFn(app, at);
   assert.ok(/input\.addEventListener\s*\(\s*['"]touchstart['"]/.test(body),
     'bindChatUi must register a `touchstart` listener on the composer input (the start of swipe detection — fr-92).');
 });
@@ -58,7 +59,7 @@ t('web/public/app.js: touchstart listener registered on the composer input', () 
 t('web/public/app.js: touchend listener registered on the composer input', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+bindChatUi\s*\(/);
-  const body = app.slice(at, at + 30000);
+  const body = sliceFn(app, at);
   assert.ok(/input\.addEventListener\s*\(\s*['"]touchend['"]/.test(body),
     'bindChatUi must register a `touchend` listener on the composer input (fires the synthetic keydown after computing dy + elapsed — fr-92).');
 });
@@ -66,7 +67,7 @@ t('web/public/app.js: touchend listener registered on the composer input', () =>
 t('web/public/app.js: swipe handler dispatches synthetic ArrowUp / ArrowDown KeyboardEvents', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+bindChatUi\s*\(/);
-  const body = app.slice(at, at + 30000);
+  const body = sliceFn(app, at);
   // The handler must construct a KeyboardEvent('keydown') with
   // key:'ArrowUp' or 'ArrowDown' so the existing arrow-key handler
   // above (state-machine + draft-save semantics) runs unchanged.
@@ -79,7 +80,7 @@ t('web/public/app.js: swipe handler dispatches synthetic ArrowUp / ArrowDown Key
 t('web/public/app.js: swipe handler positions cursor before dispatch so the existing handler guard accepts it', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+bindChatUi\s*\(/);
-  const body = app.slice(at, at + 30000);
+  const body = sliceFn(app, at);
   // The existing arrow-key handler guards on `selStart !== 0` for Up
   // and `selEnd !== value.length` for Down. The swipe handler must
   // move the cursor to the correct extreme BEFORE dispatching so the
@@ -96,7 +97,7 @@ t('web/public/app.js: swipe handler positions cursor before dispatch so the exis
 t('web/public/app.js: swipe detection uses distance + time thresholds (not every touch fires)', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+bindChatUi\s*\(/);
-  const body = app.slice(at, at + 30000);
+  const body = sliceFn(app, at);
   // Two thresholds: SWIPE_MIN_PX (filter wobble) and SWIPE_MAX_MS
   // (filter long scrolls). Without both, a long sustained drag or a
   // tiny wobble would fire spurious history-step events.
@@ -109,7 +110,7 @@ t('web/public/app.js: swipe detection uses distance + time thresholds (not every
 t('web/public/app.js: swipe handler skips multi-touch (e.touches.length !== 1)', () => {
   const app = _read('web/public/app.js');
   const at = app.search(/function\s+bindChatUi\s*\(/);
-  const body = app.slice(at, at + 30000);
+  const body = sliceFn(app, at);
   // The handler must early-return on multi-touch (pinch-zoom, two-
   // finger scroll) so it doesn't fight the user's other gestures.
   assert.ok(/e\.touches\.length\s*!==\s*1|touches\.length\s*!==\s*1/.test(body),

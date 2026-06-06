@@ -30,6 +30,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -47,7 +48,7 @@ t('app.js: _updateAgentStatusStrip handles iteration_aborted (clears kind + labe
   // sites elsewhere in app.js.
   const idx = APP.search(/function\s+_updateAgentStatusStrip\s*\(/);
   assert.ok(idx > -1, '_updateAgentStatusStrip must be defined');
-  const win = APP.slice(idx, idx + 4500);
+  const win = sliceFn(APP, idx);
   // The branch must match ev.type === 'iteration_aborted' and clear
   // both kind + line so the Stop-show predicate flips false.
   assert.ok(/ev\.type === ['"]iteration_aborted['"]/.test(win),
@@ -85,7 +86,7 @@ t('app.js: _retireClaudeTyping clears claudeStatusKind + claudeStatusLine (not j
   // a stranded line + kind kept the button visible forever.
   const idx = APP.search(/function\s+_retireClaudeTyping\s*\(/);
   assert.ok(idx > -1, '_retireClaudeTyping must be defined');
-  const win = APP.slice(idx, idx + 1200);
+  const win = sliceFn(APP, idx);
   assert.ok(/state\.awaitingClaude\s*=\s*false/.test(win),
     'sanity: _retireClaudeTyping must still clear awaitingClaude');
   // The fix must additionally clear kind + line so the 30s idle

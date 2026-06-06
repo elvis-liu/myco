@@ -33,6 +33,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -138,7 +139,7 @@ t('styles.css: .verdict-panel-content still uses overflow-y:auto + max-width:960
 t('app.js: bug-55 truly-modal contract preserved (no backdrop click handler, no Esc handler in _renderVerdictPanel)', () => {
   const src = _read('web/public/app.js');
   const at = src.search(/function\s+_renderVerdictPanel\s*\(\)/);
-  const body = src.slice(at, at + 20000);
+  const body = sliceFn(src, at);
   // bug-58's CSS change is purely about the modal's positioning
   // context. The dismissal wiring lives in JS and must stay GONE
   // (bug-55 contract).

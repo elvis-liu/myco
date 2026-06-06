@@ -23,6 +23,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -42,7 +43,7 @@ t('app.js: _renderVerdictPanel no longer declares the safeToDismissByBackdrop ga
   const src = _read('web/public/app.js');
   const at = src.search(/function\s+_renderVerdictPanel\s*\(\)/);
   assert.ok(at > -1, '_renderVerdictPanel must exist.');
-  const body = src.slice(at, at + 20000);
+  const body = sliceFn(src, at);
   // Anchor on the CODE pattern, not the bare substring — bug-55's
   // comment block legitimately mentions "safeToDismissByBackdrop"
   // when explaining what it removed. Looking for `const
@@ -59,7 +60,7 @@ t('app.js: _renderVerdictPanel no longer declares the safeToDismissByBackdrop ga
 t('app.js: _renderVerdictPanel no longer registers a backdrop click listener that dismisses the pane', () => {
   const src = _read('web/public/app.js');
   const at = src.search(/function\s+_renderVerdictPanel\s*\(\)/);
-  const body = src.slice(at, at + 20000);
+  const body = sliceFn(src, at);
   // The pre-fix pattern was:
   //   panel.addEventListener('click', (e) => {
   //     if (e.target === panel) dismissPanel();
@@ -73,7 +74,7 @@ t('app.js: _renderVerdictPanel no longer registers a backdrop click listener tha
 t('app.js: _renderVerdictPanel no longer registers a document keydown listener that dismisses on Escape', () => {
   const src = _read('web/public/app.js');
   const at = src.search(/function\s+_renderVerdictPanel\s*\(\)/);
-  const body = src.slice(at, at + 20000);
+  const body = sliceFn(src, at);
   // The pre-fix Esc handler called document.addEventListener inside
   // the function. Look for that specific pattern in the function body
   // (the function-LOCAL `document.addEventListener('keydown', ...)`
@@ -85,7 +86,7 @@ t('app.js: _renderVerdictPanel no longer registers a document keydown listener t
 t('app.js: the dismissPanel() helper that wiped state.critiqueReview from the backdrop path is gone', () => {
   const src = _read('web/public/app.js');
   const at = src.search(/function\s+_renderVerdictPanel\s*\(\)/);
-  const body = src.slice(at, at + 20000);
+  const body = sliceFn(src, at);
   // The pre-fix code had `const dismissPanel = () => { ... }` defined
   // inside _renderVerdictPanel as a backdrop+Esc shared helper. With
   // the backdrop/Esc paths gone, the helper has no callers — it must

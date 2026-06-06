@@ -5335,7 +5335,73 @@
       "source": "user",
       "voters": [],
       "comments": []
+    },
+    {
+      "id": "td-36",
+      "text": "A: convert 8 awk|grep-q sites to capture+here-string (30% flake)",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-06-06T00:23:00.559Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "td-37",
+      "text": "E: replace sleep 2 (smoke server) with poll-bind",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-06-06T00:23:00.559Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "td-38",
+      "text": "F: sweep 38 echo \"$VAR\" | grep -q sites to here-strings",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-06-06T00:23:00.559Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "td-39",
+      "text": "C: budget-exceeded + fail tail the captured .out file",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-06-06T00:23:00.559Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "td-40",
+      "text": "D: static regression guards for awk|grep + echo|grep antipatterns",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-06-06T00:23:00.559Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "td-41",
+      "text": "B: extractFunctionBody helper + sweep 160 slice(at, at+N) sites",
+      "layer": "Todo",
+      "done": false,
+      "addedAt": "2026-06-06T00:23:00.559Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
     }
   ],
-  "updatedAt": "2026-06-04T06:40:19.631Z"
+  "updatedAt": "2026-06-06T00:23:00.559Z"
 }

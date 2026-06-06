@@ -35,6 +35,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -58,7 +59,7 @@ t('web/public/app.js defines _withShareToken(url) that appends ?s=/&s= when stat
   // can't decide whether to decorate. ±400 chars after the function
   // header is a safe window.
   const at = app.search(/function\s+_withShareToken\s*\(/);
-  const body = app.slice(at, at + 600);
+  const body = sliceFn(app, at);
   assert.ok(/state\.shareToken/.test(body),
     '_withShareToken must read state.shareToken to decide whether to decorate the URL (bug-47).');
   assert.ok(/encodeURIComponent\s*\(\s*state\.shareToken\s*\)/.test(body),

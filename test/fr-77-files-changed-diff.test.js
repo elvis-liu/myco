@@ -50,6 +50,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -87,7 +88,7 @@ t('files.js exports listChangedFiles + readDiff', () => {
 t('files.js: listChangedFiles caps at 500 entries (truncated flag)', () => {
   const idx = FILES_SRC.search(/function\s+listChangedFiles\s*\(/);
   assert.ok(idx > -1);
-  const win = FILES_SRC.slice(idx, idx + 1500);
+  const win = sliceFn(FILES_SRC, idx);
   assert.ok(/MAX\s*=\s*500/.test(win),
     'listChangedFiles must declare MAX = 500 as the entry cap');
   assert.ok(/truncated/.test(win),
@@ -97,13 +98,13 @@ t('files.js: listChangedFiles caps at 500 entries (truncated flag)', () => {
 t('files.js: readDiff guards path traversal via safeJoin', () => {
   const idx = FILES_SRC.search(/function\s+readDiff\s*\(/);
   assert.ok(idx > -1);
-  const win = FILES_SRC.slice(idx, idx + 2000);
+  const win = sliceFn(FILES_SRC, idx);
   assert.ok(/safeJoin\(absRoot,\s*relPath\)/.test(win));
 });
 
 t('files.js: readDiff uses git diff HEAD --no-color --no-ext-diff', () => {
   const idx = FILES_SRC.search(/function\s+readDiff\s*\(/);
-  const win = FILES_SRC.slice(idx, idx + 3000);
+  const win = sliceFn(FILES_SRC, idx);
   assert.ok(/--no-color/.test(win));
   assert.ok(/--no-ext-diff/.test(win));
   assert.ok(/'HEAD'/.test(win));
@@ -361,7 +362,7 @@ await tAsync('fr-77 r2: listChangedFiles surfaces last-5 commit subjects with pe
 t('fr-77 r2 server: _extractMentions caps at 50 entries (defense)', () => {
   const idx = FILES_SRC.search(/function\s+_extractMentions\s*\(/);
   assert.ok(idx > -1, '_extractMentions must be defined');
-  const win = FILES_SRC.slice(idx, idx + 600);
+  const win = sliceFn(FILES_SRC, idx);
   assert.ok(/found\.size\s*>=\s*50/.test(win));
   assert.ok(/fr\|bug\|td|bug\|fr\|td|td\|fr\|bug/.test(win));
 });
@@ -369,7 +370,7 @@ t('fr-77 r2 server: _extractMentions caps at 50 entries (defense)', () => {
 t('fr-77 r2 server: log parser uses NUL separator (%h%x00%s) safely', () => {
   const idx = FILES_SRC.search(/--pretty=format:%h%x00%s/);
   assert.ok(idx > -1, 'git log must use %h%x00%s');
-  const win = FILES_SRC.slice(idx, idx + 600);
+  const win = sliceFn(FILES_SRC, idx);
   assert.ok(/line\.indexOf\('\\0'\)/.test(win),
     "parser must call indexOf('\\\\0') — NUL byte split, not newline");
 });
@@ -522,7 +523,7 @@ t('app.js: _togglePlanChangedFileExpand + _renderInlineDiffBody defined (inline-
 t('app.js: bindPlanChangedFilesUi defined and idempotent (dataset.bound guard)', () => {
   assert.ok(/function\s+bindPlanChangedFilesUi\s*\(/.test(APP));
   const idx = APP.search(/function\s+bindPlanChangedFilesUi\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/dataset\.bound/.test(win),
     'bind must be guarded so re-shows of the Plan view do not double-bind');
   assert.ok(/plan-changed-files-refresh/.test(win),
@@ -536,7 +537,7 @@ t('app.js: bindPlanChangedFilesUi defined and idempotent (dataset.bound guard)',
 t('app.js: showArtifactView("plan") triggers loadPlanChangedFiles + bindPlanChangedFilesUi', () => {
   const idx = APP.search(/function\s+showArtifactView\s*\(/);
   assert.ok(idx > -1);
-  const win = APP.slice(idx, idx + 3000);
+  const win = sliceFn(APP, idx);
   assert.ok(/type\s*===\s*['"]plan['"]/.test(win),
     'showArtifactView must gate the changed-files load on type === "plan"');
   assert.ok(/bindPlanChangedFilesUi\(/.test(win),
@@ -547,7 +548,7 @@ t('app.js: showArtifactView("plan") triggers loadPlanChangedFiles + bindPlanChan
 
 t('app.js: inline-expand toggles a sibling li.pcf-diff-row (not the right pane)', () => {
   const idx = APP.search(/async\s+function\s+_togglePlanChangedFileExpand\s*\(/);
-  const win = APP.slice(idx, idx + 4000);
+  const win = sliceFn(APP, idx);
   assert.ok(/createElement\(['"]li['"]\)/.test(win),
     'inline expand must create a new LI sibling for the diff body');
   assert.ok(/pcf-diff-row/.test(win),
@@ -564,7 +565,7 @@ t('app.js: inline-expand toggles a sibling li.pcf-diff-row (not the right pane)'
 
 t('app.js: inline-expand uses /files/diff endpoint (reuses readDiff route)', () => {
   const idx = APP.search(/async\s+function\s+_togglePlanChangedFileExpand\s*\(/);
-  const win = APP.slice(idx, idx + 4000);
+  const win = sliceFn(APP, idx);
   assert.ok(/\/files\/diff\?path=/.test(win),
     'inline-expand must reuse the existing /files/diff endpoint');
 });
@@ -574,7 +575,7 @@ t('app.js: _renderPlanChangedFiles list items carry data-fc-path + .pcf-caret', 
   // r13 inlined SVG markup → grew the body; r16 added accepted-state
   // branches with duplicated button HTML → grew again. Slice 8kB to
   // cover.
-  const win = APP.slice(idx, idx + 8000);
+  const win = sliceFn(APP, idx);
   assert.ok(/data-fc-path=/.test(win),
     'list items must carry data-fc-path so the click handler picks the path');
   assert.ok(/pcf-caret/.test(win),
@@ -595,7 +596,7 @@ t('app.js: r17 _planItemDetailsHtml emits <details> for analysis + implPlan when
   assert.ok(/function\s+_planItemDetailsHtml\s*\(/.test(APP),
     '_planItemDetailsHtml helper must be defined');
   const idx = APP.search(/function\s+_planItemDetailsHtml\s*\(/);
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   // Both field names referenced.
   assert.ok(/analysis/.test(win) && /implPlan/.test(win),
     'helper must read it.analysis + it.implPlan');
@@ -734,7 +735,7 @@ t('styles.css: r14 SVG sizing rules for chip + btn-icon + comment icons', () => 
 
 t('app.js: r15 _togglePcfLineComment binds Esc to dismiss + shows "Esc to cancel" hint', () => {
   const idx = APP.search(/function\s+_togglePcfLineComment\s*\(/);
-  const win = APP.slice(idx, idx + 3000);
+  const win = sliceFn(APP, idx);
   assert.ok(/pcf-line-hint/.test(win),
     'per-line form must render a .pcf-line-hint');
   assert.ok(/Esc to cancel/.test(win),
@@ -748,13 +749,13 @@ t('app.js: r15 file-level reconsider form has Esc hint + handler', () => {
   // The form lives inside _renderInlineDiffBody's HTML, and the Esc
   // handler lives inside _bindDiffInteractions.
   const renderIdx = APP.search(/function\s+_renderInlineDiffBody\s*\(/);
-  const renderWin = APP.slice(renderIdx, renderIdx + 3500);
+  const renderWin = sliceFn(APP, renderIdx);
   assert.ok(/pcf-reconsider-hint/.test(renderWin),
     'file-level form must render a .pcf-reconsider-hint');
   assert.ok(/Esc to clear/.test(renderWin),
     'hint text must include "Esc to clear"');
   const bindIdx = APP.search(/function\s+_bindDiffInteractions\s*\(/);
-  const bindWin = APP.slice(bindIdx, bindIdx + 2000);
+  const bindWin = sliceFn(APP, bindIdx);
   assert.ok(/key\s*===\s*['"]Escape['"]/.test(bindWin),
     '_bindDiffInteractions must bind Escape on the file-level textarea');
 });
@@ -764,7 +765,7 @@ t('app.js: r16 _planAcceptedPaths Set tracks accepted-this-session paths', () =>
     '_planAcceptedPaths must be a Set');
   // _planChangedFilesAction populates it on accept success.
   const idx = APP.search(/async\s+function\s+_planChangedFilesAction\s*\(/);
-  const win = APP.slice(idx, idx + 2500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_planAcceptedPaths\.add/.test(win),
     'accept success must add the path to _planAcceptedPaths');
   // Refresh button clears it.
@@ -776,7 +777,7 @@ t('app.js: r16 _planAcceptedPaths Set tracks accepted-this-session paths', () =>
 
 t('app.js: r16 _renderPlanChangedFiles emits .is-accepted + .pcf-accepted-badge + disabled buttons', () => {
   const idx = APP.search(/function\s+_renderPlanChangedFiles\s*\(/);
-  const win = APP.slice(idx, idx + 5500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_planAcceptedPaths\.has\(e\.path\)/.test(win),
     'render must check _planAcceptedPaths.has(e.path) per row');
   assert.ok(/pcf-accepted-badge/.test(win),
@@ -914,14 +915,14 @@ t('app.js: _planChangedFilesAction (accept/reject) + _sendReconsider defined', (
 
 t('app.js: reject path asks window.confirm before destructive action', () => {
   const idx = APP.search(/async\s+function\s+_planChangedFilesAction\s*\(/);
-  const win = APP.slice(idx, idx + 2000);
+  const win = sliceFn(APP, idx);
   assert.ok(/window\.confirm\(/.test(win),
     'reject must prompt window.confirm before deleting/reverting');
 });
 
 t('app.js: _renderPlanChangedFiles emits per-row accept + reject buttons when not readOnly', () => {
   const idx = APP.search(/function\s+_renderPlanChangedFiles\s*\(/);
-  const win = APP.slice(idx, idx + 5500);
+  const win = sliceFn(APP, idx);
   assert.ok(/data-pcf-action=['"]accept['"]/.test(win),
     'rows must include an accept button with data-pcf-action="accept"');
   assert.ok(/data-pcf-action=['"]reject['"]/.test(win),
@@ -938,7 +939,7 @@ t('fr-77 r13: per-row + caret icons are Lucide SVGs matching the chrome cluster 
   // Reject ✕ buttons + the leading caret ▶ to the SAME family so the
   // whole UI reads as one icon system.
   const idx = APP.search(/function\s+_renderPlanChangedFiles\s*\(/);
-  const win = APP.slice(idx, idx + 5500);
+  const win = sliceFn(APP, idx);
   // pcf-row-btn must contain SVG (not Unicode ✓/✕).
   const acceptBlock = win.slice(win.indexOf('data-pcf-action="accept"'));
   assert.ok(/<svg[^>]*viewBox="0 0 24 24"[^>]*stroke-width="1\.75"/.test(acceptBlock),
@@ -987,7 +988,7 @@ t('styles.css: pcf-row-btn is a square chrome-style button with sized SVG', () =
 
 t('app.js: _highlightDiffWithLang tracks post-change line numbers (data-line-no) + clickable class', () => {
   const idx = APP.search(/function\s+_highlightDiffWithLang\s*\(/);
-  const win = APP.slice(idx, idx + 5000);
+  const win = sliceFn(APP, idx);
   assert.ok(/newLineNo/.test(win),
     'must maintain a post-change line counter for per-line comment marker');
   assert.ok(/data-line-no=/.test(win),
@@ -1000,7 +1001,7 @@ t('app.js: _highlightDiffWithLang tracks post-change line numbers (data-line-no)
 
 t('app.js: _renderInlineDiffBody includes the reconsider form (file-level)', () => {
   const idx = APP.search(/function\s+_renderInlineDiffBody\s*\(/);
-  const win = APP.slice(idx, idx + 3000);
+  const win = sliceFn(APP, idx);
   assert.ok(/pcf-reconsider/.test(win),
     'inline diff must include a .pcf-reconsider form below the diff');
   assert.ok(/pcf-reconsider-input/.test(win),
@@ -1011,7 +1012,7 @@ t('app.js: _renderInlineDiffBody includes the reconsider form (file-level)', () 
 
 t('app.js: _sendReconsider passes optional lineNo through to /files/reconsider', () => {
   const idx = APP.search(/async\s+function\s+_sendReconsider\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   assert.ok(/files\/reconsider/.test(win),
     'must POST to /files/reconsider');
   assert.ok(/lineNo/.test(win),
@@ -1080,7 +1081,7 @@ t('app.js: _diffLangForPath + _highlightDiffWithLang defined', () => {
 
 t('app.js: _diffLangForPath reuses hljsLangForExt + handles Dockerfile/Makefile basenames', () => {
   const idx = APP.search(/function\s+_diffLangForPath\s*\(/);
-  const win = APP.slice(idx, idx + 1200);
+  const win = sliceFn(APP, idx);
   assert.ok(/hljsLangForExt\s*\(/.test(win),
     'must consult the existing extension→language map');
   assert.ok(/Dockerfile/i.test(win),
@@ -1091,7 +1092,7 @@ t('app.js: _diffLangForPath reuses hljsLangForExt + handles Dockerfile/Makefile 
 
 t('app.js: _highlightDiffWithLang classifies meta / hunk / add / rm / ctx', () => {
   const idx = APP.search(/function\s+_highlightDiffWithLang\s*\(/);
-  const win = APP.slice(idx, idx + 4500);
+  const win = sliceFn(APP, idx);
   for (const cls of ['pcf-diff-meta', 'pcf-diff-hunk', 'pcf-diff-add', 'pcf-diff-rm', 'pcf-diff-ctx']) {
     assert.ok(win.includes(cls),
       `line classifier must emit ${cls}`);
@@ -1111,7 +1112,7 @@ t('app.js: _highlightDiffWithLang classifies meta / hunk / add / rm / ctx', () =
 
 t('app.js: _highlightDiffWithLang calls hljs.highlight per line with detected language', () => {
   const idx = APP.search(/function\s+_highlightDiffWithLang\s*\(/);
-  const win = APP.slice(idx, idx + 4500);
+  const win = sliceFn(APP, idx);
   assert.ok(/window\.hljs\.highlight\s*\(/.test(win),
     'must call window.hljs.highlight per line for syntax tokens');
   assert.ok(/getLanguage\s*\(/.test(win),
@@ -1122,7 +1123,7 @@ t('app.js: _highlightDiffWithLang calls hljs.highlight per line with detected la
 
 t('app.js: _renderInlineDiffBody wires the per-language highlighter (not the old language-diff block)', () => {
   const idx = APP.search(/function\s+_renderInlineDiffBody\s*\(/);
-  const win = APP.slice(idx, idx + 2500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_highlightDiffWithLang\s*\(/.test(win),
     '_renderInlineDiffBody must call _highlightDiffWithLang');
   assert.ok(/_diffLangForPath\s*\(/.test(win),
@@ -1203,7 +1204,7 @@ t('app.js: _planChangedFileStatsHtml renders +N / −M chips + bin badge', () =>
   assert.ok(/function\s+_planChangedFileStatsHtml\s*\(/.test(APP),
     '_planChangedFileStatsHtml helper must be defined');
   const idx = APP.search(/function\s+_planChangedFileStatsHtml\s*\(/);
-  const win = APP.slice(idx, idx + 1500);
+  const win = sliceFn(APP, idx);
   // Bin badge for null/null.
   assert.ok(/pcf-stats-bin/.test(win),
     'null counts must render a .pcf-stats-bin badge');
@@ -1219,7 +1220,7 @@ t('app.js: _planChangedFileStatsHtml renders +N / −M chips + bin badge', () =>
 
 t('app.js: _renderPlanChangedFiles list items include the stats chip', () => {
   const idx = APP.search(/function\s+_renderPlanChangedFiles\s*\(/);
-  const win = APP.slice(idx, idx + 3500);
+  const win = sliceFn(APP, idx);
   assert.ok(/_planChangedFileStatsHtml\s*\(/.test(win),
     'row HTML must invoke _planChangedFileStatsHtml');
 });
@@ -1285,7 +1286,7 @@ t('app.js: bindPlanChangedFilesResize defined + wired into bindPlanChangedFilesU
   // Must be invoked from bindPlanChangedFilesUi so the resize wires up
   // alongside the rest of the section's bindings on first plan-show.
   const idx = APP.search(/function\s+bindPlanChangedFilesUi\s*\(/);
-  const win = APP.slice(idx, idx + 2500);
+  const win = sliceFn(APP, idx);
   assert.ok(/bindPlanChangedFilesResize\(/.test(win),
     'bindPlanChangedFilesUi must call bindPlanChangedFilesResize');
 });
@@ -1293,7 +1294,7 @@ t('app.js: bindPlanChangedFilesResize defined + wired into bindPlanChangedFilesU
 t('app.js: resize handler uses pointer events + persists to localStorage', () => {
   const idx = APP.search(/function\s+bindPlanChangedFilesResize\s*\(/);
   assert.ok(idx > -1);
-  const win = APP.slice(idx, idx + 4000);
+  const win = sliceFn(APP, idx);
   // Pointer events — works for both mouse + touch.
   assert.ok(/addEventListener\(['"]pointerdown['"]/.test(win),
     'must bind pointerdown on the handle');
@@ -1312,7 +1313,7 @@ t('app.js: resize handler uses pointer events + persists to localStorage', () =>
 
 t('app.js: resize clamps to MIN + viewport-fraction MAX', () => {
   const idx = APP.search(/function\s+bindPlanChangedFilesResize\s*\(/);
-  const win = APP.slice(idx, idx + 4000);
+  const win = sliceFn(APP, idx);
   // MIN constant + Math.max/min clamp.
   assert.ok(/MIN_PX/.test(win) || /Math\.max\([^)]*\d+/.test(win),
     'must declare a MIN bound (≥60px) to keep the handle reachable');
@@ -1324,7 +1325,7 @@ t('app.js: resize clamps to MIN + viewport-fraction MAX', () => {
 
 t('app.js: double-click on handle resets to CSS default (clears inline height + saved value)', () => {
   const idx = APP.search(/function\s+bindPlanChangedFilesResize\s*\(/);
-  const win = APP.slice(idx, idx + 4000);
+  const win = sliceFn(APP, idx);
   assert.ok(/addEventListener\(['"]dblclick['"]/.test(win),
     'must bind dblclick on the handle');
   // The dblclick handler must clear sec.style.height AND remove the

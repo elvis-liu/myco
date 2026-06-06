@@ -42,6 +42,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { sliceFn } = require('./_lib/fn-body');
 
 let passed = 0, failed = 0;
 function t(name, fn) {
@@ -68,7 +69,7 @@ t('server/src/critique.js: resolveCritique(sessionId, session, opts) helper exis
 t('server/src/critique.js: resolveCritique emits state-update with kind:"critique-resolved" + itemId + reason', () => {
   const src = _read('server/src/critique.js');
   const at = src.search(/function\s+resolveCritique\s*\(/);
-  const body = src.slice(at, at + 1500);
+  const body = sliceFn(src, at);
   assert.ok(/session\.emit\s*\(\s*['"]state-update['"]/.test(body),
     'resolveCritique must call session.emit("state-update", ...) — that\'s the WS broadcast hook every attached client listens on.');
   assert.ok(/kind:\s*['"]critique-resolved['"]/.test(body),
