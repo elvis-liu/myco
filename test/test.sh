@@ -145,11 +145,23 @@ NODE_TEST_RESULT_DIR=""
 # Fire every test/*.test.js in the background and stash {basename}.exit /
 # {basename}.out into a tempdir so call-sites can read the result later.
 # Idempotent — second call no-ops.
+#
+# Concurrency: capped at NODE_TEST_PARALLELISM (default 10). Pre-cap this
+# fired ALL ~175 test files at once, which OOM-killed random tests on
+# small-RAM hosts (mycobeta: 2 cores / 7.7GB → 175 × ~60MB node ≈ 10GB
+# committed → OOM-storm → tests get reaped before they can write their
+# .exit file → poller blames "180s budget" on whichever test drew the
+# short straw that run). Cap lets fast hosts keep most of their wall-time
+# win while bounding peak memory to ~max_parallel × ~60MB. `wait -n`
+# returns when ANY single background job finishes (bash 4.3+; we run 5.3
+# on both dev + mycobeta).
 node_test_prelaunch() {
   if [ -n "$NODE_TEST_RESULT_DIR" ]; then return; fi
   if ! have_node; then return; fi
   NODE_TEST_RESULT_DIR=$(mktemp -d -t myco-node-tests.XXXXXX)
   trap 'rm -rf "$NODE_TEST_RESULT_DIR"' EXIT
+  local max_parallel="${NODE_TEST_PARALLELISM:-10}"
+  local running=0
   local f
   for f in test/*.test.js; do
     [ -f "$f" ] || continue
@@ -159,11 +171,29 @@ node_test_prelaunch() {
       node "$f" > "$NODE_TEST_RESULT_DIR/$key.out" 2>&1
       echo "$?" > "$NODE_TEST_RESULT_DIR/$key.exit"
     ) &
+    running=$((running + 1))
+    if [ "$running" -ge "$max_parallel" ]; then
+      # Block until ANY of the in-flight tests finishes, then slot the
+      # next file. `wait -n` is the cheap way to do this — kernel-level
+      # blocking on SIGCHLD, no polling.
+      #
+      # The `|| true` matters because of two distinct nonzero paths:
+      #   (a) the awaited test exited nonzero (assertion failed) —
+      #       `set -e` on line 3 would abort the whole test.sh, never
+      #       letting node_test_result report the failure properly.
+      #   (b) shell doesn't support `wait -n` (very old bash) — we
+      #       silently degrade to "no concurrency cap" rather than
+      #       abort. We're on bash 5.3 everywhere so this is just
+      #       defensive.
+      wait -n 2>/dev/null || true
+      running=$((running - 1))
+    fi
   done
-  # We deliberately do NOT `wait` here — call-sites that need a particular
-  # result will block on the .exit file via node_test_result. That lets
-  # the static-check phase keep ripping in the foreground while node
-  # processes burn cycles in the background.
+  # We deliberately do NOT `wait` for the trailing batch — call-sites
+  # that need a particular result will block on the .exit file via
+  # node_test_result. That lets the static-check phase keep ripping in
+  # the foreground while the last (<= max_parallel) node processes
+  # burn cycles in the background.
 }
 
 # Return 0 / 1 + emit pass/fail for the given test file.
