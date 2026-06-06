@@ -5401,7 +5401,26 @@
       "source": "user",
       "voters": [],
       "comments": []
+    },
+    {
+      "id": "bug-66",
+      "text": "Enforce single main project per session; anchor plan + memory to main-project/_myco_",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-06T08:32:38.130Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "{\n  \"items\": [\n    {\n      \"id\": \"bug-1\",\n      \"text\": \"Enforce single main project per session; consolidate plan + memory under main-project/_myco_\",\n      \"layer\": \"Bug\",\n      \"done\": false,\n      \"addedAt\": \"2026-06-06T05:48:10.199Z\",\n      \"addedBy\": \"kkrazy\",\n      \"source\": \"user\",\n      \"voters\": [],\n      \"comments\": [],\n      \"meta\": {\n        \"rewriteRequested\": \"long\",\n        \"originalText\": \"There.should be only one main project for each session added via +. We should be looking at the main-project/_myco_/plan.json, the main-project/_myco_ should be where.the project memory should stay.\",\n        \"rewritten\": true\n      },\n      \"description\": \"**Problem:** Sessions can accumulate multiple \\\"main\\\" projects when added via `+`, and project memory/plan paths are inconsistent.\\n**Expected:** Each session has exactly one main project. Plan is read from `main-project/_myco_/plan.json`, and `main-project/_myco_` is the canonical location for project memory.\\n**Actual:** Multiple main projects can be added per session, and memory/plan locations are not anchored to `main-project/_myco_`.\\n**Context:** Paths involved — `main-project/_myco_/plan.json`, `main-project/_myco_/` (project memory root).\"\n    }\n  ],\n  \"updatedAt\": \"2026-06-06T05:48:16.031Z\"\n}",
+        "rewritten": true
+      },
+      "description": "**Problem:** Sessions can accumulate multiple \"main\" projects when added via `+`, and project memory/plan paths are not consistently anchored under `main-project/_myco_`.\n**Expected:** Each session has exactly one main project. Plan is read from `main-project/_myco_/plan.json`, and `main-project/_myco_` is the canonical root for project memory.\n**Actual:** Adding via `+` permits multiple main projects per session, and plan/memory locations drift away from `main-project/_myco_`.\n**Context:** Paths involved — `main-project/_myco_/plan.json`, `main-project/_myco_/` (project memory root)."
     }
   ],
-  "updatedAt": "2026-06-06T00:23:00.559Z"
+  "updatedAt": "2026-06-06T08:32:44.632Z"
 }
