@@ -5599,7 +5599,41 @@
         "rewritten": true
       },
       "description": "**Problem:** Plan items submitted for implementation don't run through the required staged workflow with critic gating, so solutions advance without review.\n**Expected:** Each plan item runs 3 stages — 1. analyze (propose a solution), 2. code (implement the proposal), 3. verify (confirm the fix). After every stage a selected critic model runs and opens a modal popover letting the user (1) review the solution, (2) ask further questions, (3) accept the solution, or (4) ask Claude to address the issues. The next stage only starts once the prior stage's solution is accepted.\n**Actual:** Stages are not separated, no critic step runs between them, and no acceptance modal gates progression."
+    },
+    {
+      "id": "bug-69",
+      "text": "Verdict panel renders follow-up questions unreadably alongside original message",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-07T05:26:25.727Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "verdict panel should show user follow up questions in a more readable format, together with the original message.",
+        "rewritten": true
+      },
+      "description": "**Problem:** User follow-up questions in the verdict panel are hard to read and poorly grouped with the original message.\n**Expected:** Follow-up questions display in a readable, structured format paired clearly with the original message they relate to.\n**Actual:** Follow-ups render in a format that's hard to scan and not visually tied to the original message."
+    },
+    {
+      "id": "bug-70",
+      "text": "\"Ask critic\" outside Analyze stage reopens Analyze verdict modal instead of current stage",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-07T05:35:21.603Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "\"ask critic\" in other stage than analyze verdict modal will bring back the modal to show critic of the analyze stage result, the \"ask critic\" should be specfiic to the current stage.",
+        "rewritten": true
+      },
+      "description": "**Problem:** \"Ask critic\" is not stage-aware and always surfaces the Analyze stage critique.\n**Expected:** \"Ask critic\" should return the critic for the current stage's verdict modal.\n**Actual:** Invoking \"ask critic\" from any stage other than Analyze reopens the Analyze verdict modal with the Analyze stage critic."
     }
   ],
-  "updatedAt": "2026-06-06T15:21:04.546Z"
+  "updatedAt": "2026-06-07T05:35:28.751Z"
 }
