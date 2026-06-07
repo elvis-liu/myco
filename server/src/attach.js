@@ -244,7 +244,21 @@ function _registerExternalSession(sessionId, session) {
         // next transition will be → awaiting_accept (via critique.js).
         _transitionStageState(sessionId, session, active.itemId, stage, 'awaiting_verdict');
         const rec = sessionsMod.getSessionRecord(sessionId);
-        if (!rec || !rec.absCwd) return;
+        if (!rec || !rec.absCwd) {
+          // bug-68 follow-up (2026-06-07): emit a chat note instead of
+          // silent return. Pre-follow-up the sentinel-received note
+          // appeared + then nothing — user had no signal the critic
+          // wasn't going to fire. Session record missing usually means
+          // the rec was reaped + the session is in a weird transition;
+          // don't transition stageState here (state is unknown), just
+          // tell the user.
+          console.warn(`[bug-68] stage-done(${stage}) — no session record / absCwd; cannot run critic`);
+          _emitCritiqueSkipNote(sessionId, session, {
+            stage, itemId: active.itemId, reason: 'no-session-rec',
+            message: `⚠️ Critic skipped for **${stage}** stage — session record is missing or has no working directory. The session may be transitioning (reaped + respawning). Try ▶ Run on the plan item again in a moment, or type **accept** in chat to proceed without the critic.`,
+          });
+          return;
+        }
         const { listChangedFiles, readDiff } = require('./files');
         const changedInfo = await listChangedFiles(rec.absCwd);
         if (!changedInfo || !Array.isArray(changedInfo.entries) || changedInfo.entries.length === 0) {
@@ -294,11 +308,39 @@ function _registerExternalSession(sessionId, session) {
           const d = await readDiff(rec.absCwd, entry.path);
           if (d && d.diff) fullDiff += `\n--- File: ${entry.path} ---\n${d.diff}\n`;
         }
-        if (!fullDiff.trim()) return;
+        if (!fullDiff.trim()) {
+          // bug-68 follow-up (2026-06-07): all readDiff calls returned
+          // empty (file added but git can't compute diff, file was a
+          // binary, or similar). Same observability hole as the
+          // baseline-wip-only case: tell the user + transition to
+          // awaiting_accept so chat-accept works.
+          console.log(`[td-33] stage-done(${stage}) — readDiff returned empty for all newEntries; skipping critique`);
+          _emitCritiqueSkipNote(sessionId, session, {
+            stage, itemId: active.itemId, reason: 'empty-diff',
+            message: `📋 Critic skipped for **${stage}** stage — files changed but the diff is empty (possibly new files git can't diff, binary changes, or readDiff errors). Type **accept** in chat to proceed to the next stage, or re-emit \`[stage: ${stage} done]\` after making textual changes.`,
+          });
+          _transitionStageState(sessionId, session, active.itemId, stage, 'awaiting_accept');
+          return;
+        }
         const planArtifact = rec.artifacts && rec.artifacts.plan;
         const item = planArtifact && Array.isArray(planArtifact.items)
           && planArtifact.items.find((it) => it.id === active.itemId);
-        if (!item) return;
+        if (!item) {
+          // bug-68 follow-up (2026-06-07): plan item not found in
+          // rec.artifacts.plan. Pre-follow-up this returned silently.
+          // bug-74 added the file-mirror fallback in
+          // _findPlanItemInRec, but THIS path uses a different lookup
+          // (direct .find on rec.artifacts.plan.items) — if rec.artifacts
+          // is stale (e.g. plan.json was edited externally), the item
+          // isn't found. Tell the user; don't transition (we can't find
+          // the item to transition).
+          console.warn(`[bug-68] stage-done(${stage}) — item ${active.itemId} not found in rec.artifacts.plan; cannot run critic`);
+          _emitCritiqueSkipNote(sessionId, session, {
+            stage, itemId: active.itemId, reason: 'item-missing',
+            message: `⚠️ Critic skipped for **${stage}** stage — plan item \`${active.itemId}\` not found in the session's in-memory artifacts. The plan.json may have been edited externally + needs re-load. Try ▶ Run on the plan item again; if the issue persists, check that \`_myco_/plan.json\` contains the item.`,
+          });
+          return;
+        }
         const { triggerGeminiCritique } = require('./critique');
         // td-33 r2: pass newEntries through so intermediate critiques
         // get the same file-context enrichment as final critiques.
@@ -320,6 +362,27 @@ function _registerExternalSession(sessionId, session) {
           { isIntermediate: true, stage, changedEntries: newEntries });
       } catch (err) {
         console.error(`[td-33] stage-done(${stage}) critique failed: ${err.message}`);
+        // bug-68 follow-up (2026-06-07): emit a chat note for uncaught
+        // exceptions in the stage-done handler. Pre-follow-up errors
+        // landed in stderr only, leaving the user with the sentinel-
+        // received note + nothing else. Common causes: readDiff
+        // exception (corrupt git state), getSessionRecord race, an
+        // error thrown by triggerGeminiCritique before its own error
+        // path landed. The note doesn't transition stageState
+        // (state is unknown after an exception); the user should
+        // re-dispatch via ▶ Run if the issue is transient.
+        try {
+          const activeForNote = session._activeRunItem;
+          const itemIdForNote = activeForNote && activeForNote.itemId;
+          if (itemIdForNote) {
+            _emitCritiqueSkipNote(sessionId, session, {
+              stage, itemId: itemIdForNote, reason: 'handler-exception',
+              message: `⚠️ Critic handler crashed during **${stage}** stage for \`${itemIdForNote}\`: \`${err && err.message ? err.message.slice(0, 200) : 'unknown error'}\`. The server log has the full stack trace. Try ▶ Run on the plan item again — if the error recurs, the underlying cause needs investigation (likely a git state issue, session race, or critic-pipeline bug).`,
+            });
+          }
+        } catch (noteErr) {
+          console.error(`[bug-68] follow-up handler-exception note failed: ${noteErr.message}`);
+        }
       }
     });
     // Plan-item ▶ Run linkage: when the user kicks off a run via

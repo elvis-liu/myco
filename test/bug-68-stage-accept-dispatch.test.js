@@ -253,23 +253,56 @@ t('attach.js stage-done handler emits skip-note when critic skips (no changes / 
 
 t('attach.js skip sites transition stageState to awaiting_accept so chat-accept works (bug-68 follow-up — td-35 stuck-stage repro)', () => {
   const src = _read('server/src/attach.js');
-  // Both skip sites must follow the chat note with
-  // _transitionStageState(..., stage, 'awaiting_accept'). Pre-follow-up
-  // the skip path left stageState at awaiting_verdict (set on sentinel
-  // detection earlier in the handler) — because the awaiting_accept
-  // transition lives in critique.js and the critic never fired for
-  // skips. User-reported on td-35: "I've never seen ✓ Accept Stage in
-  // the verdict HUD either" + "the verdict modal is never shown up".
-  // The fix transitions to awaiting_accept on skip so bug-70 chat-
-  // accept handler (which gates on awaiting_accept) works immediately.
+  // Three skip sites must follow the chat note with
+  // _transitionStageState(..., stage, 'awaiting_accept'):
+  // no-changes, baseline-wip-only, empty-diff. Pre-follow-up the skip
+  // path left stageState at awaiting_verdict (set on sentinel detection
+  // earlier in the handler) — because the awaiting_accept transition
+  // lives in critique.js and the critic never fired for skips. User-
+  // reported on td-35: "I've never seen ✓ Accept Stage in the verdict
+  // HUD either" + "the verdict modal is never shown up". The fix
+  // transitions to awaiting_accept on skip so bug-70 chat-accept
+  // handler (which gates on awaiting_accept) works immediately.
+  //
+  // Window 10500 chars: enough to cover all 3 transitioning skip
+  // sites. The other 3 silent bail paths (no-session-rec, item-
+  // missing, handler-exception) DO emit chat notes but intentionally
+  // do NOT transition — state is unknown or the item can't be
+  // located, so chat-accept on them wouldn't have a clean target.
   const at = src.search(/session\.on\(\s*['"]stage-done['"]/);
-  const body = src.slice(at, at + 7500);
-  // Look for _transitionStageState(...'awaiting_accept'...) calls in
-  // the skip-note regions (one per skip branch).
+  const body = src.slice(at, at + 10500);
   const re = /_emitCritiqueSkipNote\s*\([\s\S]{0,1500}_transitionStageState\s*\([^)]*['"]awaiting_accept['"]/g;
   const matches = body.match(re) || [];
-  assert.ok(matches.length >= 2,
-    `both skip sites must call _transitionStageState(..., 'awaiting_accept') after the skip note — found ${matches.length} site(s). Without this the chat-accept handler (gated on awaiting_accept) silently no-ops on skips, and the verdict pane never renders (no broadcast). User is stuck with no recovery path (bug-68 follow-up).`);
+  assert.ok(matches.length >= 3,
+    `the three "diff-empty" skip sites (no-changes / baseline-wip-only / empty-diff) must each call _transitionStageState(..., 'awaiting_accept') after the skip note — found ${matches.length} site(s). Without this the chat-accept handler (gated on awaiting_accept) silently no-ops on skips, and the verdict pane never renders. User is stuck with no recovery path (bug-68 follow-up).`);
+});
+
+t('attach.js stage-done handler: ALL silent-bail paths now emit chat notes (no-rec / empty-diff / item-missing / handler-exception)', () => {
+  const src = _read('server/src/attach.js');
+  const at = src.search(/session\.on\(\s*['"]stage-done['"]/);
+  assert.ok(at > -1, 'stage-done handler must exist.');
+  // Window of 15_000 chars covers the full handler including all 6
+  // bail-path notes (3 transitioning skip sites + 3 non-transitioning)
+  // + their explanatory comments. The handler-exception case sits
+  // furthest at ~13_000 chars from handler start.
+  const body = src.slice(at, at + 15000);
+  // Each of the 4 bail paths must have its own reason string in a
+  // _emitCritiqueSkipNote call. These reasons are how the static
+  // guards distinguish the cases.
+  for (const reason of ['no-session-rec', 'empty-diff', 'item-missing', 'handler-exception']) {
+    const re = new RegExp(`reason:\\s*['"]${reason}['"]`);
+    assert.ok(re.test(body),
+      `stage-done handler must emit a chat note with reason:'${reason}' so the user sees what failed instead of stderr-only silence (bug-68 follow-up — close the 3 silent returns + catch-all).`);
+  }
+  // Bonus: the empty-diff path must ALSO transition to awaiting_accept
+  // (same shape as the no-changes + baseline-wip-only skip-transition
+  // fix). The other 3 bail paths (no-session-rec / item-missing /
+  // handler-exception) intentionally do NOT transition — state is
+  // unknown or the item can't be located.
+  const emptyDiffBlock = body.match(/reason:\s*['"]empty-diff['"][\s\S]{0,800}/);
+  assert.ok(emptyDiffBlock, 'empty-diff branch must exist.');
+  assert.ok(/_transitionStageState\s*\([^)]*['"]awaiting_accept['"]/.test(emptyDiffBlock[0]),
+    'empty-diff branch must transition stageState to awaiting_accept (same as no-changes + baseline-wip-only skips) so chat-accept works.');
 });
 
 t('attach.js skip-note text advises typing accept in chat (NOT click verdict HUD)', () => {
