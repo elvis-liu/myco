@@ -677,6 +677,44 @@ function resolveCritique(sessionId, session, opts = {}) {
     itemId,
     reason,
   });
+  // bug-75: dismiss / discard must also clear item.meta.lastCriticReview
+  // so fr-98 attach-replay (attach.js:1804-1821) stops re-shipping the
+  // pane on every reconnect. Pre-fix this composed with the documented
+  // "dismiss → no state-machine change" semantic into an infinite
+  // re-render loop: stageState stayed at awaiting_accept (correct —
+  // user hadn't decided), but lastCriticReview ALSO stayed populated,
+  // so every WebSocket attach re-replayed the same verdict. Logged
+  // smoking gun: _myco_/logs/mycod-2026-06-07.log:17:49-17:51 — three
+  // reconnects in 75 seconds, each followed by a dismiss POST, the
+  // pane kept coming back. bug-72's client-side Reopen pill (shipped
+  // separately) gives the user local recovery if they change their
+  // mind after dismissing.
+  //
+  // Discard rides the same path defensively (clearActiveRunItem already
+  // clears stageState entirely on discard via /run/done, which short-
+  // circuits fr-98's replay condition; but clearing here means the
+  // persisted slot is gone the moment the resolve POST lands, before
+  // /run/done has to catch up).
+  //
+  // stageState is INTENTIONALLY untouched — Dismiss still means "no
+  // decision yet." Claude's [stage: X done] sentinel remains blocked by
+  // bug-61 until the user explicitly accepts. The bug-72 Reopen pill +
+  // a fresh Accept Stage click are the user's recovery path.
+  if (itemId && (reason === 'dismiss' || reason === 'discard')) {
+    try {
+      const attachMod = require('./attach');
+      const stageStateMod = require('./stageState');
+      const rec = sessionsMod.getSessionRecord(sessionId);
+      const item = attachMod._findPlanItemInRec(rec, itemId);
+      if (item && stageStateMod.clearLastCriticReview(item)) {
+        sessionsMod.saveStore();
+        console.log(`[bug-75] cleared lastCriticReview for ${itemId} on reason=${reason} — fr-98 replay will no longer re-ship this verdict on reconnect`);
+      }
+    } catch (err) {
+      console.error(`[bug-75] dismiss/discard clearLastCriticReview failed: ${err.message}`);
+    }
+  }
+
   // fr-96: button-driven stage-state transitions. The Accept Stage /
   // Fix Stage buttons (intermediate verdict pane, bug-56) send a
   // reason that drives the state machine forward. For the other
@@ -686,6 +724,8 @@ function resolveCritique(sessionId, session, opts = {}) {
   //     via clearActiveRunItem when /run/done route hits (bug-57).
   //   dismiss → no state-machine change. The user wanted to close
   //     the pane without a decision; state stays at awaiting_accept.
+  //     bug-75 follow-up: the persisted lastCriticReview IS cleared
+  //     above so fr-98 replay stops re-popping the pane on reconnect.
   //   fix (final) → no state-machine change here either. The button
   //     dispatches a re-prompt to Claude; the next [stage: X done]
   //     sentinel will land the next transition.

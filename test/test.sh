@@ -3253,6 +3253,21 @@ test_chat_window() {
   # Server-side state (rec._lastCritique + item.meta.lastCriticReview)
   # already survives Dismiss — no server changes needed.
   node_test_result test/bug-72-reopen-dismissed-verdict.test.js "test/bug-72-reopen-dismissed-verdict.test.js (7 cases)"
+  # bug-75 (new bug-75 plan item — distinct from existing
+  # bug-75-ask-critic-scoped-to-current-stage.test.js which is filed
+  # against plan-item bug-69): Dismiss did not make the verdict pane
+  # stick across reconnects. fr-98 attach-replay re-shipped the same
+  # verdict on every WebSocket attach when stageState was
+  # awaiting_verdict / awaiting_accept; resolveCritique with
+  # reason='dismiss' deliberately did NOT clear lastCriticReview
+  # ("close without a decision"). Together = infinite re-render loop
+  # on reconnect. Smoking gun in _myco_/logs/mycod-2026-06-07.log:
+  # three reconnects in 75s, each replayed the same bug-72 verdict
+  # pane + user Dismiss POST. Fix: extend resolveCritique to call
+  # clearLastCriticReview when reason='dismiss' or 'discard'.
+  # stageState still untouched — Dismiss still means "no decision."
+  # bug-72's Reopen pill gives the user local recovery.
+  node_test_result test/bug-75-dismiss-clears-replay-cache.test.js "test/bug-75-dismiss-clears-replay-cache.test.js (4 cases)"
   # fr-92: mobile users can't access composer history since touch
   # devices have no arrow keys. Add a touchstart + touchend listener
   # on #chat-input that detects vertical swipes (|dy| >= 30px in
