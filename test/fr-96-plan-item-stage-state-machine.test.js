@@ -226,14 +226,15 @@ t('critique.js: after critic broadcast, transition to awaiting_accept (fr-96 hoo
   // kind:'critique-review') so the verdict broadcast lands first.
   const emitAt = src.search(/kind:\s*['"]critique-review['"]/);
   assert.ok(emitAt > -1, 'critique-review emit must exist.');
-  // Look for the transition call within 3000 chars AFTER the emit.
+  // Look for the transition call within 4000 chars AFTER the emit.
   // Pre-fr-98 this was 1500 chars; fr-98 added a ~1500-char block
   // (setLastCriticReview persist + saveStore + error handler comment)
-  // legitimately BETWEEN the emit and the transition. The fr-96
-  // contract is "transition is AFTER emit", not "transition is within
-  // N chars" — 3000 keeps the ordering assertion while accepting the
-  // larger fr-98 prologue.
-  const after = src.slice(emitAt, emitAt + 3000);
+  // legitimately BETWEEN the emit and the transition. fr-98 follow-up
+  // (2026-06-07) added another ~250 chars of explanatory comment when
+  // dropping the !isError gate. The fr-96 contract is "transition is
+  // AFTER emit", not "transition is within N chars" — 4000 keeps the
+  // ordering assertion while accepting the cumulative explainer prologue.
+  const after = src.slice(emitAt, emitAt + 4000);
   assert.ok(/_transitionStageState\s*\([\s\S]{0,300}['"]awaiting_accept['"]/.test(after),
     'critique.js must call attachMod._transitionStageState(..., "awaiting_accept") AFTER the critique-review emit (fr-96 hook 3).');
 });

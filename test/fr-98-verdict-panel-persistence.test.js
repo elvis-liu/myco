@@ -217,6 +217,58 @@ t('server/src/critique.js: the broadcast site ALSO calls setLastCriticReview (pe
     'critique.js must call sessionsMod.saveStore() after setLastCriticReview so the verdict is durable on disk.');
 });
 
+// ── 4b. fr-98 follow-up (2026-06-07): error verdicts ALSO persist ──
+//
+// Pre-follow-up: `if (rec && !isError)` gated the persist call, so error
+// verdicts never landed in plan.json. The bug-68 critique-error chat
+// note told users "click the ↻ Retry button on the verdict pane" — but
+// the pane was only visible to devices attached AT BROADCAST MOMENT. A
+// user re-attaching later saw the chat note + no pane + no Retry button.
+// User-reported on bug-58 verbatim: "the following msg never bring up
+// the verdict modal: 📍 Analyze sentinel received for bug-58 — critic
+// firing (typically 10-30s for Gemini 2.5)." The investigation showed
+// the critic errored twice (Gemini 503), the chat notes appeared, but
+// the pane was lost on the user's re-attach because error verdicts
+// were excluded from persistence.
+//
+// Follow-up fix: drop the `!isError` gate. ALL verdicts persist; the
+// replay-on-attach gate (stageState.status === awaiting_verdict for
+// errors, OR awaiting_accept for non-errors) ensures only pending
+// verdicts replay.
+
+t('server/src/critique.js: persistence does NOT gate on !isError (fr-98 follow-up — error verdicts ALSO persist for re-attach)', () => {
+  const src = _read('server/src/critique.js');
+  // Locate the critique-review broadcast site + the persistence block
+  // that follows. The pre-follow-up gate was `if (rec && !isError)`;
+  // the follow-up uses `if (rec)` only.
+  const at = src.search(/kind:\s*['"]critique-review['"]/);
+  assert.ok(at > -1, 'critique-review broadcast must exist.');
+  const persistBlock = src.slice(at, at + 3000);
+  const setAt = persistBlock.search(/setLastCriticReview\s*\(/);
+  assert.ok(setAt > -1, 'setLastCriticReview call must exist after the broadcast.');
+  // The 400 chars BEFORE the setLastCriticReview call must NOT
+  // contain `!isError` — pre-follow-up the gate was `if (rec && !isError)`
+  // immediately before the call. Post-follow-up it's `if (rec)` only.
+  const before = persistBlock.slice(Math.max(0, setAt - 400), setAt);
+  assert.ok(!/!\s*isError/.test(before),
+    `setLastCriticReview's surrounding gate must NOT include !isError — error verdicts must also persist so the pane replays on re-attach (fr-98 follow-up, bug-58 in-the-wild repro). Found !isError in the 400 chars before the setLastCriticReview call.`);
+});
+
+t('server/src/critique.js: error chat note offers alternative recovery path (▶ Run re-dispatch)', () => {
+  const src = _read('server/src/critique.js');
+  // The bug-68-critique-error note must mention the ▶ Run alternative
+  // since the verdict pane may not be visible (different tab, fresh
+  // attach, pane was lost).
+  assert.ok(/bug-68-critique-error/.test(src),
+    'bug-68-critique-error chat note must exist.');
+  // Find the note text — match within a reasonable window of the
+  // meta.kind:'bug-68-critique-error' marker.
+  const at = src.search(/bug-68-critique-error/);
+  const before = src.slice(Math.max(0, at - 1500), at);
+  assert.ok(/▶\s*Run/.test(before),
+    "bug-68-critique-error chat note must mention `▶ Run` as the alternative recovery path — pane may not be visible on a non-chat tab / fresh attach, and the user needs a way to retry without the pane (fr-98 follow-up).");
+});
+
 t('server/src/critique.js: resolveCritique clears lastCriticReview on accept-stage / fix-stage', () => {
   const src = _read('server/src/critique.js');
   const at = src.search(/function\s+resolveCritique\s*\(/);

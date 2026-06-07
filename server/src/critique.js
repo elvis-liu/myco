@@ -479,10 +479,24 @@ ${fileContextBlock}${historyBlock}${userFollowupBlock}`;
   // Cleared on every resolve path (verify-accept / discard via
   // clearActiveRunItem → _clearAndBroadcastStageState; accept-stage /
   // fix-stage via resolveCritique below) so resolved verdicts don't
-  // ghost-replay on next attach. Skipped on error verdicts because
-  // the matching stageState transition is also skipped (the user
-  // hasn't seen a real verdict yet — see the fr-96 block below).
-  if (rec && !isError) {
+  // ghost-replay on next attach.
+  //
+  // fr-98 follow-up (2026-06-07): error verdicts NOW persist too.
+  // The original fr-98 cut error verdicts out of persistence on the
+  // theory that "an error isn't a real verdict — why replay it?" But
+  // bug-58's empirically-observed failure mode showed the gap: the
+  // bug-68 critique-error chat note tells the user to "click the ↻
+  // Retry button on the verdict pane," but the pane is only visible to
+  // devices attached AT BROADCAST MOMENT. A user re-attaching later
+  // (different tab, fresh device, post-restart) sees the chat note +
+  // no pane + no Retry button — they're told to click a button that
+  // doesn't exist. Persisting error verdicts means the pane replays
+  // on every attach (gated by stageState.status === awaiting_verdict
+  // which is the state error verdicts leave the item in). The pane
+  // clears via the same path as success verdicts: when a new broadcast
+  // overwrites the slot, or when the user resolves it via Retry /
+  // Dismiss / re-dispatch.
+  if (rec) {
     try {
       const stageStateMod = require('./stageState');
       const attachMod = require('./attach');
@@ -522,7 +536,13 @@ ${fileContextBlock}${historyBlock}${userFollowupBlock}`;
     try {
       const note = {
         user: 'system',
-        text: `⚠️ Critic call for **${item.id}** (${stage || 'final'} stage) errored. The verdict pane shows a ↻ Retry button — click it to re-fire the critic. If the error persists, check the server log for the underlying cause (Gemini 503 / quota / malformed response).`,
+        text:
+          `⚠️ Critic call for **${item.id}** (${stage || 'final'} stage) errored. ` +
+          `The verdict pane shows a ↻ Retry button — click it to re-fire the critic. ` +
+          `If you can't see the pane (e.g. on a non-chat tab, or attached after the broadcast), ` +
+          `click **▶ Run** on the plan item in the Plan tab to re-dispatch the full run. ` +
+          `If the error persists, check the server log for the underlying cause ` +
+          `(Gemini 503 / quota / malformed response).`,
         ts: new Date().toISOString(),
         meta: { kind: 'bug-68-critique-error', stage: stage || 'final', itemId: item.id },
       };
