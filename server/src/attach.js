@@ -2736,6 +2736,28 @@ function _broadcastSyntheticSkipVerdict(sessionId, session, opts) {
         stageStateMod.setLastCriticReview(item, broadcastPayload);
         sessionsMod.saveStore();
       }
+      // bug-75 (plan-item bug-69): ALSO update rec._lastCritique so
+      // retryLastCritique reads the CURRENT skipped verdict instead of
+      // stale prior-stage data. Pre-bug-75 the per-session cache only
+      // got refreshed inside triggerGeminiCritique — a skip path
+      // bypassed it. Result: clicking 💬 Ask Critic on a skipped
+      // verdict re-fired whichever stage's critic last ran for real,
+      // re-rendering THAT stage's modal (the user-reported bug-69).
+      // The payload mirrors the broadcastPayload so it carries
+      // isSkipped:true; retryLastCritique reads that flag and
+      // short-circuits with a chat note instead of re-firing.
+      rec._lastCritique = {
+        itemId,
+        itemSnapshot: item,
+        diff: '',
+        claudeOutput: '',
+        isIntermediate,
+        stage,
+        skipped: true,
+        skipReason: reason,
+        firedAt: new Date().toISOString(),
+      };
+      sessionsMod.saveStore();
     }
   } catch (err) {
     console.error(`[bug-68] synthetic skip-verdict persist failed: ${err.message}`);
@@ -3095,6 +3117,11 @@ module.exports = {
   // _maybeHandleChatAccept — both accept paths land at the same end
   // state (claude actually moves on).
   _postAcceptStagePrompt,
+  // bug-75 (plan-item bug-69): synthetic skip-verdict broadcaster
+  // exported for the end-to-end test that exercises the
+  // "Ask Critic on a skipped verdict must not re-fire stale prior
+  // stage" repro.
+  _broadcastSyntheticSkipVerdict,
   // Re-export menu helpers so callers that historically grabbed them off
   // ptyMod continue to find them.
   handleSessionMenu: menuMod.handleSessionMenu,

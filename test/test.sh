@@ -3187,6 +3187,20 @@ test_chat_window() {
   #     the X accept — try typing 'continue' to nudge" chat note so a
   #     wedged SDK queue is recoverable.
   node_test_result test/bug-68-stage-accept-dispatch.test.js "test/bug-68-stage-accept-dispatch.test.js (27 cases)"
+  # bug-75 (plan-item bug-69 — file uses bug-75 because
+  # bug-69-test-sh-portability.test.sh already exists with unrelated
+  # content): clicking 💬 Ask Critic on a critic-SKIPPED verdict must
+  # NOT re-fire the previous stage's critic. Pre-bug-75
+  # `_broadcastSyntheticSkipVerdict` (the bug-68 follow-up `c941278`)
+  # updated item.meta.lastCriticReview but NOT rec._lastCritique — so
+  # the per-session retry cache stayed at whichever stage last fired a
+  # REAL critic. User-reported: "Ask critic outside the analyze stage
+  # reopens the analyze stage's verdict modal." Fix: synthetic skip
+  # broadcast now ALSO updates rec._lastCritique with skipped:true;
+  # retryLastCritique reads that flag and short-circuits with a chat
+  # note ("can't re-ask critic on a skipped stage — make changes and
+  # re-emit [stage: X done] or click ✓ Accept Stage").
+  node_test_result test/bug-75-ask-critic-scoped-to-current-stage.test.js "test/bug-75-ask-critic-scoped-to-current-stage.test.js (6 cases)"
   # fr-92: mobile users can't access composer history since touch
   # devices have no arrow keys. Add a touchstart + touchend listener
   # on #chat-input that detects vertical swipes (|dy| >= 30px in

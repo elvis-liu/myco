@@ -571,6 +571,38 @@ async function retryLastCritique(sessionId, session, opts = {}) {
   if (!rec || !rec._lastCritique) return false;
   const last = rec._lastCritique;
   if (!last.itemSnapshot || !last.itemId) return false;
+  // bug-75 (plan-item bug-69): short-circuit when the cached verdict
+  // is a critic-SKIP (bug-68 follow-up c941278 broadcasts a synthetic
+  // AGREED verdict when the critic gets skipped — no diff /
+  // baseline-WIP-only). Without this guard, clicking 💬 Ask Critic on
+  // a skipped verdict would re-fire triggerGeminiCritique on whatever
+  // stage's data is cached — pre-bug-75 that was the PREVIOUS real
+  // critic fire (stale prior-stage), which is the user-reported bug-69
+  // repro ("Ask critic outside analyze reopens analyze verdict").
+  // Post-bug-75 the cache reflects the current skipped stage, so the
+  // re-fire would at least target the right stage — but the SKIP body
+  // has empty diff + empty claudeOutput, so re-firing triggerGemini
+  // critique is pointless (the critic would just skip again). Surface
+  // a chat note explaining the situation + return false so the client
+  // alert can guide the user toward a useful action ("make changes
+  // and re-emit [stage: X done]" or click ✓ Accept Stage).
+  if (last.skipped === true || last.isSkipped === true) {
+    try {
+      const attachMod = require('./attach');
+      const note = {
+        user: 'claude',                              // project convention for system/assistant chat rows
+        text: `📋 Can't re-ask critic on a skipped **${last.stage}** stage verdict — there's nothing to review (no diff was attributable to this stage). To proceed: click **✓ Accept Stage** to advance, or make code changes and re-emit \`[stage: ${last.stage} done]\` to fire a fresh critique.`,
+        ts: new Date().toISOString(),
+        meta: { kind: 'bug-75-retry-on-skip', stage: last.stage, itemId: last.itemId },
+      };
+      sessionsMod.appendChatMessage(sessionId, note);
+      if (session && typeof session.emit === 'function') session.emit('chat', note);
+      console.log(`[bug-75] retryLastCritique short-circuited on skipped ${last.stage} verdict for ${last.itemId}`);
+    } catch (err) {
+      console.error(`[bug-75] retry-on-skip note emit failed: ${err.message}`);
+    }
+    return false;
+  }
   await triggerGeminiCritique(sessionId, session, last.itemSnapshot, last.diff, last.claudeOutput, {
     isIntermediate: last.isIntermediate,
     stage: last.stage,
