@@ -285,6 +285,13 @@ function _registerExternalSession(sessionId, session) {
           // the skip → awaiting_accept transition, chat-accept works
           // immediately + claude advances via bug-68's dispatch wire.
           _transitionStageState(sessionId, session, active.itemId, stage, 'awaiting_accept');
+          // bug-68 follow-up (2026-06-07 second wave): also emit a
+          // SYNTHETIC verdict broadcast so the client renders the
+          // pane with the ✓ Accept Stage button. Chat-accept text path
+          // is fine, but the user expects the visual modal.
+          _broadcastSyntheticSkipVerdict(sessionId, session, {
+            stage, itemId: active.itemId, reason: 'no-changes',
+          });
           return;
         }
         const baselineDirty = (active.baselineDirty instanceof Set) ? active.baselineDirty : new Set();
@@ -301,6 +308,11 @@ function _registerExternalSession(sessionId, session) {
           // skip site above — transition to awaiting_accept so chat-
           // accept works + claude advances via the bug-68 dispatch wire.
           _transitionStageState(sessionId, session, active.itemId, stage, 'awaiting_accept');
+          // bug-68 follow-up (2026-06-07 second wave): synthetic
+          // verdict broadcast so the pane renders.
+          _broadcastSyntheticSkipVerdict(sessionId, session, {
+            stage, itemId: active.itemId, reason: 'baseline-wip-only',
+          });
           return;
         }
         let fullDiff = '';
@@ -320,6 +332,9 @@ function _registerExternalSession(sessionId, session) {
             message: `📋 Critic skipped for **${stage}** stage — files changed but the diff is empty (possibly new files git can't diff, binary changes, or readDiff errors). Type **accept** in chat to proceed to the next stage, or re-emit \`[stage: ${stage} done]\` after making textual changes.`,
           });
           _transitionStageState(sessionId, session, active.itemId, stage, 'awaiting_accept');
+          _broadcastSyntheticSkipVerdict(sessionId, session, {
+            stage, itemId: active.itemId, reason: 'empty-diff',
+          });
           return;
         }
         const planArtifact = rec.artifacts && rec.artifacts.plan;
@@ -2596,6 +2611,81 @@ function _emitSentinelReceivedNote(sessionId, session, opts) {
     console.log(`[bug-68] sentinel-received note for ${itemId} stage=${stage}`);
   } catch (err) {
     console.error(`[bug-68] sentinel-received note emit failed: ${err.message}`);
+  }
+}
+
+// bug-68 follow-up (2026-06-07 second wave): emit a synthetic
+// critique-review BROADCAST when the critic skips for a "no real
+// findings" reason. Pre-follow-up the skip path:
+//   1. emitted a chat note ✓
+//   2. transitioned stageState to awaiting_accept ✓
+//   3. did NOT emit a critique-review broadcast ✗
+// Without (3), the client's _renderVerdictPanel had nothing to render
+// — state.critiqueReview stayed null. User-reported verbatim on td-35:
+//   "the verdict modal is never shown up"
+//   "I've never seen ✓ Accept Stage in the verdict HUD either"
+// Even though chat-accept worked (typing "accept" → bug-70 picked it
+// up → claude advanced via bug-68 dispatch), the user EXPECTED the
+// visual pane with the Accept Stage button. This helper synthesizes a
+// "✓ AGREED" verdict (isError:false, hasDisagreement:false,
+// isSkipped:true marker) so the existing renderer paints a pane with
+// title "✓ Gemini Approved Checkpoint (X)" + the intermediate action
+// row (Dismiss / Fix Stage / Accept Stage) per bug-56.
+//
+// Persistence: re-uses fr-98's setLastCriticReview so the pane
+// replays on every new attach for as long as stageState.status is
+// awaiting_*. Clearing on accept/dismiss is handled by the existing
+// _clearAndBroadcastStageState + resolveCritique chokepoints.
+function _broadcastSyntheticSkipVerdict(sessionId, session, opts) {
+  if (!session) return;
+  const { stage, itemId, reason } = opts || {};
+  if (!stage || !itemId) return;
+  const isIntermediate = stage === 'analyze' || stage === 'code';
+  const reasonExplain = {
+    'no-changes':       'no file changes were detected at this checkpoint',
+    'baseline-wip-only': 'all dirty paths were already modified before this run started (baseline WIP)',
+    'empty-diff':       'files changed but the diff was empty (new files git can\'t diff, binaries, or readDiff errors)',
+  }[reason] || 'no reviewable changes were attributable to this stage';
+  const critiqueBody =
+    `## ✓ AGREED — critic skipped\n\n` +
+    `The **${stage}** stage produced no reviewable changes; ${reasonExplain}. ` +
+    `Nothing to flag.\n\n` +
+    `**To proceed:** click **✓ Accept Stage** below, or type \`accept\` in chat.\n\n` +
+    `*If you intended this stage to produce changes, click **⚡ Ask Claude to Fix Stage** to redo it, or make the changes manually and re-emit* \`[stage: ${stage} done]\`*.*`;
+  const broadcastPayload = {
+    kind: 'critique-review',
+    itemId,
+    hasDisagreement: false,
+    isError: false,
+    isIntermediate,
+    isRetry: false,
+    isSkipped: true,                  // new flag — traceability + future client tweaks
+    skipReason: reason,
+    stage,
+    critique: critiqueBody,
+    diff: '',
+    criticName: 'Skip',
+    criticId: 'skip',
+    specialties: [{ id: 'skip', name: 'Skip', isError: false, isAgreed: true }],
+  };
+  try {
+    session.emit('state-update', broadcastPayload);
+    console.log(`[bug-68] synthetic skip-verdict broadcast — itemId=${itemId}, stage=${stage}, reason=${reason}`);
+  } catch (err) {
+    console.error(`[bug-68] synthetic skip-verdict emit failed: ${err.message}`);
+  }
+  // fr-98 persistence — replay on attach.
+  try {
+    const rec = sessionsMod.getSessionRecord(sessionId);
+    if (rec) {
+      const item = _findPlanItemInRec(rec, itemId);
+      if (item) {
+        stageStateMod.setLastCriticReview(item, broadcastPayload);
+        sessionsMod.saveStore();
+      }
+    }
+  } catch (err) {
+    console.error(`[bug-68] synthetic skip-verdict persist failed: ${err.message}`);
   }
 }
 

@@ -305,6 +305,50 @@ t('attach.js stage-done handler: ALL silent-bail paths now emit chat notes (no-r
     'empty-diff branch must transition stageState to awaiting_accept (same as no-changes + baseline-wip-only skips) so chat-accept works.');
 });
 
+t('attach.js _broadcastSyntheticSkipVerdict helper exists + emits state-update critique-review (bug-68 follow-up — pane must render on skip)', () => {
+  const src = _read('server/src/attach.js');
+  // Helper must exist.
+  assert.ok(/function\s+_broadcastSyntheticSkipVerdict\s*\(/.test(src),
+    '_broadcastSyntheticSkipVerdict helper must exist — user-reported on td-35 verbatim: "the verdict modal is never shown up". The synthetic broadcast renders the visual pane that chat-accept alone could not.');
+  // Helper must emit a state-update with kind:critique-review.
+  const at = src.search(/function\s+_broadcastSyntheticSkipVerdict\s*\(/);
+  const body = sliceFn(src, at);
+  assert.ok(/session\.emit\s*\(\s*['"]state-update['"]/.test(body),
+    '_broadcastSyntheticSkipVerdict must call session.emit(\'state-update\', ...) so the client receives the broadcast.');
+  assert.ok(/kind:\s*['"]critique-review['"]/.test(body),
+    'synthetic broadcast must carry kind:"critique-review" so the existing client _renderVerdictPanel picks it up — no client changes needed.');
+  assert.ok(/isError:\s*false/.test(body),
+    'synthetic broadcast must set isError:false — renders the AGREED pane (not the error pane).');
+  assert.ok(/hasDisagreement:\s*false/.test(body),
+    'synthetic broadcast must set hasDisagreement:false — renders the "✓ Gemini Approved Checkpoint" title with Accept Stage action row.');
+  assert.ok(/isSkipped:\s*true/.test(body),
+    'synthetic broadcast must carry isSkipped:true as a traceability marker so a future client tweak can distinguish a real verdict from a synthetic skip.');
+  assert.ok(/setLastCriticReview\s*\(/.test(body),
+    'synthetic broadcast must persist via fr-98 setLastCriticReview so the pane replays on every new attach (cross-device + post-restart).');
+});
+
+t('attach.js stage-done handler: 3 transitioning skip sites also call _broadcastSyntheticSkipVerdict (modal renders on skip)', () => {
+  const src = _read('server/src/attach.js');
+  const at = src.search(/session\.on\(\s*['"]stage-done['"]/);
+  const body = src.slice(at, at + 15000);
+  // Count _broadcastSyntheticSkipVerdict call sites in the stage-done
+  // handler — should be 3 (no-changes, baseline-wip-only, empty-diff).
+  const callCount = (body.match(/_broadcastSyntheticSkipVerdict\s*\(/g) || []).length;
+  assert.ok(callCount >= 3,
+    `the 3 transitioning skip sites (no-changes / baseline-wip-only / empty-diff) must each call _broadcastSyntheticSkipVerdict so the verdict pane renders — found ${callCount} call(s). Without this the user sees a chat note + no modal (the symptom of the td-35 in-the-wild repro).`);
+  // The non-transitioning bail paths (no-session-rec / item-missing /
+  // handler-exception) MUST NOT call _broadcastSyntheticSkipVerdict —
+  // state is unknown or the item can't be located; a synthetic
+  // verdict would be misleading.
+  for (const reason of ['no-session-rec', 'item-missing', 'handler-exception']) {
+    const reasonRegion = body.match(new RegExp(`reason:\\s*['"]${reason}['"][\\s\\S]{0,500}`));
+    if (reasonRegion) {
+      assert.ok(!/_broadcastSyntheticSkipVerdict\s*\(/.test(reasonRegion[0]),
+        `non-transitioning skip site '${reason}' must NOT call _broadcastSyntheticSkipVerdict — state is unknown (degraded path); a synthetic verdict would mislead the user. The chat note alone is the correct treatment.`);
+    }
+  }
+});
+
 t('attach.js skip-note text advises typing accept in chat (NOT click verdict HUD)', () => {
   const src = _read('server/src/attach.js');
   const at = src.search(/session\.on\(\s*['"]stage-done['"]/);
