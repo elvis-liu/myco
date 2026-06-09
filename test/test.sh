@@ -2834,6 +2834,18 @@ test_chat_window() {
   # Security invariant locked in tests: GET response shape is
   # metadata-only (present + last4), never raw value.
   node_test_result test/fr-87-config-page-pats.test.js "test/fr-87-config-page-pats.test.js (17 cases)"
+  # bug-77 (plan-item bug-73): the admin config modal had 2 Save
+  # buttons with ambiguous labels — bare "Save" near the PAT add
+  # form, "Save env config" near the admin env form. Adjacent to
+  # each other the bare "Save" looked like a global commit, but it
+  # was actually scoped to ONE per-repo PAT add. User-reported as
+  # "End users are confused by the presence of multiple Save
+  # buttons … making it unclear which one persists their changes."
+  # Fix: rename #config-pat-save label from "Save" → "Add PAT" so
+  # it matches its own section header (<h4>Add a per-repo PAT</h4>).
+  # id + click handler unchanged. #config-admin-env-save already
+  # has the unambiguous "Save env config" label and stays as-is.
+  node_test_result test/bug-77-config-save-button-labels.test.js "test/bug-77-config-save-button-labels.test.js (5 cases)"
   # bug-43: mobile HUD + critic-select overflow. User-reported as
   # "HUD too wide on mobile and 'critic: gemini' button takes space
   # that should belong to the text input". Pure-CSS fix:
