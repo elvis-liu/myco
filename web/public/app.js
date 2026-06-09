@@ -1103,14 +1103,43 @@ async function _refreshConfigAdmin() {
     const input = document.getElementById(inputId);
     if (!input) continue;
     const v = cfg[envKey];
-    // Masked values look like "••••XXXX" or include "..." — leave
-    // those inputs blank so a save with an empty field doesn't
-    // overwrite the real secret with the mask.
-    if (typeof v === 'string' && (v.includes('•') || v.includes('...'))) {
-      input.value = '';
-    } else {
-      input.value = (typeof v === 'string') ? v : '';
-    }
+    // bug-76 (plan-item bug-74): always show the server's value as
+    // input.value — including masked ones (e.g. "AIza…XXXX"). Pre-fix
+    // we cleared the input on masked values so a save without re-
+    // typing wouldn't overwrite the real secret with the mask, but
+    // the side effect was no visible "save took effect" affordance
+    // AND clicking Test reported "no key" because _runApiKeyTest
+    // read input.value (empty) instead of trusting the server's
+    // saved state. Fix:
+    //   · show the masked value so the user sees confirmation
+    //   · _runApiKeyTest below detects the mask pattern and sends
+    //     key='' so the server falls back to process.env
+    //   · focus listener (below) clears the input on first click
+    //     when value is masked, so partial edits can't create a
+    //     hybrid masked+typed value that the server's isMaskedValue
+    //     check would skip
+    input.value = (typeof v === 'string') ? v : '';
+  }
+  // bug-76 (plan-item bug-74): focus listener on the 4 _KEY inputs.
+  // Clears the input on focus if the value is masked — gives the
+  // user a single-click "edit the key" affordance and prevents
+  // partial-edit values that contain "..." from being treated as
+  // masked-and-thus-skipped by the server's isMaskedValue check.
+  // Idempotent via dataset.bug76Bound.
+  const KEY_INPUT_IDS = [
+    'config-admin-anthropic-key',
+    'config-admin-gemini-key',
+    'config-admin-openai-key',
+    'config-admin-critic-key',
+  ];
+  for (const id of KEY_INPUT_IDS) {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.bug76Bound === '1') continue;
+    el.dataset.bug76Bound = '1';
+    el.addEventListener('focus', () => {
+      const v = el.value || '';
+      if (v.includes('•') || v.includes('...')) el.value = '';
+    });
   }
   // Wire handlers once.
   if (!section.dataset.bound) {
@@ -13838,7 +13867,17 @@ async function _runApiKeyTest(which) {
   const btn = document.getElementById(btnId);
   if (!input || !statusEl) return;
 
-  const key = (input.value || '').trim();
+  let key = (input.value || '').trim();
+  // bug-76 (plan-item bug-74): when the input shows a masked value
+  // (e.g. "AIza…XXXX" from a prior save), the user hasn't typed a
+  // new key — reset to empty so the request body carries key='' and
+  // the server falls back to process.env[the appropriate env var].
+  // Pre-fix the masked value was sent as the literal key, the server
+  // tried to probe Gemini with "AIza…XXXX" (invalid), and Test
+  // reported "no key" / "invalid". With this fix + the server-side
+  // env fallback in /api/admin/test-key probes, Test against a
+  // saved key works without re-typing.
+  if (key.includes('•') || key.includes('...')) key = '';
   // Custom Critic also reads the endpoint + model fields. fr-91 r3:
   // ids switched to the live #config-admin-env-form scheme.
   const endpoint = which === 'critic'

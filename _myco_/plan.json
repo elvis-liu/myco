@@ -5718,7 +5718,153 @@
         "rewritten": true
       },
       "description": "**Problem:** Once the verdict modal is dismissed, there's no affordance to bring it back.\n**Expected:** A control (button, menu item, or shortcut) to re-open the verdict modal after dismissal.\n**Actual:** Clicking \"Dismiss\" closes the modal permanently with no way to reopen it."
+    },
+    {
+      "id": "bug-73",
+      "text": "Config page has multiple \"Save\" buttons causing user confusion",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-09T01:04:26.238Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "b9a298ac0dbc",
+          "user": "claude",
+          "text": "✓ Deploy running in background. Now bug-73 analyze. · 167.3s · $7.0179 · 12↓/8854↑",
+          "ts": "2026-06-09T01:07:40.291Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-09T01:04:51.267Z"
+          }
+        },
+        {
+          "id": "95f6ec4c7325",
+          "user": "claude",
+          "text": "✓ Both done: · 23.9s · $7.7368 · 7↓/1153↑",
+          "ts": "2026-06-09T01:10:30.244Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-09T01:04:51.267Z"
+          }
+        },
+        {
+          "id": "5ce2fcbb8958",
+          "user": "claude",
+          "text": "✓ Gemini key resolution · 27.2s · $8.7828 · 8↓/1051↑",
+          "ts": "2026-06-09T01:14:14.223Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-09T01:04:51.267Z"
+          }
+        },
+        {
+          "id": "c029bc5093d2",
+          "user": "claude",
+          "text": "✓ PROOF — Gemini API call SUCCEEDED:** with the PID-1's key explicitly piped through, the SDK returned `\"OK\"`. The key is valid, the SDK work… · 910.0s · $19.0987 · 31↓/35460↑",
+          "ts": "2026-06-09T01:29:54.837Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-09T01:04:51.267Z"
+          }
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the config page has too many \"save\" button which is confusing to end user",
+        "rewritten": true,
+        "stageState": {
+          "stage": "analyze",
+          "status": "awaiting_accept",
+          "updatedAt": "2026-06-09T01:07:46.761Z",
+          "history": [
+            {
+              "stage": "analyze",
+              "status": "in_progress",
+              "ts": "2026-06-09T01:04:51.317Z"
+            },
+            {
+              "stage": "analyze",
+              "status": "awaiting_verdict",
+              "ts": "2026-06-09T01:07:40.025Z"
+            },
+            {
+              "stage": "analyze",
+              "status": "awaiting_accept",
+              "ts": "2026-06-09T01:07:46.761Z"
+            }
+          ]
+        },
+        "lastCriticReview": {
+          "kind": "critique-review",
+          "itemId": "bug-73",
+          "hasDisagreement": true,
+          "isError": true,
+          "isIntermediate": true,
+          "isRetry": true,
+          "stage": "analyze",
+          "critique": "(Gemini call failed: {\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}})",
+          "diff": "",
+          "criticName": "Gemini-2.5-Flash",
+          "criticId": "gemini",
+          "userPrompt": "",
+          "specialties": [
+            {
+              "id": "general",
+              "name": "General QA",
+              "isError": true,
+              "isAgreed": false
+            }
+          ],
+          "broadcastAt": "2026-06-09T01:10:33.039Z"
+        }
+      },
+      "description": "**Problem:** End users are confused by the presence of multiple \"Save\" buttons on the config page, making it unclear which one persists their changes.\n**Expected:** A single, unambiguous \"Save\" action that clearly commits all config changes.\n**Actual:** The config page renders several \"Save\" buttons, leaving users uncertain which one to click and what scope each one saves.",
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-06-09T01:07:40.291Z",
+          "startedAt": "2026-06-09T01:04:51.267Z",
+          "summary": "167.3s · 12→8854 tok",
+          "result": "Deploy running in background. Now bug-73 analyze.\n\n## bug-73 (config) analyze stage\n\n### Restated problem\nThe config modal (`#config-modal` opened via the `@login` chip, defined at `web/public/index.html:493–620`) has **2 distinct Save buttons** with different scopes but visually ambiguous labels:\n\n| button | id | label | scope | handler |\n|---|---|---|---|---|\n| PAT Save | `#config-pat-save` | bare **\"Save\"** | Adds ONE per-repo PAT (provider + owner + repo + alias + token) | `app.js:1365 _saveConfigPerRepoPat` |\n| Env Save | `#config-admin-env-save` | **\"Save env config\"** | Persists the 9-field admin env form (ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, CUSTOM_CRITIC_ENDPOINT/KEY/MODEL, HTTP_PROXY, HTTPS_PROXY, NO_PROXY) | `app.js:1191 _saveConfigAdminEnv` |\n\nThere's also an `#config-admin-allowlist-add` button that says **\"Add\"** (clearer, immediate persist on click — not a Save by name).\n\nThe PAT one's bare \"Save\" label is the main offender — it doesn't tell the user \"this saves THE PAT form only\". A non-admin user only sees this one Save; an admin sees both, and the bare \"Save\" looks visually like a global commit while \"Save env config\" looks scoped — making the bare \"Save\" seem like the global action that commits everything.\n\n### The user's expected vs my reading\n\n> \"A single, unambiguous 'Save' action that clearly commits all config changes.\"\n\nTwo literal interpretations:\n\n**A. Single global Save** — replace both per-section Save buttons with ONE Save at the bottom of the modal that commits ALL changes (PAT + admin env) atomically. Modal becomes a \"fill in what you want changed, click Save once\" form.\n\n**B. Per-section saves, but unambiguous labels** — keep both buttons (architecture-clean — admin scope stays separated from per-user scope, permission boundaries are explicit) but rename for clarity:\n- `#config-pat-save`: \"Save\" → **\"Add PAT\"** (it's literally an add-to-list action, not an edit)\n- `#config-admin-env-save`: keep \"Save env config\"\n\n### Nu"
+        },
+        {
+          "status": "success",
+          "ts": "2026-06-09T01:10:30.244Z",
+          "startedAt": "2026-06-09T01:04:51.267Z",
+          "summary": "23.9s · 7→1153 tok",
+          "result": "Both done:\n\n| | |\n|---|---|\n| **Deploy** of `268c464` to mycobeta | ✓ — `HTTP/2 200`, post-deploy validation all green, lean-ctx healthy, USER_MANUAL.md + codemirror bundle serving. Bundle marker stayed at `2026-06-07T11:14:44Z` (expected — `268c464` was plan.json-only, no source change to invalidate the bundle build). |\n| **bug-73 analyze sentinel** | Emitted in prior turn — paused for your accept (or pivot signal if you'd rather restructure as option A). |\n\nWaiting for your accept on bug-73 analyze."
+        },
+        {
+          "status": "success",
+          "ts": "2026-06-09T01:14:14.223Z",
+          "startedAt": "2026-06-09T01:04:51.267Z",
+          "summary": "27.2s · 8→1051 tok",
+          "result": "## Gemini key resolution\n\n`server/src/critics/gemini.js:51`:\n```js\nconst apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;\n```\n\n**Resolution order:**\n1. **`GEMINI_API_KEY`** — primary, the canonical env var the Google GenAI SDK expects.\n2. **`API_KEY`** — fallback for legacy / generic deployments.\n3. If neither is set → returns the literal string `'(Gemini API key missing; please set GEMINI_API_KEY or API_KEY in your environment)'` which the critic-error detector picks up to render the ↻ Retry affordance.\n\nThe resolved key is passed to `new GoogleGenAI({ apiKey })` (line 57) and used for the `ai.models.generateContent({ model: 'gemini-2.5-pro', … })` call.\n\n## Where it's set in production\n\nPer CLAUDE.md Deployment §3, env vars live in `$STATE_DIR/.env` on each host:\n\n- **myco.labxnow.ai** (prod): `/home/kkrazy/myco-state/.env` should have `GEMINI_API_KEY=…`\n- **mycobeta.labxnow.ai**: same path. The deploy report I just ran noted the OAuth env vars are missing, but didn't surface a Gemini key issue — likely it IS set (otherwise critic verdicts would all return the \"(Gemini API key missing…)\" string).\n\nYou can also set it server-side via the **Admin → Server env config** form in the config modal:\n- `#config-admin-gemini-key` input (visible at `index.html:600` if you're an admin)\n- POSTs to the admin env-save endpoint which writes `$STATE_DIR/.env`\n- The container reads `.env` on container restart (deploy.sh's container swap reloads it)\n\n## Per-session override\n\nPer-user `GEMINI_API_KEY` overrides via the `_loadProjectCriticRules` mechanism aren't supported — the key is global per-host. If you wanted per-session keys, that'd be a new feature."
+        },
+        {
+          "status": "success",
+          "ts": "2026-06-09T01:29:54.837Z",
+          "startedAt": "2026-06-09T01:04:51.267Z",
+          "summary": "910.0s · 31→35460 tok",
+          "result": "**PROOF — Gemini API call SUCCEEDED:** with the PID-1's key explicitly piped through, the SDK returned `\"OK\"`. The key is valid, the SDK works, the model `gemini-2.5-pro` is reachable.\n\n## Conclusion\n\nYour Gemini key save **worked correctly**. The current container's PID 1 (the actual server process) has `GEMINI_API_KEY` set, and a direct Gemini call with that key succeeds.\n\n### What confused us earlier\n\n1. **`docker exec myco sh -c \"echo $GEMINI_API_KEY\"` returned empty** — but `docker exec` spawns a NEW process that doesn't inherit PID 1's runtime env (it uses the image's default env from the Dockerfile, which doesn't declare GEMINI_API_KEY). The actual server (PID 1) DOES have it because the entrypoint sourced `.env` at startup.\n2. **The UI shows the field blank after save** — by design (masked secrets are cleared so the form doesn't echo them back), but indistinguishable from \"save failed\".\n\n### What this means for your earlier \"the critic doesn't work\" observation\n\nIf you tested critic AFTER `268c464` deployed (~01:10), it should work. If your test was BEFORE the redeploy, the old container's process.env state could have been stale. The redeploy ingested `.env` cleanly.\n\n### Recommended next steps\n\nThe save flow is functionally correct. There are 2 real UX bugs worth fixing:\n1. **No visible \"saved\" affordance** — after save, the field clears with no chip/checkmark to confirm. Should show `Set: AIza…XXXX` (masked) or a ✓ confirmation.\n2. **`docker exec` debug discoverability** — the diagnosis trail today went sideways because `docker exec`-based probes don't reflect PID 1's runtime env. Worth adding a `/api/admin/debug/env` route (admin-gated) that reports what process.env actually contains, masked, so future debugging is single-step.\n\nWant me to file these as plan items, or tackle one of them in a stage cycle right now?"
+        }
+      ]
+    },
+    {
+      "id": "bug-74",
+      "text": "Admin config: after saving a masked _KEY field (Gemini/Anthropic/OpenAI/Custom-Critic-Key), the input clears — should show the masked value (e.g. AIza…XXXX) so the user sees confirmation AND can click Test against the saved key. Problem: web/public/app.js:1109 clears the input when the server returns a value containing '...' or '•' (the mask sentinel). Result: indistinguishable from 'save failed', plus Test button reports 'no key' even though the server has the saved key — because _testKey reads input.value (now empty) instead of trusting the server-side state. Expected: after save, the input renders the masked value as a non-editable chip (or pre-filled disabled text); Test fires against the server-saved key without requiring the input field to be re-typed. Actual: input goes blank, Test fails with 'no key', user thinks save was broken when actually only the UI is misleading.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-09T01:37:14.427Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
     }
   ],
-  "updatedAt": "2026-06-07T15:36:10.713Z"
+  "updatedAt": "2026-06-09T01:37:14.427Z"
 }

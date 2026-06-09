@@ -1822,6 +1822,12 @@ app.post('/api/admin/test-key', requireAdmin, async (req, res) => {
 // header. 200 → key is valid + lists models. 401 → bad key. Other
 // codes → surface the status + body.
 async function _probeAnthropicKey(key) {
+  // bug-76 (plan-item bug-74): fall back to process.env when client
+  // didn't send a key. The admin UI's Test button now sends key=''
+  // when its input shows a masked value (the server-saved key);
+  // the probe uses the saved key without round-tripping the secret
+  // back to the client.
+  if (!key) key = process.env.ANTHROPIC_API_KEY || '';
   if (!key) return { ok: false, error: 'no Anthropic key provided' };
   const resp = await fetch('https://api.anthropic.com/v1/models', {
     headers: {
@@ -1844,6 +1850,9 @@ async function _probeAnthropicKey(key) {
 // verbatim. We don't use models.list because the @google/genai
 // JS SDK version pinned here doesn't expose it consistently.
 async function _probeGeminiKey(key) {
+  // bug-76 (plan-item bug-74): fall back to process.env when client
+  // didn't send a key — same pattern as _probeAnthropicKey above.
+  if (!key) key = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
   if (!key) return { ok: false, error: 'no Gemini key provided' };
   const { GoogleGenAI } = require('@google/genai');
   const ai = new GoogleGenAI({ apiKey: key });
@@ -1862,6 +1871,9 @@ async function _probeGeminiKey(key) {
 
 // OpenAI: GET /v1/models with Bearer auth. Cheapest probe.
 async function _probeOpenAIKey(key) {
+  // bug-76 (plan-item bug-74): fall back to process.env when client
+  // didn't send a key — same pattern as _probeAnthropicKey above.
+  if (!key) key = process.env.OPENAI_API_KEY || '';
   if (!key) return { ok: false, error: 'no OpenAI key provided' };
   const resp = await fetch('https://api.openai.com/v1/models', {
     headers: { 'Authorization': `Bearer ${key}` },
@@ -1880,6 +1892,14 @@ async function _probeOpenAIKey(key) {
 // hosted LLMs follow). If the endpoint lives behind auth, the
 // optional `key` is passed as a Bearer token.
 async function _probeCustomCriticKey(endpoint, key, model) {
+  // bug-76 (plan-item bug-74): fall back to process.env for both key
+  // AND endpoint when client didn't send them — same pattern as
+  // _probeAnthropicKey / _probeGeminiKey / _probeOpenAIKey above,
+  // extended to also cover the endpoint URL since CUSTOM_CRITIC_ENDPOINT
+  // is part of the same env-config form. If both client and env
+  // are missing the endpoint, error as before.
+  if (!endpoint) endpoint = process.env.CUSTOM_CRITIC_ENDPOINT || '';
+  if (!key) key = process.env.CUSTOM_CRITIC_KEY || '';
   if (!endpoint) return { ok: false, error: 'no Custom Critic endpoint provided' };
   // Normalize the URL: caller may have entered http://host:port/v1
   // or http://host:port. Append /models if it's a /v1 base.

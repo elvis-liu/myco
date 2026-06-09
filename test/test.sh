@@ -3927,6 +3927,21 @@ test_chat_window() {
   # Inline warning policy: probe result rendered next to each field,
   # Save proceeds regardless of outcome.
   node_test_result test/fr-91-admin-key-test.test.js "test/fr-91-admin-key-test.test.js (9 cases)"
+  # bug-76 (plan-item bug-74): admin config _KEY masked round-trip.
+  # Pre-fix the GET /api/admin/config response was MASKED by maskKey()
+  # to avoid echoing secrets, and the client's _refreshConfigAdmin
+  # CLEARED the input on a masked value. Net effect: after a successful
+  # save, the field looked blank (no save-took-effect signal) AND
+  # _runApiKeyTest read input.value (empty) so Test reported "no key"
+  # even though the server had the saved key in process.env. User
+  # report (2026-06-09, verbatim): "right now if I click test, it
+  # says no key". Fix: client now shows the masked value (visible
+  # confirmation), _runApiKeyTest detects the mask pattern + sends
+  # key='', each server-side _probeXKey falls back to process.env
+  # when client-sent key is empty, focus listener clears mask-on-
+  # click for clean editing. Static guards on all 4 surfaces +
+  # runtime fallback-before-error ordering.
+  node_test_result test/bug-76-config-key-masked-roundtrip.test.js "test/bug-76-config-key-masked-roundtrip.test.js (9 cases)"
   # fr-88 (composer-collapse — note: distinct from the older fr-88(r)
   # blocking-modal feature that lives in app.js around line 1764+):
   # the four .composer-btn action buttons (Stop / Mic / Draw / Send)
