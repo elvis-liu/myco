@@ -5968,7 +5968,33 @@
         "rewritten": true
       },
       "description": "**Problem:** The stage-accept confirmation log shows the wrong stage name, making it look like the user accepted the code when they actually accepted the analysis.\n**Expected:** After accepting the analyze stage, the log should read `Analysis accepted — claude was prompted to proceed to the code stage.`\n**Actual:** Log reads `Code accepted — claude was prompted to proceed to the code stage.` even though the prior turn contains `[stage-accept] User accepted the analyze stage. Please proceed to the code stage.`\n**Context:** The label appears to be derived from the *next* stage (`code`) instead of the *accepted* stage (`analyze`)."
+    },
+    {
+      "id": "bug-80",
+      "text": "Sidebar shows duplicate session entry under `<session dir>/<session name>` path",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-09T08:37:50.258Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "0993ced8d0e4",
+          "user": "kkrazy",
+          "text": "investigate current session to debug",
+          "ts": "2026-06-09T08:38:15.324Z"
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "extra session <session directory>/<session name> pointing to the same session <session name> is showing up on the side bar: my-kkrazy-4xf7dcac/omni-cache is actually the same session as the omni-cache session",
+        "rewritten": true
+      },
+      "description": "**Problem:** Sidebar lists the same session twice — once under its bare name and once under a `<session directory>/<session name>` path.\n**Expected:** Each session appears once in the sidebar.\n**Actual:** `my-kkrazy-4xf7dcac/omni-cache` is rendered as a separate entry even though it is the same session as `omni-cache`."
     }
   ],
-  "updatedAt": "2026-06-09T08:16:11.179Z"
+  "updatedAt": "2026-06-09T08:37:56.585Z"
 }

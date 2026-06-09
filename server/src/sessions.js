@@ -62,6 +62,67 @@ function toRel(abs, user) {
 
 // ─── session store (JSON file) ──────────────────────────────────────────────
 
+// bug-80: helper to detect "nested session" pollution. Given an
+// absolute path + the current store, returns the registered session
+// record whose absCwd is a STRICT ANCESTOR of the given path (i.e.
+// the path lives inside that session's workspace). Returns null
+// when no such ancestor exists OR when the path equals one of the
+// registered session's absCwd (a path equal to itself is the same
+// session, not a child). Used by both:
+//   - importExistingTranscripts (skip guard): refuses to register
+//     a discovered .claude/projects transcript that lives inside an
+//     already-known session's workspace — the transcript is just a
+//     subagent run inside the parent, not a separate session.
+//   - _normalizeNestedSessions (cleanup scan): removes legacy entries
+//     in the store that violate the same invariant (so existing dirty
+//     stores get cleaned at server boot).
+function _findEnclosingSession(absCwd, store) {
+  if (!absCwd || !store || !store.sessions) return null;
+  const target = path.resolve(absCwd);
+  for (const rec of Object.values(store.sessions)) {
+    if (!rec || !rec.absCwd) continue;
+    const parentAbs = path.resolve(rec.absCwd);
+    if (parentAbs === target) continue;                  // equal != enclosed
+    const rel = path.relative(parentAbs, target);
+    // path.relative returns '' for equal, '..' or starts-with-'..' for
+    // siblings/ancestors, and a clean sub-path for descendants.
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return rec;
+  }
+  return null;
+}
+
+// bug-80: boot-time normalization. Scans the loaded store and removes
+// entries whose absCwd is enclosed by another entry's absCwd (the dirty
+// state the bug-80 reporter has — see _myco_/logs and the user's repro:
+// `myco-kkrazy-b6a240cf` with cwd `myco-kkrazy-4cf7dcac/omni-cache`
+// living INSIDE `myco-kkrazy-4cf7dcac`'s workspace). Returns the array
+// of removed ids so callers can log audit info. Idempotent: a clean
+// store returns []; the next loadStore call is a no-op.
+function _normalizeNestedSessions(store) {
+  if (!store || !store.sessions) return [];
+  const removed = [];
+  // Snapshot ids first — we mutate sessions inside the loop. Order
+  // doesn't matter because a CHILD-of-CHILD is also a CHILD-of-PARENT
+  // (transitivity), and we test against the live store on each
+  // iteration so already-deleted children don't accidentally protect
+  // their grandchildren.
+  for (const id of Object.keys(store.sessions)) {
+    const rec = store.sessions[id];
+    if (!rec || !rec.absCwd) continue;
+    // Don't let an entry "enclose" itself: _findEnclosingSession
+    // already excludes equal paths, but be defensive against alternate
+    // forms (trailing slash, .., etc.) by resolving both sides via the
+    // helper.
+    const enclosing = _findEnclosingSession(rec.absCwd, store);
+    if (enclosing && enclosing.id !== rec.id) {
+      console.warn(`[bug-80] _normalizeNestedSessions: removing nested session ${rec.id} (absCwd=${rec.absCwd}) — enclosed by ${enclosing.id} (absCwd=${enclosing.absCwd})`);
+      delete store.sessions[id];
+      removed.push(id);
+    }
+  }
+  return removed;
+}
+
 let storeCache = null;
 function loadStore() {
   if (storeCache) return storeCache;
@@ -73,6 +134,24 @@ function loadStore() {
   }
   if (!storeCache.sessions) storeCache.sessions = {};
   if (!storeCache.dismissed) storeCache.dismissed = [];
+  // bug-80: clean any nested-session pollution from the on-disk store
+  // BEFORE handing it back to callers. The fix in
+  // importExistingTranscripts prevents new occurrences; this scan
+  // handles the existing duplicates users already see in the sidebar.
+  // We save the cleaned store back to disk so the change persists
+  // (otherwise loadStore would re-clean on every cold start without
+  // ever flushing the file — wasteful + auditable changes don't land).
+  const removedNested = _normalizeNestedSessions(storeCache);
+  if (removedNested.length > 0) {
+    try {
+      const tmp = STATE_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(storeCache, null, 2));
+      fs.renameSync(tmp, STATE_FILE);
+      console.log(`[bug-80] loadStore: persisted normalized store after removing ${removedNested.length} nested session(s): ${removedNested.join(', ')}`);
+    } catch (err) {
+      console.error(`[bug-80] loadStore: failed to persist normalized store: ${err.message}`);
+    }
+  }
   return storeCache;
 }
 
@@ -1242,6 +1321,19 @@ async function importExistingTranscripts() {
 
     if (store.dismissed && store.dismissed.includes(cwd)) continue;
 
+    // bug-80: skip transcripts whose cwd lives INSIDE another already-
+    // registered session's workspace. These are subagent / sub-shell
+    // runs of the parent session, NOT separate sessions — pre-fix they
+    // got auto-registered as duplicate sidebar entries (user-reported:
+    // `myco-kkrazy-4cf7dcac/omni-cache` shown alongside `omni-cache`).
+    // The parent session keeps its own absCwd, so the user's view of
+    // their workspace stays canonical.
+    const enclosing = _findEnclosingSession(cwd, store);
+    if (enclosing) {
+      console.log(`[bug-80] importExistingTranscripts: skipping ${cwd} — enclosed by ${enclosing.id} (absCwd=${enclosing.absCwd})`);
+      continue;
+    }
+
     const rel = path.relative(WORKSPACE, cwd);
     if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
     const segs = rel.split(path.sep).filter(Boolean);
@@ -1615,6 +1707,11 @@ Object.assign(module.exports, {
   listWorkspaceDirs,
   listSessions,
   spawnSession,
+  // bug-80: exported for the regression test + future audit/cleanup
+  // tools that want to surface "is this session enclosed by another?"
+  // or run an ad-hoc cleanup.
+  _findEnclosingSession,
+  _normalizeNestedSessions,
   ensureLiveSession,
   sessionBelongsToUser,
   deleteSession,

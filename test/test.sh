@@ -3290,6 +3290,18 @@ test_chat_window() {
   # where the files pane is an overlay and drag would fight touch
   # scroll. Static-grep guards across index.html / styles.css / app.js.
   node_test_result test/bug-78-files-tree-resize.test.js "test/bug-78-files-tree-resize.test.js (13 cases)"
+  # bug-80 (no nested-session duplicates): importExistingTranscripts
+  # auto-imported .claude/projects transcripts even when they lived
+  # INSIDE another already-registered session's workspace — the user
+  # saw duplicate sidebar entries (one for the canonical session, one
+  # for the bogus child with cwd like `parent-id/sub/`). Fix:
+  # _findEnclosingSession helper detects "this path is enclosed by a
+  # known session"; importExistingTranscripts skip-guards on it;
+  # _normalizeNestedSessions runs at loadStore() boot to clean
+  # existing dirty stores. 11 cases — static guards + runtime asserts
+  # against the helper, the cleanup scan, the boot-time loadStore
+  # cleanup, and the importExistingTranscripts skip end-to-end.
+  node_test_result test/bug-80-no-nested-session-duplicates.test.js "test/bug-80-no-nested-session-duplicates.test.js (11 cases)"
   # fr-92: mobile users can't access composer history since touch
   # devices have no arrow keys. Add a touchstart + touchend listener
   # on #chat-input that detects vertical swipes (|dy| >= 30px in
