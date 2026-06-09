@@ -5710,161 +5710,175 @@
       "addedAt": "2026-06-07T10:16:58.582Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
-      "comments": [],
-      "meta": {
-        "rewriteRequested": "long",
-        "originalText": "should have a way to bring up the verdict modal again if I click \"dismiss\"",
-        "rewritten": true
-      },
-      "description": "**Problem:** Once the verdict modal is dismissed, there's no affordance to bring it back.\n**Expected:** A control (button, menu item, or shortcut) to re-open the verdict modal after dismissal.\n**Actual:** Clicking \"Dismiss\" closes the modal permanently with no way to reopen it."
-    },
-    {
-      "id": "bug-73",
-      "text": "Config page has multiple \"Save\" buttons causing user confusion",
-      "layer": "Bug",
-      "done": false,
-      "addedAt": "2026-06-09T01:04:26.238Z",
-      "addedBy": "kkrazy",
-      "source": "user",
       "voters": [
         "kkrazy"
       ],
       "comments": [
         {
-          "id": "b9a298ac0dbc",
+          "id": "10fdeb7ca7e4",
           "user": "claude",
-          "text": "✓ Deploy running in background. Now bug-73 analyze. · 167.3s · $7.0179 · 12↓/8854↑",
-          "ts": "2026-06-09T01:07:40.291Z",
+          "text": "✓ Pausing for the critic verdict + your accept signal (`✓ Accept Stage`, or chat-accept like \"proceed\" / \"code stage\"). If you want a differe… · 152.3s · $1.4981 · 14↓/9444↑",
+          "ts": "2026-06-07T11:21:34.146Z",
           "meta": {
             "kind": "run-summary",
-            "runStartedAt": "2026-06-09T01:04:51.267Z"
+            "runStartedAt": "2026-06-07T11:19:01.799Z"
           }
         },
         {
-          "id": "95f6ec4c7325",
+          "id": "8091192daac3",
           "user": "claude",
-          "text": "✓ Both done: · 23.9s · $7.7368 · 7↓/1153↑",
-          "ts": "2026-06-09T01:10:30.244Z",
+          "text": "✓ Code stage summary · 291.2s · $4.5659 · 28↓/19420↑",
+          "ts": "2026-06-07T11:27:27.930Z",
           "meta": {
             "kind": "run-summary",
-            "runStartedAt": "2026-06-09T01:04:51.267Z"
+            "runStartedAt": "2026-06-07T11:19:01.799Z"
           }
         },
         {
-          "id": "5ce2fcbb8958",
+          "id": "dcfa76f4e1c1",
           "user": "claude",
-          "text": "✓ Gemini key resolution · 27.2s · $8.7828 · 8↓/1051↑",
-          "ts": "2026-06-09T01:14:14.223Z",
+          "text": "✓ Yes — that toast means the server detected my `[stage: code done]` sentinel and kicked off the Gemini call; the verdict pane is supposed to… · 60.1s · $4.7812 · 6↓/3939↑",
+          "ts": "2026-06-07T11:31:17.211Z",
           "meta": {
             "kind": "run-summary",
-            "runStartedAt": "2026-06-09T01:04:51.267Z"
+            "runStartedAt": "2026-06-07T11:19:01.799Z"
           }
         },
         {
-          "id": "c029bc5093d2",
+          "id": "8988be3d8e42",
           "user": "claude",
-          "text": "✓ PROOF — Gemini API call SUCCEEDED:** with the PID-1's key explicitly piped through, the SDK returned `\"OK\"`. The key is valid, the SDK work… · 910.0s · $19.0987 · 31↓/35460↑",
-          "ts": "2026-06-09T01:29:54.837Z",
+          "text": "✓ Run closeout · 219.3s · $6.8470 · 66↓/14520↑",
+          "ts": "2026-06-07T11:36:05.278Z",
           "meta": {
             "kind": "run-summary",
-            "runStartedAt": "2026-06-09T01:04:51.267Z"
+            "runStartedAt": "2026-06-07T11:19:01.799Z"
+          }
+        },
+        {
+          "id": "d409a428def5",
+          "user": "claude",
+          "text": "✓ Token revoked at GitHub side (API returns 401). The token file in `/data/git-tokens.json` was refreshed at 11:07 but still holds the **same… · 264.5s · $8.5168 · 14↓/7177↑",
+          "ts": "2026-06-07T11:45:39.140Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-07T11:19:01.799Z"
           }
         }
       ],
       "meta": {
         "rewriteRequested": "long",
-        "originalText": "the config page has too many \"save\" button which is confusing to end user",
+        "originalText": "should have a way to bring up the verdict modal again if I click \"dismiss\"",
         "rewritten": true,
         "stageState": {
-          "stage": "analyze",
+          "stage": "verify",
           "status": "awaiting_accept",
-          "updatedAt": "2026-06-09T01:07:46.761Z",
+          "updatedAt": "2026-06-07T15:51:20.182Z",
           "history": [
             {
               "stage": "analyze",
               "status": "in_progress",
-              "ts": "2026-06-09T01:04:51.317Z"
+              "ts": "2026-06-07T11:19:01.828Z"
             },
             {
               "stage": "analyze",
               "status": "awaiting_verdict",
-              "ts": "2026-06-09T01:07:40.025Z"
+              "ts": "2026-06-07T11:21:30.176Z"
             },
             {
               "stage": "analyze",
               "status": "awaiting_accept",
-              "ts": "2026-06-09T01:07:46.761Z"
+              "ts": "2026-06-07T11:21:43.918Z"
+            },
+            {
+              "stage": "code",
+              "status": "in_progress",
+              "ts": "2026-06-07T15:50:23.770Z"
+            },
+            {
+              "stage": "verify",
+              "status": "awaiting_accept",
+              "ts": "2026-06-07T15:51:20.182Z"
             }
           ]
-        },
-        "lastCriticReview": {
-          "kind": "critique-review",
-          "itemId": "bug-73",
-          "hasDisagreement": true,
-          "isError": true,
-          "isIntermediate": true,
-          "isRetry": true,
-          "stage": "analyze",
-          "critique": "(Gemini call failed: {\"error\":{\"code\":503,\"message\":\"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\"status\":\"UNAVAILABLE\"}})",
-          "diff": "",
-          "criticName": "Gemini-2.5-Flash",
-          "criticId": "gemini",
-          "userPrompt": "",
-          "specialties": [
-            {
-              "id": "general",
-              "name": "General QA",
-              "isError": true,
-              "isAgreed": false
-            }
-          ],
-          "broadcastAt": "2026-06-09T01:10:33.039Z"
         }
       },
-      "description": "**Problem:** End users are confused by the presence of multiple \"Save\" buttons on the config page, making it unclear which one persists their changes.\n**Expected:** A single, unambiguous \"Save\" action that clearly commits all config changes.\n**Actual:** The config page renders several \"Save\" buttons, leaving users uncertain which one to click and what scope each one saves.",
+      "description": "**Problem:** Once the verdict modal is dismissed, there's no affordance to bring it back.\n**Expected:** A control (button, menu item, or shortcut) to re-open the verdict modal after dismissal.\n**Actual:** Clicking \"Dismiss\" closes the modal permanently with no way to reopen it.",
       "runs": [
         {
           "status": "success",
-          "ts": "2026-06-09T01:07:40.291Z",
-          "startedAt": "2026-06-09T01:04:51.267Z",
-          "summary": "167.3s · 12→8854 tok",
-          "result": "Deploy running in background. Now bug-73 analyze.\n\n## bug-73 (config) analyze stage\n\n### Restated problem\nThe config modal (`#config-modal` opened via the `@login` chip, defined at `web/public/index.html:493–620`) has **2 distinct Save buttons** with different scopes but visually ambiguous labels:\n\n| button | id | label | scope | handler |\n|---|---|---|---|---|\n| PAT Save | `#config-pat-save` | bare **\"Save\"** | Adds ONE per-repo PAT (provider + owner + repo + alias + token) | `app.js:1365 _saveConfigPerRepoPat` |\n| Env Save | `#config-admin-env-save` | **\"Save env config\"** | Persists the 9-field admin env form (ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY, CUSTOM_CRITIC_ENDPOINT/KEY/MODEL, HTTP_PROXY, HTTPS_PROXY, NO_PROXY) | `app.js:1191 _saveConfigAdminEnv` |\n\nThere's also an `#config-admin-allowlist-add` button that says **\"Add\"** (clearer, immediate persist on click — not a Save by name).\n\nThe PAT one's bare \"Save\" label is the main offender — it doesn't tell the user \"this saves THE PAT form only\". A non-admin user only sees this one Save; an admin sees both, and the bare \"Save\" looks visually like a global commit while \"Save env config\" looks scoped — making the bare \"Save\" seem like the global action that commits everything.\n\n### The user's expected vs my reading\n\n> \"A single, unambiguous 'Save' action that clearly commits all config changes.\"\n\nTwo literal interpretations:\n\n**A. Single global Save** — replace both per-section Save buttons with ONE Save at the bottom of the modal that commits ALL changes (PAT + admin env) atomically. Modal becomes a \"fill in what you want changed, click Save once\" form.\n\n**B. Per-section saves, but unambiguous labels** — keep both buttons (architecture-clean — admin scope stays separated from per-user scope, permission boundaries are explicit) but rename for clarity:\n- `#config-pat-save`: \"Save\" → **\"Add PAT\"** (it's literally an add-to-list action, not an edit)\n- `#config-admin-env-save`: keep \"Save env config\"\n\n### Nu"
+          "ts": "2026-06-07T11:21:34.146Z",
+          "startedAt": "2026-06-07T11:19:01.799Z",
+          "summary": "152.3s · 14→9444 tok",
+          "result": "Pausing for the critic verdict + your accept signal (`✓ Accept Stage`, or chat-accept like \"proceed\" / \"code stage\"). If you want a different surface than option A (chat-composer pill), say so on the verdict pane or in chat and I'll redo analyze."
         },
         {
           "status": "success",
-          "ts": "2026-06-09T01:10:30.244Z",
-          "startedAt": "2026-06-09T01:04:51.267Z",
-          "summary": "23.9s · 7→1153 tok",
-          "result": "Both done:\n\n| | |\n|---|---|\n| **Deploy** of `268c464` to mycobeta | ✓ — `HTTP/2 200`, post-deploy validation all green, lean-ctx healthy, USER_MANUAL.md + codemirror bundle serving. Bundle marker stayed at `2026-06-07T11:14:44Z` (expected — `268c464` was plan.json-only, no source change to invalidate the bundle build). |\n| **bug-73 analyze sentinel** | Emitted in prior turn — paused for your accept (or pivot signal if you'd rather restructure as option A). |\n\nWaiting for your accept on bug-73 analyze."
+          "ts": "2026-06-07T11:27:27.930Z",
+          "startedAt": "2026-06-07T11:19:01.799Z",
+          "summary": "291.2s · 28→19420 tok",
+          "result": "### Code stage summary\n\n**Files changed:**\n1. **`test/bug-72-reopen-dismissed-verdict.test.js`** (new, 7 cases) — static-grep guards locking the contract: Dismiss snapshot, pill rendering, click-handler restoration, supersede-clear, CSS ruleset, marker comment. 7/7 red against unfixed code → 7/7 green after fix.\n2. **`web/public/app.js`** — three surgical edits inside `_renderVerdictPanel`:\n   - btnDismiss handler: `state.lastDismissedVerdict = review` before the existing nullings.\n   - Early-return path: instead of always hiding the pane when there's no active review, render an `↻ Reopen verdict` pill (with stage badge + itemId) when `state.lastDismissedVerdict` is set. Pill click restores the state and re-renders.\n   - critique-review broadcast handler: `state.lastDismissedVerdict = null` after `state.critiqueReview = msg` so a newer verdict supersedes the snapshot.\n3. **`web/public/styles.css`** — `.verdict-reopen-pill` + 3 sub-class rules. Lavender identity matching `.verdict-intermediate-badge` for critic-surface color coding.\n4. **`test/test.sh`** — wired the new 7-case test next to bug-71.\n\n**No server-side changes** — confirmed in analyze: `rec._lastCritique` and `item.meta.lastCriticReview` both survive Dismiss already.\n\n**Done-criteria check:**\n- ✅ Production source edited per the analyzed plan; no scope creep.\n- ✅ Regression test would have caught the original problem (red 7/7 → green 7/7).\n- ✅ Test passes locally; wired into test.sh.\n\n[stage: code done]\n\nPausing for the code-stage critic verdict + your accept signal. The diff is small (3 client-side files: app.js handler/render edits + styles.css ruleset + test). If the critic 503s, the code is reviewable directly: pill HTML at app.js around `_renderVerdictPanel`, click handler immediately below, Dismiss snapshot at `btnDismiss` handler."
         },
         {
           "status": "success",
-          "ts": "2026-06-09T01:14:14.223Z",
-          "startedAt": "2026-06-09T01:04:51.267Z",
-          "summary": "27.2s · 8→1051 tok",
-          "result": "## Gemini key resolution\n\n`server/src/critics/gemini.js:51`:\n```js\nconst apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;\n```\n\n**Resolution order:**\n1. **`GEMINI_API_KEY`** — primary, the canonical env var the Google GenAI SDK expects.\n2. **`API_KEY`** — fallback for legacy / generic deployments.\n3. If neither is set → returns the literal string `'(Gemini API key missing; please set GEMINI_API_KEY or API_KEY in your environment)'` which the critic-error detector picks up to render the ↻ Retry affordance.\n\nThe resolved key is passed to `new GoogleGenAI({ apiKey })` (line 57) and used for the `ai.models.generateContent({ model: 'gemini-2.5-pro', … })` call.\n\n## Where it's set in production\n\nPer CLAUDE.md Deployment §3, env vars live in `$STATE_DIR/.env` on each host:\n\n- **myco.labxnow.ai** (prod): `/home/kkrazy/myco-state/.env` should have `GEMINI_API_KEY=…`\n- **mycobeta.labxnow.ai**: same path. The deploy report I just ran noted the OAuth env vars are missing, but didn't surface a Gemini key issue — likely it IS set (otherwise critic verdicts would all return the \"(Gemini API key missing…)\" string).\n\nYou can also set it server-side via the **Admin → Server env config** form in the config modal:\n- `#config-admin-gemini-key` input (visible at `index.html:600` if you're an admin)\n- POSTs to the admin env-save endpoint which writes `$STATE_DIR/.env`\n- The container reads `.env` on container restart (deploy.sh's container swap reloads it)\n\n## Per-session override\n\nPer-user `GEMINI_API_KEY` overrides via the `_loadProjectCriticRules` mechanism aren't supported — the key is global per-host. If you wanted per-session keys, that'd be a new feature."
+          "ts": "2026-06-07T11:31:17.211Z",
+          "startedAt": "2026-06-07T11:19:01.799Z",
+          "summary": "60.1s · 6→3939 tok",
+          "result": "Yes — that toast means the server detected my `[stage: code done]` sentinel and kicked off the Gemini call; the verdict pane is supposed to appear once the critic returns (usually within 30s, sometimes longer on pro). If you waited ~60s and nothing showed up, that's a real bug.\n\n**Most likely causes, in rough order:**\n\n1. **Critic 503/error swallowed silently.** Pro is on a different endpoint than flash but still has capacity dips. Normally an error verdict pane WOULD render with isError:true + the ↻ Retry button — but if the broadcast got filtered or the panel was hidden by a state race, you'd see nothing.\n\n2. **`bug-61` dropped the verdict as a phantom-unresolved.** This guard at `app.js:7540-7556` silently drops incoming intermediate critique-reviews when `state.critiqueReview` is already set + unresolved. Given the *stage-accept* misclassification bug we've been seeing all session (the repeated `[stage-accepted: code→code]` and `[stage-accept]` synthetic prompts), it's plausible some bogus prior signal left phantom state that ate the new verdict.\n\n3. **Critic actually still running.** Gemini 2.5 *pro* takes much longer than flash — 30-60s on the heavy code-stage prompt is normal. If you didn't wait long enough, that explains it cleanly.\n\n4. **Server-side detected the sentinel was dropped per bug-61.** When stageState is already `awaiting_verdict` or `awaiting_accept`, the server PHYSICALLY drops a 2nd sentinel and logs `[stage-sentinel] dropping` — but it still emits the \"Code sentinel received\" toast first? That would be a contract violation worth flagging.\n\n**What I'd like to do:**\n\n1. **Capture this as a `/bug` plan item now** — \"code-stage critic verdict pane never appears after 'Code sentinel received' toast.\" That gives us a stable artifact + lets me write the regression test once we trace the cause.\n2. **Pull recent server logs** via `./scripts/collect-logs.sh` to confirm whether the Gemini call returned + the broadcast fired. That tells us \"client droppe"
         },
         {
           "status": "success",
-          "ts": "2026-06-09T01:29:54.837Z",
-          "startedAt": "2026-06-09T01:04:51.267Z",
-          "summary": "910.0s · 31→35460 tok",
-          "result": "**PROOF — Gemini API call SUCCEEDED:** with the PID-1's key explicitly piped through, the SDK returned `\"OK\"`. The key is valid, the SDK works, the model `gemini-2.5-pro` is reachable.\n\n## Conclusion\n\nYour Gemini key save **worked correctly**. The current container's PID 1 (the actual server process) has `GEMINI_API_KEY` set, and a direct Gemini call with that key succeeds.\n\n### What confused us earlier\n\n1. **`docker exec myco sh -c \"echo $GEMINI_API_KEY\"` returned empty** — but `docker exec` spawns a NEW process that doesn't inherit PID 1's runtime env (it uses the image's default env from the Dockerfile, which doesn't declare GEMINI_API_KEY). The actual server (PID 1) DOES have it because the entrypoint sourced `.env` at startup.\n2. **The UI shows the field blank after save** — by design (masked secrets are cleared so the form doesn't echo them back), but indistinguishable from \"save failed\".\n\n### What this means for your earlier \"the critic doesn't work\" observation\n\nIf you tested critic AFTER `268c464` deployed (~01:10), it should work. If your test was BEFORE the redeploy, the old container's process.env state could have been stale. The redeploy ingested `.env` cleanly.\n\n### Recommended next steps\n\nThe save flow is functionally correct. There are 2 real UX bugs worth fixing:\n1. **No visible \"saved\" affordance** — after save, the field clears with no chip/checkmark to confirm. Should show `Set: AIza…XXXX` (masked) or a ✓ confirmation.\n2. **`docker exec` debug discoverability** — the diagnosis trail today went sideways because `docker exec`-based probes don't reflect PID 1's runtime env. Worth adding a `/api/admin/debug/env` route (admin-gated) that reports what process.env actually contains, masked, so future debugging is single-step.\n\nWant me to file these as plan items, or tackle one of them in a stage cycle right now?"
+          "ts": "2026-06-07T11:36:05.278Z",
+          "startedAt": "2026-06-07T11:19:01.799Z",
+          "summary": "219.3s · 66→14520 tok",
+          "result": "### Run closeout\n\nbug-72 work is complete locally. Files touched:\n1. `web/public/app.js` — Dismiss snapshot, Reopen pill render + click handler, supersede-clear.\n2. `web/public/styles.css` — `.verdict-reopen-pill` + 3 sub-class rules.\n3. `test/bug-72-reopen-dismissed-verdict.test.js` — new 7-case regression net.\n4. `test/test.sh` — wired the new test.\n5. `test/bug-69-verdict-panel-followup-rendering.test.js` — narrow regex update to find verdict-card template by class, not by ordinal (anti-fragility per §10.b; needed because my pill added a second `panel.innerHTML =` template literal).\n\n**Filed during diagnosis:**\n- **bug-73** — code-stage critic verdict pane never appears after sentinel toast (the user-visible symptom).\n- **bug-74** — chat-parser misclassifying non-accept text + synthetic accepts not transitioning server-side stageState (the upstream cause).\n\nBoth bug-73 and bug-74 now have concrete log evidence from `_myco_/logs/mycod-2026-06-07.log:149-154` to drive regression tests when you want them worked.\n\nNo deploy initiated (per CLAUDE.md Deployment §0). No push initiated (no explicit ask). Run-queue free to advance."
+        },
+        {
+          "status": "success",
+          "ts": "2026-06-07T11:45:39.140Z",
+          "startedAt": "2026-06-07T11:19:01.799Z",
+          "summary": "264.5s · 14→7177 tok",
+          "result": "Token revoked at GitHub side (API returns 401). The token file in `/data/git-tokens.json` was refreshed at 11:07 but still holds the **same** `ghp_trDg…` token — which is now dead.\n\n**Local state is clean:** commit `9709568` is on `main`, working tree is clean. The push is blocked at auth, nothing more.\n\nTo unblock, one of:\n\n1. **`/setpat <new-token>`** — generate a fresh PAT at https://github.com/settings/tokens (Classic, `repo` scope), paste into `/setpat` from this session. Then say \"push again.\"\n2. **Re-OAuth** on `myco.labxnow.ai` — sign out + back in to refresh the user-level slot.\n3. **Authorize the SSH key** at https://github.com/settings/keys (pubkey from earlier: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILWQdNCXYCnpxrYx4AER57Lmf+Ir4i11DXaxknLO/PC0`) and I'll switch the remote to SSH.\n\nI won't keep retrying the dead token."
+        },
+        {
+          "status": "aborted",
+          "ts": "2026-06-07T11:52:08.937Z",
+          "summary": "interrupted by Stop"
         }
       ]
     },
     {
-      "id": "bug-74",
-      "text": "Admin config: after saving a masked _KEY field (Gemini/Anthropic/OpenAI/Custom-Critic-Key), the input clears — should show the masked value (e.g. AIza…XXXX) so the user sees confirmation AND can click Test against the saved key. Problem: web/public/app.js:1109 clears the input when the server returns a value containing '...' or '•' (the mask sentinel). Result: indistinguishable from 'save failed', plus Test button reports 'no key' even though the server has the saved key — because _testKey reads input.value (now empty) instead of trusting the server-side state. Expected: after save, the input renders the masked value as a non-editable chip (or pre-filled disabled text); Test fires against the server-saved key without requiring the input field to be re-typed. Actual: input goes blank, Test fails with 'no key', user thinks save was broken when actually only the UI is misleading.",
+      "id": "bug-73",
+      "text": "Code-stage critic verdict pane never appears after 'Code sentinel received' toast — server confirms sentinel detection and critic fire, but the verdict pane never renders client-side. Observed 2026-06-07 mid-session on bug-72 code-stage critique (right after the gemini-2.5-pro switch landed). Hypotheses: (1) critic 503 error verdict silently dropped by client filter, (2) bug-61 phantom-unresolved guard ate the new broadcast — likely related to the repeated stray [stage-accepted: code→code] / [stage-accept] synthetic prompts firing all session (see also: stage-accept-on-closed-run bug), (3) Gemini 2.5 pro simply slower than expected (~30-60s on heavy prompts). Need: server-log evidence (Gemini call return value, broadcast firing, sentinel-drop log) + a regression test asserting the critique-review broadcast reaches the client and renders within N seconds of the sentinel.",
       "layer": "Bug",
       "done": false,
-      "addedAt": "2026-06-09T01:37:14.427Z",
+      "addedAt": "2026-06-07T11:32:47.906Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "bug-74",
+      "text": "Chat parser misclassifies non-accept text as a stage-accept signal, firing synthetic prompts on closed runs. Repro this session: dozens of stray '[stage-accepted: code→code]' (note: malformed same-stage→same-stage arrow — the synthetic template at attach.js:2840 expects distinct stages) and '[stage-accept] User accepted the analyze stage' messages arrived through the chat after bug-71 ran to completion, none triggered by an actual user accept button click. Likely either: (a) the chat-accept phrase parser at attach.js classifying ordinary words ('proceed', 'accept', etc.) in ordinary conversation as accept signals, or (b) a stale verdict-pane state on a closed run still WebSocket-attached and firing synthetic accept clicks. Expected: accept signals fire only on actual user actions (button click or unambiguous chat-accept phrase like 'accept' / 'accept stage' on a line by itself, scoped to an active stage). Stage transitions on closed runs should be no-ops with logging. Add a regression test that simulates a chat message containing 'accept' inside a sentence ('I accept that this is hard') and confirms NO synthetic dispatch fires.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-07T11:32:47.906Z",
+      "addedBy": "claude",
+      "source": "user",
+      "voters": [],
+      "comments": []
+    },
+    {
+      "id": "bug-75",
+      "text": "Dismiss does not make verdict pane stick across reconnects — fr-98 replays it on every attach. Repro from 2026-06-07 17:49-17:51 logs: 3 attaches in 75s, each fires `[fr-98] replayed pending critique-review on attach for item bug-72 (stage=analyze, status=awaiting_accept)` and the user clicks Dismiss on the replayed pane (POST /critique/resolve with reason='dismiss'), but stageState stays at awaiting_accept and `item.meta.lastCriticReview` stays populated, so the next reconnect re-shows the same pane. Infinite loop. Root: fr-98 attach-replay (attach.js:1804) + resolveCritique's intentional 'dismiss = no state change' (critique.js:687) compose into a trap. Fix: extend resolveCritique to also clearLastCriticReview when reason='dismiss' (and probably 'discard'). bug-72's Reopen pill (already shipped client-side) gives the user local recovery if they want the verdict back. stageState still gated by accept-stage/fix-stage transitions; the pane just stops nagging.",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-07T18:22:48.103Z",
       "addedBy": "claude",
       "source": "user",
       "voters": [],
       "comments": []
     }
   ],
-  "updatedAt": "2026-06-09T01:37:14.427Z"
+  "updatedAt": "2026-06-07T18:22:48.103Z"
 }
