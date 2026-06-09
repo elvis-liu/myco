@@ -11046,12 +11046,90 @@ function bindChatpaneResize() {
   });
 }
 
+// bug-78: drag-resize on the #files-tree-pane. Mirrors bindChatpaneResize
+// (just above) — the handle is a sibling DOM element of the pane; pointer
+// events drive --files-tree-w on the root; localStorage persists the
+// width across reloads; mobile (≤900px) is a no-op because the files
+// pane is an overlay there and drag would fight touch scroll. Double-
+// click resets to the default 220px. Idempotent via handle.dataset.bound
+// so bindFilesUi() can call this safely on every click of #btn-files.
+function bindFilesTreeResize() {
+  const handle = document.getElementById('files-tree-resize');
+  if (!handle || handle.dataset.bound) return;
+  handle.dataset.bound = '1';
+
+  const MIN_W = 180;    // matches the CSS min-width on #files-tree-pane
+  const DEFAULT_W = 220;
+
+  // Restore last-saved width — clamped against the current viewport so a
+  // value persisted at a wider window doesn't end up consuming the entire
+  // file viewer on a narrower one.
+  const saved = parseInt(localStorage.getItem('myco_files_tree_w') || '', 10);
+  const maxSensible = Math.max(MIN_W, Math.floor(window.innerWidth * 0.6));
+  if (Number.isFinite(saved) && saved >= MIN_W && saved <= maxSensible) {
+    document.documentElement.style.setProperty('--files-tree-w', saved + 'px');
+  } else if (Number.isFinite(saved) && saved > maxSensible) {
+    // Stale wide value from a larger viewport — drop it so the CSS
+    // default (220) takes over and the user lands somewhere sensible.
+    try { localStorage.removeItem('myco_files_tree_w'); } catch {}
+  }
+
+  let dragging = false;
+  const onDown = (e) => {
+    if (window.innerWidth <= 900) return;       // mobile overlay → no resize
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault();
+    dragging = true;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    try { handle.setPointerCapture(e.pointerId); } catch {}
+  };
+  const onMove = (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    // #files-tree-pane sits at the left edge of #files-wrap (which itself
+    // sits inside the main pane, right of the sidebar). New width =
+    // cursor.x minus the wrap's left edge.
+    const wrap = document.getElementById('files-wrap');
+    const wrapLeft = wrap ? wrap.getBoundingClientRect().left : 0;
+    const max = Math.max(MIN_W, Math.floor(window.innerWidth * 0.6));
+    const newW = Math.max(MIN_W, Math.min(max, e.clientX - wrapLeft));
+    document.documentElement.style.setProperty('--files-tree-w', newW + 'px');
+  };
+  const onUp = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    try { handle.releasePointerCapture(e.pointerId); } catch {}
+    const cur = getComputedStyle(document.documentElement).getPropertyValue('--files-tree-w').trim();
+    const px = parseInt(cur, 10);
+    if (Number.isFinite(px)) localStorage.setItem('myco_files_tree_w', String(px));
+  };
+
+  handle.addEventListener('pointerdown', onDown);
+  handle.addEventListener('pointermove', onMove);
+  handle.addEventListener('pointerup', onUp);
+  handle.addEventListener('pointercancel', onUp);
+  handle.addEventListener('dblclick', () => {
+    // Reset to default width on double-click — matches bindChatpaneResize.
+    document.documentElement.style.setProperty('--files-tree-w', DEFAULT_W + 'px');
+    try { localStorage.removeItem('myco_files_tree_w'); } catch {}
+  });
+}
+
 // ── per-session file explorer ───────────────────────────────────────────────
 
 function bindFilesUi() {
   const btn = document.getElementById('btn-files');
   if (!btn || btn.dataset.bound) return;
   btn.dataset.bound = '1';
+  // bug-78: wire the tree-pane drag-resize handle. Idempotent — safe
+  // to call multiple times; bindFilesTreeResize gates on its own
+  // dataset.bound flag.
+  bindFilesTreeResize();
   // Show-only on click — see the chrome-icon contract in bindChrome().
   // Switching away from the files view happens by clicking another
   // main-pane button (terminal/preview/plan/arch/test).

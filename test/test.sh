@@ -3280,6 +3280,16 @@ test_chat_window() {
   # stageState still untouched — Dismiss still means "no decision."
   # bug-72's Reopen pill gives the user local recovery.
   node_test_result test/bug-75-dismiss-clears-replay-cache.test.js "test/bug-75-dismiss-clears-replay-cache.test.js (4 cases)"
+  # bug-78 (file explorer tree pane drag-to-resize): #files-tree-pane
+  # was a fixed 220px with only a binary collapse toggle — long
+  # filenames truncated with no live way to widen the pane. Fix
+  # mirrors bindChatpaneResize (app.js:10979) — handle element next
+  # to the pane, pointerdown/move/up listeners drive --files-tree-w
+  # CSS variable, width persists to localStorage.myco_files_tree_w,
+  # double-click resets to default 220px, no-op on mobile (≤900px)
+  # where the files pane is an overlay and drag would fight touch
+  # scroll. Static-grep guards across index.html / styles.css / app.js.
+  node_test_result test/bug-78-files-tree-resize.test.js "test/bug-78-files-tree-resize.test.js (13 cases)"
   # fr-92: mobile users can't access composer history since touch
   # devices have no arrow keys. Add a touchstart + touchend listener
   # on #chat-input that detects vertical swipes (|dy| >= 30px in

@@ -5878,7 +5878,97 @@
       "source": "user",
       "voters": [],
       "comments": []
+    },
+    {
+      "id": "bug-76",
+      "text": "Stage popup fires across sessions instead of only the active one",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-09T03:03:57.865Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the stage popup should be session specific, current whenever there is a critic verdict, regardless of from which session and what session I am working on, it will show up. it should show up only when the from session and the active session matches.",
+        "rewritten": true
+      },
+      "description": "**Problem:** Stage popup leaks across sessions, interrupting users working in unrelated sessions.\n**Expected:** Popup shows only when the critic verdict's from-session matches the active session.\n**Actual:** Any critic verdict triggers the popup regardless of originating session or the user's current session."
+    },
+    {
+      "id": "bug-77",
+      "text": "Analyze stage reads code diff instead of plan-only input",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-09T03:04:31.649Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "at analyze stage it shouldn't looking into the code diff, it should only look at the plan to fix the problem",
+        "rewritten": true
+      },
+      "description": "**Problem:** Analyze stage is pulling in the code diff, which pollutes its context and pushes it off-task.\n**Expected:** Analyze stage should consult only the plan when deciding how to fix the problem.\n**Actual:** Analyze stage looks at the code diff alongside (or instead of) the plan."
+    },
+    {
+      "id": "bug-78",
+      "text": "File explorer directory view not horizontally resizable, truncates long filenames",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-09T08:11:59.112Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [
+        "kkrazy"
+      ],
+      "comments": [
+        {
+          "id": "5eb2e24c4cb9",
+          "user": "claude",
+          "text": "✓ Pausing for the critic verdict + your accept signal. · 97.6s · $3.5645 · 12↓/5074↑",
+          "ts": "2026-06-09T08:14:05.664Z",
+          "meta": {
+            "kind": "run-summary",
+            "runStartedAt": "2026-06-09T08:12:26.069Z"
+          }
+        }
+      ],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the file explore directory view should be expandable by dragging so that I can see the complete filename when it's long",
+        "rewritten": true
+      },
+      "description": "**Problem:** Long filenames in the file explorer directory view are truncated with no way to reveal the full name.\n**Expected:** The directory view panel should be expandable by dragging its edge so users can widen it to see complete filenames.\n**Actual:** The panel has a fixed width and cannot be resized by dragging, leaving long filenames clipped.",
+      "runs": [
+        {
+          "status": "success",
+          "ts": "2026-06-09T08:14:05.664Z",
+          "startedAt": "2026-06-09T08:12:26.069Z",
+          "summary": "97.6s · 12→5074 tok",
+          "result": "Pausing for the critic verdict + your accept signal."
+        }
+      ]
+    },
+    {
+      "id": "bug-79",
+      "text": "Stage-accept log mislabels \"Analysis accepted\" as \"Code accepted\"",
+      "layer": "Bug",
+      "done": false,
+      "addedAt": "2026-06-09T08:16:04.563Z",
+      "addedBy": "kkrazy",
+      "source": "user",
+      "voters": [],
+      "comments": [],
+      "meta": {
+        "rewriteRequested": "long",
+        "originalText": "the label of stage change is wrong, in the following log \"Code accepted — claude was prompted to proceed to the code stage\" should be \"Analysis accepted --.....\" since I accepted the analysis, not the code. : kkrazy04:14 PM\n[stage-accept] User accepted the analyze stage. Please proceed to the code stage.\n\n16:14:24\n▸\n× 1\nturn · [stage-accept] User accepted the analyze stage. Please proce\n16:14:24\n▶ turn\n[stage-accept] User accepted the analyze stage. Please proceed to the code stage.\nmyco04:14 PM\n→ Code accepted — claude was prompted to proceed to the code stage.",
+        "rewritten": true
+      },
+      "description": "**Problem:** The stage-accept confirmation log shows the wrong stage name, making it look like the user accepted the code when they actually accepted the analysis.\n**Expected:** After accepting the analyze stage, the log should read `Analysis accepted — claude was prompted to proceed to the code stage.`\n**Actual:** Log reads `Code accepted — claude was prompted to proceed to the code stage.` even though the prior turn contains `[stage-accept] User accepted the analyze stage. Please proceed to the code stage.`\n**Context:** The label appears to be derived from the *next* stage (`code`) instead of the *accepted* stage (`analyze`)."
     }
   ],
-  "updatedAt": "2026-06-07T18:22:48.103Z"
+  "updatedAt": "2026-06-09T08:16:11.179Z"
 }

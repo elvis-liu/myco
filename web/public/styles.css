@@ -4468,8 +4468,13 @@ html.sidebar-collapsed { --chatpane-w: calc(100vw / 2); }
   /* Tightened 280 → 220 so the file viewer gets more horizontal
      space by default. The collapse button on the tree header
      (◀) drops the pane to a thin strip when the user wants the
-     viewer to take everything. */
-  width: 220px;
+     viewer to take everything.
+     bug-78: width is now driven by var(--files-tree-w, 220px) so the
+     drag-resize handler (bindFilesTreeResize in app.js) can grow/
+     shrink the pane by setting the CSS variable on the root. Fallback
+     is the historical 220 — what the user gets on first paint before
+     any saved width is restored. */
+  width: var(--files-tree-w, 220px);
   min-width: 180px;
   border-right: 1px solid rgba(255, 255, 255, .06);
   /* fr-77 r3: the changed-files section moved to the Plan view, so
@@ -4545,6 +4550,50 @@ html.sidebar-collapsed #files-wrap.files-tree-collapsed #files-tree-pane #files-
   flex: 0 0 auto;
 }
 #files-tree-collapse:hover { background: rgba(255, 255, 255, .06); color: var(--text); }
+
+/* bug-78: drag handle for resizing #files-tree-pane horizontally.
+   5px-wide vertical strip that sits between #files-tree-pane and
+   #files-view-pane (HTML places it as a sibling so it lives in the
+   flexbox flow at the natural seam). Hover brightens; .dragging
+   stays bright while the user holds the drag. The handle is
+   intentionally narrow so it doesn't visually crowd the tree;
+   the hit area is widened slightly via a pseudo-element so the user
+   doesn't have to be pixel-precise. */
+.files-tree-resize-handle {
+  flex: 0 0 5px;
+  width: 5px;
+  background: rgba(255, 255, 255, .04);
+  cursor: col-resize;
+  position: relative;
+  transition: background .12s ease;
+  user-select: none;
+  z-index: 32;     /* above #files-wrap content, matches the tree pane stacking */
+}
+.files-tree-resize-handle::before {
+  /* Wider invisible hit zone so the handle is easy to grab on
+     trackpads / imprecise mice. */
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+.files-tree-resize-handle:hover,
+.files-tree-resize-handle.dragging {
+  background: rgba(56, 139, 253, .45);
+}
+/* bug-78: hide the handle in the collapsed-strip state — the 36px
+   strip is too narrow for a useful drag affordance and the handle
+   would overlap the ▶ expand button visually. */
+#files-wrap.files-tree-collapsed .files-tree-resize-handle {
+  display: none;
+}
+/* bug-78: mobile no-op. Below 900px the files pane is an overlay and
+   drag-resize would fight touch scroll on the tree list. Matches the
+   bindChatpaneResize mobile convention. */
+@media (max-width: 900px) {
+  .files-tree-resize-handle {
+    display: none;
+  }
+}
 
 /* fr-77 r3: "Changed files" section moved from Files view → Plan view.
    Sits as a peer of #artifact-body-plan inside #plan-wrap (which is

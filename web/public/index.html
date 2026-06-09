@@ -355,6 +355,13 @@
                browsing; click-to-open-diff is now click-to-expand-inline
                on the Plan-view list. -->
         </div>
+        <!-- bug-78: drag handle for resizing #files-tree-pane horizontally.
+             Mirrors the bindChatpaneResize pattern (handle is a sibling
+             of the pane it resizes, not a child, so the pane can stay
+             overflow-hidden without clipping the cursor target). Hidden
+             on the collapsed-strip state + on mobile via CSS. JS wiring
+             lives in bindFilesTreeResize(). -->
+        <div id="files-tree-resize" class="files-tree-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize file tree pane" title="Drag to resize · double-click to reset"></div>
         <div id="files-view-pane" hidden>
           <!-- bug-33: header is two stacked rows so the breadcrumb path
                gets its own row and isn't crammed against the action
