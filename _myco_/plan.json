@@ -6144,7 +6144,9 @@
       "addedAt": "2026-06-10T03:13:58.298Z",
       "addedBy": "kkrazy",
       "source": "user",
-      "voters": [],
+      "voters": [
+        "kkrazy"
+      ],
       "comments": [],
       "meta": {
         "rewriteRequested": "long",

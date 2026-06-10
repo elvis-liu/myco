@@ -3348,6 +3348,24 @@ test_chat_window() {
   # checks on the legacy short-circuit + the resolveCritique fire
   # path's unchanged contract.
   node_test_result test/bug-83-final-critique-only-after-verify.test.js "test/bug-83-final-critique-only-after-verify.test.js (5 cases)"
+  # bug-84 (pending-verdict sidebar badge): the verdict-broadcast +
+  # fr-98 attach-replay infrastructure was correct, but there was no
+  # cross-session DISCOVERY surface — when a verdict fired in session
+  # A while the user worked in session B, the user had zero indicator
+  # that A needed attention. They'd type "continue" out of
+  # impatience, which routed to claude (or chat-accept) and silently
+  # advanced stages without ever surfacing the modal. Fix: sessions.js
+  # exports hasPendingVerdict(rec) mirroring fr-98's exact replay
+  # precondition (lastCriticReview set AND stageState.status is
+  # awaiting_verdict OR awaiting_accept); index.js GET /sessions
+  # enrichment adds s.pendingVerdict per session; app.js
+  # renderSessionList renders a .session-verdict-pending badge when
+  # the flag is true. The 3s sidebar poll picks up the badge,
+  # clicking the card triggers openSession → fr-98 replay → modal
+  # appears. 12 cases — static guards on the server enrichment,
+  # client render, CSS rule + runtime asserts on the helper across
+  # all stageState + lastCriticReview shapes.
+  node_test_result test/bug-84-pending-verdict-sidebar-badge.test.js "test/bug-84-pending-verdict-sidebar-badge.test.js (12 cases)"
   # fr-92: mobile users can't access composer history since touch
   # devices have no arrow keys. Add a touchstart + touchend listener
   # on #chat-input that detects vertical swipes (|dy| >= 30px in

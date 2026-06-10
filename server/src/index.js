@@ -554,11 +554,26 @@ app.get('/sessions', async (req, res) => {
       own = await listSessions(isAuthRequired() ? user : null);
       // Tag owned/owner so the client can label non-owned sessions and
       // open them in viewer (read-only) mode without a share token.
+      // bug-84: also enrich each session with a `pendingVerdict` flag
+      // so the sidebar (polled every 3s) can render a visible
+      // indicator when a verdict modal is waiting in another session.
+      // The flag mirrors fr-98's attach-replay precondition exactly
+      // (sessionsMod.hasPendingVerdict — checks lastCriticReview is
+      // set AND stageState.status is awaiting_verdict OR
+      // awaiting_accept, same conditions fr-98 uses at
+      // attach.js:1807-1810). Result: the badge and the replay are
+      // guaranteed to agree — click the badged session card, fr-98
+      // replays the modal on the fresh attach. Without this surface,
+      // the user has no cross-session visibility into pending verdicts
+      // and tends to type "continue" out of impatience, which routes
+      // to claude (or chat-accept) and silently advances stages
+      // without the user ever seeing the modal.
       for (const s of own) {
         if (!isAuthRequired()) { s.owned = true; continue; }
         const rec = getSessionRecord(s.id);
         s.owned = !!(rec && rec.user === user);
         if (!s.owned && rec) s.owner = rec.user || null;
+        s.pendingVerdict = sessionsMod.hasPendingVerdict(rec);
       }
     }
     // Also include sessions the user has accessed via share tokens.

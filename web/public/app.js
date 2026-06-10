@@ -1529,9 +1529,23 @@ function renderSessionList() {
         visibilityBadge = `<span class="visibility-badge visibility-shared" title="${tip}">${label}</span>`;
       }
     }
+    // bug-84: cross-session pending-verdict indicator. The server's
+    // GET /sessions enrichment sets s.pendingVerdict=true when any
+    // of the session's plan items has a verdict modal waiting (same
+    // condition fr-98 uses for attach-replay). Without this badge,
+    // users working in a different session had zero indicator that
+    // session A had a critic verdict waiting — they'd type
+    // "continue" out of impatience, which routes to claude (or
+    // chat-accept) and silently advances stages without ever
+    // surfacing the modal. With the badge, the user sees the
+    // indicator within ~3s (sidebar poll), clicks the card, and
+    // fr-98 replays the modal on the fresh attach.
+    const verdictBadge = s.pendingVerdict
+      ? `<span class="session-verdict-pending" title="A verdict modal is waiting in this session — click to review.">📋</span>`
+      : '';
     li.innerHTML = `
       ${statusDot}
-      <span class="session-title">${escHtml(dirName)}${sharedBadge}${visibilityBadge}</span>
+      <span class="session-title">${escHtml(dirName)}${sharedBadge}${visibilityBadge}${verdictBadge}</span>
       ${summary}
       <span class="session-meta">${escHtml(idShort)} · ${timeAgo(s.last_activity || s.created_at)}</span>
       ${s.owned && !s.shared ? '<button class="session-share" aria-label="Share session">↗</button>' : ''}

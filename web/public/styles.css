@@ -400,6 +400,34 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   color: #8cc5ff;
 }
 
+/* bug-84: cross-session pending-verdict badge. Rendered next to the
+   session title when the server's GET /sessions enrichment marks the
+   session as having a verdict modal waiting. Lavender ring matches
+   the critic-surface color identity (verdict-intermediate-badge,
+   verdict-reopen-pill from bug-72). Subtle pulse draws the eye
+   without being distracting; honors prefers-reduced-motion. */
+.session-verdict-pending {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-size: .8rem;
+  padding: 0 4px;
+  border-radius: 50%;
+  background: rgba(187, 134, 252, .18);
+  box-shadow: 0 0 0 1px rgba(187, 134, 252, .45);
+  cursor: pointer;
+  animation: bug-84-verdict-pulse 2s ease-in-out infinite;
+}
+@keyframes bug-84-verdict-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(187, 134, 252, .45); }
+  50%      { box-shadow: 0 0 0 4px rgba(187, 134, 252, .22); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-verdict-pending {
+    animation: none;
+  }
+}
+
 .empty { padding: 16px; color: var(--muted); font-size: .85rem; }
 
 /* Delete (×) button on a card. Hidden by default. Revealed on hover for

@@ -91,6 +91,40 @@ function _findEnclosingSession(absCwd, store) {
   return null;
 }
 
+// bug-84: helper that returns true when a session record has any plan
+// item awaiting a verdict the user hasn't resolved yet. Mirrors the
+// EXACT condition fr-98's attach-replay uses (attach.js:1807-1810) so
+// the sidebar badge and the attach-replay are guaranteed to agree:
+// if the badge is shown, fr-98 WILL replay the verdict on the next
+// attach to that session. The check is OR across all plan items —
+// any pending verdict flips the flag.
+//
+// Used by:
+//   · GET /sessions enrichment (index.js) — surface the flag to the
+//     sidebar so the user sees a "verdict pending" indicator while
+//     they work in a different session, without having to remember
+//     which sessions had a critic fire.
+//   · Future code that wants a stateless "does this session need
+//     attention?" probe — the same condition + the same export point.
+//
+// Returns false defensively when rec is null, has no artifacts, or
+// has no plan items.
+function hasPendingVerdict(rec) {
+  if (!rec || !rec.artifacts || !rec.artifacts.plan) return false;
+  const items = rec.artifacts.plan.items;
+  if (!Array.isArray(items) || items.length === 0) return false;
+  for (const it of items) {
+    if (!it || !it.meta) continue;
+    const lastCriticReview = it.meta.lastCriticReview;
+    const stageState = it.meta.stageState;
+    if (!lastCriticReview) continue;
+    if (!stageState) continue;
+    const s = stageState.status;
+    if (s === 'awaiting_verdict' || s === 'awaiting_accept') return true;
+  }
+  return false;
+}
+
 // bug-80: boot-time normalization. Scans the loaded store and removes
 // entries whose absCwd is enclosed by another entry's absCwd (the dirty
 // state the bug-80 reporter has — see _myco_/logs and the user's repro:
@@ -1712,6 +1746,10 @@ Object.assign(module.exports, {
   // or run an ad-hoc cleanup.
   _findEnclosingSession,
   _normalizeNestedSessions,
+  // bug-84: shared with GET /sessions enrichment + the regression
+  // test. Mirrors fr-98's attach-replay precondition so the sidebar
+  // badge and the replay are guaranteed to agree.
+  hasPendingVerdict,
   ensureLiveSession,
   sessionBelongsToUser,
   deleteSession,
