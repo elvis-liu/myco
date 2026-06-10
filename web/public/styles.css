@@ -449,6 +449,14 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   display: none;
 }
 .diagram-lightbox-content {
+  /* fr-99 patch (2026-06-10): use explicit width (not max-width) so
+     mermaid SVGs — which ship with a viewBox but no width attribute
+     and only style.maxWidth — actually have a non-zero containing
+     block to size against. With max-width:90vw + a flex parent +
+     child SVG without explicit width, the content div shrank to 0
+     and the SVG rendered invisible (user-reported with a flowchart
+     SVG of viewBox 2293×244 — modal showed empty card). */
+  width: 90vw;
   max-width: 90vw;
   max-height: 90vh;
   overflow: auto;
@@ -457,14 +465,20 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   padding: 16px;
   box-shadow: 0 12px 48px rgba(0, 0, 0, .6);
   cursor: default;
+  box-sizing: border-box;
 }
 .diagram-lightbox-content > svg,
 .diagram-lightbox-content > img {
   display: block;
+  /* fr-99 patch: width:100% (was auto) so SVGs without an intrinsic
+     width get sized by their parent. height:auto preserves aspect
+     from the viewBox. max-height keeps very tall diagrams within
+     the viewport. margin auto centers narrow content. */
+  width: 100%;
+  height: auto;
   max-width: 100%;
   max-height: 86vh;
-  height: auto;
-  width: auto;
+  margin: 0 auto;
 }
 .diagram-lightbox-close {
   position: absolute;

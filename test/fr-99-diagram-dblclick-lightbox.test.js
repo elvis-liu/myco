@@ -187,6 +187,42 @@ t('styles.css: .diagram-lightbox-content scales to 90vw / 90vh', () => {
     'fr-99: .diagram-lightbox-content must cap height at ~90vh.');
 });
 
+t('styles.css patch (2026-06-10): .diagram-lightbox-content has EXPLICIT width (not just max-width)', () => {
+  // User-reported repro: a mermaid flowchart SVG with viewBox 2293×244
+  // (no width attribute, only style.maxWidth set by mermaid) opened
+  // the modal but rendered invisibly inside an empty card. Root cause:
+  // .diagram-lightbox-content used max-width:90vw but no explicit
+  // width. In a flex parent that's align-items:center +
+  // justify-content:center, the div shrunk to its content size; the
+  // cloned SVG had no width attribute so its containing block was 0
+  // → SVG rendered at 0×0 → invisible.
+  //
+  // Fix: explicit `width: 90vw` (or similar non-percent value relative
+  // to the viewport) so the content card has a defined size that the
+  // cloned SVG/img can fill.
+  const at = STYLES_CSS.search(/\.diagram-lightbox-content\s*\{/);
+  const block = STYLES_CSS.slice(at, at + 1000);
+  // Must contain a `width: <value>` (not just max-width). Match
+  // common shapes: width:90vw, width:100%, width:auto wouldn't help
+  // — accept anything that explicitly sets `width:` outside the
+  // max-width prefix.
+  const widthMatches = [...block.matchAll(/(^|[^-])\bwidth\s*:\s*[^;]+/gm)];
+  assert.ok(widthMatches.length > 0,
+    'fr-99 patch: .diagram-lightbox-content must set an explicit `width:` (not just max-width). Without an explicit width, mermaid SVGs without a width attribute render at 0×0 inside a flex-centered parent — the user-reported "modal shows but image is invisible" repro.');
+});
+
+t('styles.css patch (2026-06-10): the cloned svg/img child gets width:100% so it fills the content card', () => {
+  // Companion to the above: even with the content card sized, the
+  // SVG needs to be told to fill it. width:auto leaves the SVG at
+  // its intrinsic size (which for mermaid is unspecified → tiny).
+  // width:100% forces the SVG to span the content card's width;
+  // height:auto preserves the viewBox aspect ratio.
+  const block = STYLES_CSS.match(/\.diagram-lightbox-content\s*>\s*svg[\s\S]*?\{[\s\S]*?\}/);
+  assert.ok(block, 'fr-99: a `.diagram-lightbox-content > svg` (or img) ruleset must exist for the cloned diagram styling.');
+  assert.ok(/width\s*:\s*100%/.test(block[0]),
+    'fr-99 patch: the cloned svg/img child must set width:100% so it fills the content card. width:auto leaves SVGs without an intrinsic width at 0 — exact user-reported repro.');
+});
+
 t('styles.css: prefers-reduced-motion suppresses any fade-in animation', () => {
   // Any fade-in animation on the lightbox must honor prefers-reduced-
   // motion per accessibility best practice.

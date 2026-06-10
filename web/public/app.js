@@ -684,16 +684,22 @@ function _openDiagramLightbox(srcElement) {
   // Clone so the inline render survives. Deep clone preserves SVG
   // children (paths, text, etc.) AND <img> attributes.
   const clone = srcElement.cloneNode(true);
-  // Strip inline sizing so the CSS cap takes over. Mermaid SVGs ship
-  // with explicit `width=NNNpx height=NNNpx` attrs that would otherwise
-  // overflow the viewport.
+  // Strip inline sizing so the .diagram-lightbox-content CSS takes
+  // over. Mermaid SVGs ship with explicit `width="…" height="…"`
+  // attrs AND inline `style.maxWidth` that together would render the
+  // diagram at its original inline size instead of fitting the
+  // lightbox. Clearing both lets the lightbox CSS size it to
+  // width:100% of a 90vw content card (fr-99 patch 2026-06-10 —
+  // user reported the modal showing an empty card with a wide
+  // flowchart SVG because the CSS used max-width without an
+  // explicit width and the SVG had no intrinsic width).
   clone.removeAttribute('width');
   clone.removeAttribute('height');
   if (clone.style) {
     clone.style.width = '';
     clone.style.height = '';
-    clone.style.maxWidth = '100%';
-    clone.style.maxHeight = '90vh';
+    clone.style.maxWidth = '';
+    clone.style.maxHeight = '';
   }
   content.innerHTML = '';
   content.appendChild(clone);
