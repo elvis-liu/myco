@@ -109,8 +109,11 @@ parse_args() {
       --skip-post-checks)      SKIP_POST_CHECKS=1; shift ;;
       --dry-run)               DRY_RUN=1; shift ;;
       --allow-github-user)     [ -n "${2:-}" ] || die "--allow-github-user requires a GitHub login"
-                               ADD_ALLOW="$2"; shift 2 ;;
-      --allow-github-user=*)   ADD_ALLOW="${1#--allow-github-user=}"; shift ;;
+                               ADD_ALLOW="github:${2}"; shift 2 ;;
+      --allow-github-user=*)   ADD_ALLOW="github:${1#--allow-github-user=}"; shift ;;
+      --allow-gitee-user)      [ -n "${2:-}" ] || die "--allow-gitee-user requires a Gitee login"
+                               ADD_ALLOW="gitee:${2}"; shift 2 ;;
+      --allow-gitee-user=*)    ADD_ALLOW="gitee:${1#--allow-gitee-user=}"; shift ;;
       --set-oauth)             [ -n "${2:-}" ] || die "--set-oauth requires client_id:client_secret"
                                SET_OAUTH="$2"; shift 2 ;;
       --set-oauth=*)           SET_OAUTH="${1#--set-oauth=}"; shift ;;
@@ -219,28 +222,44 @@ warn_if_oauth_unset() {
   fi
 }
 
-# Idempotently add a GitHub login to the allowlist on the remote. Echoes
-# 'added' or 'unchanged'.
-allow_github_user() {
-  local login="$1"
-  if ! [[ "$login" =~ ^[a-zA-Z0-9_-]{1,24}$ ]]; then
-    die "invalid GitHub login '$login' (1-24 chars [A-Za-z0-9_-])"
+# Idempotently add a user to the allowlist on the remote.
+# Format: provider:username (e.g. github:alice, gitee:bob).
+# Echoes 'added' or 'unchanged'.
+allow_user() {
+  local entry="$1"
+  # Validate format: provider:username
+  if [[ "$entry" == *":"* ]]; then
+    local provider="${entry%%:*}"
+    local login="${entry#*:}"
+    if ! [[ "$provider" =~ ^(github|gitee)$ ]]; then
+      die "invalid provider '$provider' (expected github or gitee)"
+    fi
+    if ! [[ "$login" =~ ^[a-zA-Z0-9_-]{1,24}$ ]]; then
+      die "invalid login '$login' (1-24 chars [A-Za-z0-9_-])"
+    fi
+  else
+    # Legacy format: bare username, default to github
+    if ! [[ "$entry" =~ ^[a-zA-Z0-9_-]{1,24}$ ]]; then
+      die "invalid login '$entry' (1-24 chars [A-Za-z0-9_-])"
+    fi
+    entry="github:$entry"
   fi
-  step "Allowlisting GitHub user '$login'"
+
+  step "Allowlisting user '$entry'"
   ensure_state_dir
   ensure_allowlist_seed
   local result
-  result=$(remote "LOGIN='$login' AL='$STATE_DIR/allowed-github-users.txt' bash -s" <<'REMOTE_SH'
+  result=$(remote "ENTRY='$entry' AL='$STATE_DIR/allowed-github-users.txt' bash -s" <<'REMOTE_SH'
     set -e
-    if grep -qE "^${LOGIN}\b" "$AL"; then echo unchanged; exit 0; fi
-    echo "$LOGIN" >> "$AL"
+    if grep -qE "^${ENTRY}\b" "$AL"; then echo unchanged; exit 0; fi
+    echo "$ENTRY" >> "$AL"
     echo added
 REMOTE_SH
   )
   case "$result" in
-    added)     ok "allowlist: added '$login'" ;;
-    unchanged) ok "allowlist: '$login' already present" ;;
-    *)         die "allow_github_user: unexpected result '$result'" ;;
+    added)     ok "allowlist: added '$entry'" ;;
+    unchanged) ok "allowlist: '$entry' already present" ;;
+    *)         die "allow_user: unexpected result '$result'" ;;
   esac
 }
 
@@ -575,7 +594,7 @@ main() {
   # Single-shot config flags: do the operation and exit, no build/ship.
   if [ -n "$ADD_ALLOW" ]; then
     open_ssh
-    allow_github_user "$ADD_ALLOW"
+    allow_user "$ADD_ALLOW"
     exit 0
   fi
   if [ -n "$SET_OAUTH" ]; then

@@ -445,7 +445,11 @@
       </a>
       <div class="login-divider"><span>or use a Personal Access Token</span></div>
       <form id="login-pat-form" autocomplete="off">
-        <input id="login-pat" type="password" placeholder="GitHub token (ghp_…) or Gitee token…" autocomplete="off" spellcheck="false" />
+        <select id="login-pat-provider">
+          <option value="github">GitHub</option>
+          <option value="gitee">Gitee</option>
+        </select>
+        <input id="login-pat" type="password" placeholder="Personal Access Token…" autocomplete="off" spellcheck="false" />
         <button id="login-pat-submit" type="submit">Sign in with token</button>
       </form>
       <p class="login-hint login-fineprint">

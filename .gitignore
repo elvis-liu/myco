@@ -14,3 +14,4 @@ nohup.out
 # bleed across machines / users.
 .claude/settings.local.json
 _myco_/
+.idea/

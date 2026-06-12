@@ -94,7 +94,7 @@ function _isKnownChatUser(word) {
     }
   } catch {}
   try {
-    const allow = authMod.loadAllowlist();
+    const allow = authMod.getAllAllowedLogins();
     if (allow && typeof allow.has === 'function') {
       for (const u of allow) {
         if (String(u || '').toLowerCase() === w) return true;

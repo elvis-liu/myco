@@ -1146,18 +1146,20 @@ async function doLogout() {
 // exactly like the OAuth-callback path.
 async function doPatLogin() {
   const input = document.getElementById('login-pat');
+  const providerSelect = document.getElementById('login-pat-provider');
   const btn = document.getElementById('login-pat-submit');
   const errEl = document.getElementById('login-error');
   if (!input || !btn) return;
   const pat = (input.value || '').trim();
   if (!pat) { input.focus(); return; }
+  const provider = providerSelect ? providerSelect.value : 'github';
   btn.disabled = true;
   if (errEl) errEl.hidden = true;
   try {
     const res = await fetch('/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: pat }),
+      body: JSON.stringify({ token: pat, provider }),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok || !body.token) {

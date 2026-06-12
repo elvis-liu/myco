@@ -112,6 +112,7 @@ const {
   mintSession, revokeSession, loadAllowlist, isAllowed,
   createShareToken, shareTokenInfo, revokeShareTokensForSession,
   addUserToAllowlist, removeUserFromAllowlist,
+  KNOWN_PROVIDERS,
 } = require('./auth');
 const logCapture = require('./logCapture');
 const { startSummaryWatcher } = require('./summarizer');
@@ -318,7 +319,7 @@ app.get('/auth/github/callback', async (req, res) => {
   if (!login) {
     return _renderHtml(res, 400, `<h1>Login failed</h1><p>GitHub returned no login.</p>`);
   }
-  if (!isAllowed(login)) {
+  if (!isAllowed(login, 'github')) {
     return _renderHtml(res, 403,
       `<h1>Not invited yet</h1>` +
       `<p>Hi <code>${escHtmlServer(login)}</code> — your GitHub login isn't on the allowlist.</p>` +
@@ -366,63 +367,44 @@ app.post('/auth/login', async (req, res) => {
   if (!pat) return res.status(400).json({ error: 'token required' });
   if (pat.length < 8) return res.status(400).json({ error: 'token looks too short' });
 
+  // Accept explicit provider from frontend (default: github)
+  const provider = String((req.body && req.body.provider) || 'github').toLowerCase();
+  if (!KNOWN_PROVIDERS.has(provider)) {
+    return res.status(400).json({ error: `unknown provider: ${provider}` });
+  }
+
   let user;
-  let provider = 'github';
-  
+
   const bypass = String(process.env.MYCO_TEST_OAUTH_BYPASS || '').trim();
   if (bypass && pat.startsWith('test-token-')) {
     const login = pat.slice(11);
     console.log(`[login] Test bypass active. Resolving GitHub user: ${login}`);
     user = { login, id: 100000 + login.split('').reduce((a, c) => a + c.charCodeAt(0), 0), name: login, avatar_url: '' };
-    provider = 'github';
   } else if (bypass && pat.startsWith('test-gitee-token-')) {
     const login = pat.slice(17);
     console.log(`[login] Test bypass active. Resolving Gitee user: ${login}`);
     user = { login, id: 200000 + login.split('').reduce((a, c) => a + c.charCodeAt(0), 0), name: login, avatar_url: '' };
-    provider = 'gitee';
   } else {
-    // Heuristic: Gitee PATs are typically 32-character hexadecimal/opaque strings, or start with gitee_pat_
-    const isLikelyGitee = pat.startsWith('gitee_') || /^[a-f0-9]{32}$/i.test(pat);
-    
-    if (isLikelyGitee) {
-      try {
-        console.log('[login] Token structure suggests Gitee. Trying Gitee API first.');
-        user = await gitHosts.fetchUser({ provider: 'gitee', token: pat });
-        provider = 'gitee';
-      } catch (err) {
-        console.log('[login] Gitee validation failed, trying GitHub as fallback. Error:', err.message);
-        try {
-          user = await oauth.fetchUser(pat);
-          provider = 'github';
-        } catch (ghErr) {
-          return res.status(401).json({ error: `Gitee and GitHub both rejected the token. Gitee error: ${err.message}. GitHub error: ${ghErr.message}` });
-        }
-      }
-    } else {
-      try {
-        console.log('[login] Trying GitHub API first.');
-        user = await oauth.fetchUser(pat);
-        provider = 'github';
-      } catch (err) {
-        console.log('[login] GitHub validation failed, trying Gitee as fallback. Error:', err.message);
-        try {
-          user = await gitHosts.fetchUser({ provider: 'gitee', token: pat });
-          provider = 'gitee';
-        } catch (giteeErr) {
-          return res.status(401).json({ error: `GitHub and Gitee both rejected the token. GitHub error: ${err.message}. Gitee error: ${giteeErr.message}` });
-        }
-      }
+    // Direct validation with explicit provider - no smart detection/fallback
+    try {
+      console.log(`[login] Validating token with ${provider} API.`);
+      user = await gitHosts.fetchUser({ provider, token: pat });
+    } catch (err) {
+      console.log(`[login] ${provider} validation failed:`, err.message);
+      return res.status(401).json({ error: `${provider} rejected the token: ${err.message}` });
     }
   }
 
   const login = require('./auth').sanitize(user.login || '');
   if (!login) return res.status(401).json({ error: `${provider} returned no login` });
-  
-  if (!isAllowed(login)) {
+
+  // Check allowlist with provider
+  if (!isAllowed(login, provider)) {
     return res.status(403).json({
       error: `not invited`,
       login,
-      hint: `Ask an admin to run: ./deploy.sh --allow-github-user ${login}`,
+      provider,
+      hint: `Ask an admin to run: ./deploy.sh --allow-${provider}-user ${login}`,
     });
   }
 
@@ -441,7 +423,7 @@ app.post('/auth/login', async (req, res) => {
     name: user.name || null,
     avatarUrl: user.avatar_url || null,
   });
-  
+
   res.json({ ok: true, token: mycoTok, user: { login, name: user.name || null, avatarUrl: user.avatar_url || null } });
 });
 

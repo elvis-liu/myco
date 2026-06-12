@@ -1672,7 +1672,7 @@ function handleAdmin(ctx) {
   // for the revoke path so the owner can always clean up a previously-
   // granted but now-removed-from-allowlist user.
   const auth = require('./auth');
-  if (!revoke && auth.isAuthRequired() && !auth.isAllowed(target)) {
+  if (!revoke && auth.isAuthRequired() && !auth.isAllowed(target, 'github')) {
     ctx.reply(`(/admin: @${target} is not in the invitation allowlist (allowed-github-users.txt). Run \`./deploy.sh --allow-github-user ${target}\` first, then retry.)`);
     return;
   }
@@ -1766,7 +1766,7 @@ function handleShare(ctx) {
     // Allowlist gate on grants only (revoke must always work so the
     // owner can clean up a previously-granted but now-removed-from-
     // allowlist user).
-    if (!revoke && auth.isAuthRequired() && !auth.isAllowed(target)) {
+    if (!revoke && auth.isAuthRequired() && !auth.isAllowed(target, 'github')) {
       replies.push(`(@${target} is not in the invitation allowlist (allowed-github-users.txt). Run \`./deploy.sh --allow-github-user ${target}\` first, then retry.)`);
       continue;
     }

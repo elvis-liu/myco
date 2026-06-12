@@ -1533,6 +1533,18 @@ button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparen
   margin: 0;
 }
 
+#login-pat-provider {
+  background: #2e2e2e;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: .95rem;
+  min-height: 40px;
+  cursor: pointer;
+}
+#login-pat-provider:focus { outline: none; border-color: var(--accent); }
+
 #login-pat {
   background: #2e2e2e;
   color: var(--text);

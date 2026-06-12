@@ -34,6 +34,29 @@ function sanitize(user) {
   return String(user || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
 }
 
+// Known Git providers supported by the allowlist.
+const KNOWN_PROVIDERS = new Set(['github', 'gitee']);
+
+// Parse an allowlist entry with optional provider prefix.
+// Formats: "github:alice", "gitee:bob", or just "alice" (defaults to github).
+// Returns { provider: 'github'|'gitee', login: 'username' } or null if invalid.
+function parseAllowlistEntry(entry) {
+  const raw = String(entry || '').trim();
+  if (!raw) return null;
+  const colonIdx = raw.indexOf(':');
+  if (colonIdx >= 0) {
+    // Has a colon - must be provider:username format
+    if (colonIdx === 0) return null; // No provider before colon
+    const provider = raw.slice(0, colonIdx).toLowerCase();
+    const username = sanitize(raw.slice(colonIdx + 1));
+    if (!KNOWN_PROVIDERS.has(provider) || !username) return null;
+    return { provider, login: username };
+  }
+  // Backward compat: unprefixed defaults to github
+  const login = sanitize(raw);
+  return login ? { provider: 'github', login } : null;
+}
+
 function _ensureDir() {
   try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch {}
 }
@@ -191,6 +214,7 @@ function revokeSession(tok) {
 // Read the allowlist fresh on every check — admins manage it via `deploy.sh
 // --allow-github-user`, which appends to the file on the host. No process
 // restart should be needed for additions to take effect.
+// Returns a Set of normalized "provider:login" strings.
 function loadAllowlist() {
   let raw;
   try { raw = fs.readFileSync(ALLOWLIST_FILE, 'utf8'); }
@@ -199,16 +223,19 @@ function loadAllowlist() {
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
-    const safe = sanitize(trimmed);
-    if (safe) out.add(safe);
+    const parsed = parseAllowlistEntry(trimmed);
+    if (parsed) out.add(`${parsed.provider}:${parsed.login}`);
   }
   return out;
 }
 
-function isAllowed(login) {
+function isAllowed(login, provider = 'github') {
   const safe = sanitize(login);
   if (!safe) return false;
-  return loadAllowlist().has(safe);
+  const normalizedProvider = String(provider).toLowerCase();
+  const allowlist = loadAllowlist();
+  // Check for provider-prefixed entry
+  return allowlist.has(`${normalizedProvider}:${safe}`);
 }
 
 // ── share tokens ────────────────────────────────────────────────────────────
@@ -229,29 +256,46 @@ function shareTokenInfo(tok) {
 
 function revokeShareTokensForSession() {}
 
-function addUserToAllowlist(login) {
+function addUserToAllowlist(login, provider = 'github') {
   const safe = sanitize(login);
   if (!safe) return false;
+  const normalizedProvider = String(provider).toLowerCase();
+  if (!KNOWN_PROVIDERS.has(normalizedProvider)) return false;
+  const entry = `${normalizedProvider}:${safe}`;
   const current = loadAllowlist();
-  if (current.has(safe)) return false;
+  if (current.has(entry)) return false;
   _ensureDir();
   let existing = '';
   try { existing = fs.readFileSync(ALLOWLIST_FILE, 'utf8'); } catch {}
   const separator = (existing && !existing.endsWith('\n')) ? '\n' : '';
-  fs.appendFileSync(ALLOWLIST_FILE, `${separator}${safe}\n`);
+  fs.appendFileSync(ALLOWLIST_FILE, `${separator}${entry}\n`);
   return true;
 }
 
-function removeUserFromAllowlist(login) {
+function removeUserFromAllowlist(login, provider = 'github') {
   const safe = sanitize(login);
   if (!safe) return false;
+  const normalizedProvider = String(provider).toLowerCase();
+  const entry = `${normalizedProvider}:${safe}`;
   const current = loadAllowlist();
-  if (!current.has(safe)) return false;
-  current.delete(safe);
+  if (!current.has(entry)) return false;
+  current.delete(entry);
   _ensureDir();
   const lines = Array.from(current).join('\n') + '\n';
   fs.writeFileSync(ALLOWLIST_FILE, lines);
   return true;
+}
+
+// Get all allowed logins (without provider prefix) for @-mention recognition.
+// Returns a Set of bare usernames.
+function getAllAllowedLogins() {
+  const allowlist = loadAllowlist();
+  const logins = new Set();
+  for (const entry of allowlist) {
+    const parts = entry.split(':');
+    if (parts.length === 2) logins.add(parts[1]);
+  }
+  return logins;
 }
 
 // Eager-load on first require so route handlers see persisted sessions
@@ -275,4 +319,7 @@ module.exports = {
   sanitize,
   addUserToAllowlist,
   removeUserFromAllowlist,
+  KNOWN_PROVIDERS,
+  parseAllowlistEntry,
+  getAllAllowedLogins,
 };
