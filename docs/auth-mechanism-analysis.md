@@ -35,20 +35,21 @@
 
 **流程：**
 ```
-用户粘贴 PAT → /auth/login → 智能识别平台
-→ 调用平台 API 验证 token → 获取用户信息
-→ 白名单检查 → mintSession → 存储 token
+前端选择平台 + 粘贴 PAT → /auth/login (body.provider=xxx)
+→ 调用指定平台 API 验证 token → 获取用户信息
+→ 白名单检查(provider:login) → mintSession → 存储 token
 ```
 
-**智能识别逻辑（`server/src/index.js` line 385-404）：**
-- Gitee PAT 通常为 32 字符十六进制或以 `gitee_` 开头
-- 先尝试 Gitee API，失败则回退到 GitHub
-- 非 Gitee 格式的 token 优先尝试 GitHub API
+**显式平台选择（重构后）：**
+- 前端必须传递 `provider` 参数（`github` 或 `gitee`）
+- 不再使用智能识别/fallback 逻辑
+- 单一平台验证，失败直接返回错误
 
 **关键代码位置：**
-- `server/src/index.js` line 364-427 - `/auth/login` 路由
+- `server/src/index.js` line 367-423 - `/auth/login` 路由
 - `server/src/git-hosts.js` - 多平台适配层
 - `server/src/git-tokens.js` - Token 存储管理
+- `server/src/auth.js` - `KNOWN_PROVIDERS` 平台集合
 
 ### 1.3 无认证模式（开发模式）
 
@@ -136,15 +137,26 @@
 
 **存储位置：**
 - `$MYCO_STATE_DIR/allowed-github-users.txt`
-- 格式：每行一个 GitHub login，支持 `#` 注释
+- 格式支持两种：
+  - **新格式（推荐）：** `provider:login`（如 `github:alice`, `gitee:bob`）
+  - **向后兼容：** 无前缀 `login`（默认为 GitHub）
 
 **管理方式：**
-- `./scripts/deploy.sh --allow-github-user <login>` - 添加用户（无需重启容器）
-- `isAllowed(login)` - 检查白名单（每次登录实时读取文件）
+- `./scripts/deploy.sh --allow-github-user <login>` - 添加 GitHub 用户（写入 `github:<login>`）
+- `./scripts/deploy.sh --allow-gitee-user <login>` - 添加 Gitee 用户（写入 `gitee:<login>`）
+- 无需重启容器，实时生效
+
+**核心 API（`server/src/auth.js`）：**
+- `isAllowed(login, provider)` - 检查白名单（支持平台区分）
+- `addUserToAllowlist(login, provider)` - 添加用户
+- `removeUserFromAllowlist(login, provider)` - 删除用户
+- `parseAllowlistEntry(entry)` - 解析条目（返回 `{provider, login}`）
+- `getAllAllowedLogins()` - 获取所有用户名（用于 @ 提示，返回无前缀的 login）
 
 **特性：**
+- **平台区分：** 不同平台可以使用不同的 login（GitHub 的 `alice` vs Gitee 的 `alice_dev`）
 - **实时生效：** 添加白名单无需重启服务器
-- **内存无缓存：** 每次验证都重新读取文件，确保管理员修改立即生效
+- **内存无缓存：** 每次验证都重新读取文件
 
 ### 2.4 Share Token（会话分享）
 
@@ -182,9 +194,9 @@ async function createIssue(opts) {
 - Myco session token 不绑定特定平台
 - 用户可以同时持有 GitHub 和 Gitee 的 Git token
 
-### 3.2 扩展新平台的痛点
+### 3.2 扩展新平台的痛点（已部分解决）
 
-#### a) OAuth 流程缺乏抽象
+#### a) OAuth 流程缺乏抽象（未解决）
 
 **问题：**
 - `oauth.js` **硬编码 GitHub OAuth**
@@ -214,10 +226,10 @@ async function createIssue(opts) {
    - 或重构为统一的多平台登录入口
 ```
 
-#### b) 缺少 Provider 注册机制
+#### b) 缺少 Provider 注册机制（未解决）
 
 **当前状态：**
-- `KNOWN_PROVIDERS` 是硬编码的 Set
+- `KNOWN_PROVIDERS` 是硬编码的 Set（`['github', 'gitee']`）
 - 新增平台需要手动修改多个文件的常量
 
 **理想设计：**
@@ -236,57 +248,61 @@ class ProviderRegistry {
 providers.get('gitlab').oauth.startUrl(state);
 ```
 
-#### c) PAT 登录的智能识别不够通用
+#### c) PAT 登录已改为显式平台选择（已解决 ✓）
 
-**当前问题：**
-- Gitee 的识别逻辑（`gitee_` 前缀或 32 位十六进制）是硬编码
-- GitLab、Bitbucket 等平台的 PAT 格式未知，需要新增识别规则
+**改进后的设计：**
+- 前端传递显式 `provider` 参数（不再智能猜测）
+- 后端单一验证，无 fallback 逻辑
+- 新增平台只需：
+  1. 在 `KNOWN_PROVIDERS` 添加平台名
+  2. 在 `git-hosts.js` 实现 `fetchUser({ provider, token })`
+  3. 前端添加平台选择选项
 
-**改进方向：**
-- 用户在登录界面**手动选择平台**（下拉菜单）
-- 或提供 `/auth/login/<provider>` 的明确路由
-
-#### d) 白名单绑定 GitHub login
+#### d) 白名单已支持平台区分（已解决 ✓）
 
 **当前设计：**
-- `allowed-github-users.txt` 存储 GitHub login
-- Gitee 用户使用相同白名单（假设 login 相同）
+- `allowed-github-users.txt` 支持 `provider:login` 格式
+- `--allow-github-user` 写入 `github:<login>`
+- `--allow-gitee-user` 写入 `gitee:<login>`
+- 向后兼容无前缀格式（默认 GitHub）
 
-**问题：**
-- 不同平台的 login 可能不同（GitHub 的 `alice` vs GitLab 的 `alice_dev`）
-- 白名单机制需要支持平台区分
-
-**改进方案：**
+**示例：**
 ```
-# allowed-users.txt（新格式）
+# allowed-github-users.txt
 github:alice
 gitee:alice_dev
-gitlab:alice_lab
+gitlab:alice_lab   # 未来扩展
 ```
 
-### 3.3 扩展性评分
+### 3.3 扩展性评分（更新后）
 
 | 维度 | 当前状态 | 扩展难度 | 说明 |
 |------|---------|---------|------|
 | Git 操作 | 已抽象 | ⭐⭐ 低 | 新增 `_createIssueGitlab` 等函数即可 |
 | Token 存储 | 已抽象 | ⭐ 很低 | 两级 key 结构天然支持多平台 |
 | OAuth 登录 | 硬编码 | ⭐⭐⭐⭐ 高 | 需重构路由 + OAuth 模块 |
-| PAT 登录 | 半抽象 | ⭐⭐⭐ 中 | 智能识别 + 手动选择双路径 |
-| 白名单 | 单平台 | ⭐⭐⭐ 中 | 需支持平台前缀格式 |
+| PAT 登录 | 已抽象 ✓ | ⭐ 很低 | 显式 provider 参数，无智能识别 |
+| 白名单 | 已抽象 ✓ | ⭐ 很低 | 支持 provider:login 格式 |
 | 前端 UI | 单按钮 | ⭐⭐⭐ 中 | 需多平台登录入口 |
 
-### 3.4 推荐的扩展路线
+### 3.4 推荐的扩展路线（更新后）
+
+#### 已完成 ✓
+1. **白名单支持平台前缀** - `provider:login` 格式已实现
+2. **PAT 登录显式平台选择** - 移除智能识别，前端传递 `provider` 参数
 
 #### 短期（最小改动）
 1. **保持 GitHub OAuth 为主**，新增平台仅支持 PAT 登录
-2. 在 `/auth/login` 增加平台选择参数（用户手动指定）
-3. 扩展 `git-hosts.js` 的 API 适配（工作量小）
+2. 新增平台只需修改：
+   - `server/src/auth.js` - `KNOWN_PROVIDERS.add('gitlab')`
+   - `server/src/git-hosts.js` - 实现 `fetchUser` 和 issue API
+   - 前端登录界面 - 添加平台下拉选择
+3. 白名单命令已支持：`--allow-<provider>-user`
 
 #### 中期（完善架构）
 1. 创建 `providers.js` 注册机制，统一管理平台适配器
 2. OAuth 路由重构为 `/auth/<provider>/start`
-3. 白名单支持平台前缀格式
-4. 前端登录界面提供多平台选择
+3. 前端登录界面提供多平台选择（已有 provider 参数基础）
 
 #### 长期（插件化）
 1. 提供第三方 Provider 插件接口（npm package）
@@ -335,24 +351,28 @@ gitlab:alice_lab
 
 **优点：**
 - GitHub OAuth 流程成熟稳定
-- PAT 登录已支持 GitHub + Gitee 双平台
+- PAT 登录已支持 GitHub + Gitee 双平台（显式 provider 选择）
 - Token 存储架构清晰（两级 key）
 - Git 操作已有多平台抽象
+- **白名单已支持平台区分**（`provider:login` 格式）
+- **PAT 登录已移除智能识别**（前端显式选择平台）
 
-**缺点：**
-- OAuth 流程硬编码 GitHub
-- 缺少 Provider 注册机制
-- 白名单仅支持 GitHub login
-- 前端 UI 未提供多平台入口
+**待改进：**
+- OAuth 流程仍硬编码 GitHub（新增 OAuth 平台需重构）
+- 缺少 Provider 注册机制（`KNOWN_PROVIDERS` 硬编码）
+- 前端 UI 未提供多平台登录入口（需添加平台选择）
 
 ### 5.2 扩展建议
 
-#### 最小可行方案（支持新平台 PAT 登录）
+#### 新增 PAT 平台（已简化至 3 文件）
 ```
 修改文件数：3
-工作量：约 2-3 天
+工作量：约 1 天
 风险：低
-影响：不破坏现有 GitHub OAuth 流程
+步骤：
+1. auth.js - KNOWN_PROVIDERS.add('gitlab')
+2. git-hosts.js - 实现 fetchUser + issue API
+3. 前端 app.js - 添加 GitLab 选择项
 ```
 
 #### 完整多平台 OAuth 方案
@@ -374,17 +394,17 @@ gitlab:alice_lab
 ### 5.3 下一步行动
 
 1. **评估需求：** 确定是否需要 OAuth 登录支持新平台，还是 PAT 登录已足够
-2. **原型验证：** 选择一个平台（如 GitLab）实现 PAT 登录原型，评估工作量
+2. **原型验证：** 选择一个平台（如 GitLab）实现 PAT 登录原型（工作量已大幅降低）
 3. **架构评审：** 如果决定支持 OAuth，先设计 Provider 注册机制再动手
 4. **安全加固：** 补充 token 权限验证 + share token 访问控制
 
 ---
 
-**分析日期：** 2026-06-12
-**分析基于：** commit `928c74a feat(fr-101): plan-item tags with quick add/delete`
+**分析日期：** 2026-06-12（更新）
+**分析基于：** commit `ea8d95c add analysis docs`
 **核心文件：**
-- `server/src/auth.js` - Session 管理
+- `server/src/auth.js` - Session 管理 + 白名单（已支持 provider:login）
 - `server/src/oauth.js` - GitHub OAuth
 - `server/src/git-tokens.js` - Token 存储
 - `server/src/git-hosts.js` - 多平台适配
-- `server/src/index.js` - 路由处理
+- `server/src/index.js` - 路由处理（PAT 登录已改用显式 provider）

@@ -1,0 +1,74 @@
+{
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "baseUrl": "https://api.anthropic.com/v1",
+      "defaultModel": "claude-sonnet-4-6",
+      "defaultTimeoutMs": 30000,
+      "defaultMaxTokens": 200
+    },
+    "gemini": {
+      "apiKey": "${GEMINI_API_KEY}",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+      "defaultModel": "gemini-2.5-pro",
+      "sampling": {
+        "temperature": 0.2,
+        "topP": 0.8,
+        "maxOutputTokens": 8192
+      }
+    },
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}",
+      "baseUrl": "https://api.openai.com/v1",
+      "defaultModel": "gpt-4o",
+      "sampling": {
+        "temperature": 0.2
+      }
+    },
+    "azure-openai": {
+      "apiKey": "${AZURE_OPENAI_API_KEY}",
+      "baseUrl": "${AZURE_OPENAI_ENDPOINT}",
+      "apiVersion": "2024-02-15-preview",
+      "deploymentName": "gpt-4-deployment",
+      "defaultModel": "gpt-4",
+      "sampling": {
+        "temperature": 0.2
+      }
+    },
+    "custom": {
+      "apiKey": "${CUSTOM_API_KEY}",
+      "baseUrl": "http://localhost:11434/v1",
+      "defaultModel": "llama3",
+      "sampling": {
+        "temperature": 0.2
+      }
+    }
+  },
+  "scenarios": {
+    "agent": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6"
+    },
+    "critic": {
+      "provider": "gemini",
+      "model": "gemini-2.5-pro",
+      "alternatives": ["openai:gpt-4o", "anthropic:claude-haiku-4-5"]
+    },
+    "summarizer": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "extractor": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "btw": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5-20251001"
+    }
+  },
+  "fallback": {
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5-20251001"
+  }
+}

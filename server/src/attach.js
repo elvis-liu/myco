@@ -1846,6 +1846,11 @@ function _sendAttachSnapshot(session, ws) {
       ws.send(JSON.stringify({ t: 'state-update', kind: 'critic-model-changed', modelId: rec.criticModel }));
     }
 
+    // Phase 3: broadcast session model config on attach
+    if (rec.modelConfig) {
+      ws.send(JSON.stringify({ t: 'state-update', kind: 'modelConfig', config: rec.modelConfig }));
+    }
+
     const artifacts = {};
     for (const type of ['plan', 'test', 'arch']) {
       const fromFile = getArtifactsMod().__test.readArtifactFromFile(rec, type);

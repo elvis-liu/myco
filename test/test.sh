@@ -1911,6 +1911,91 @@ test_lastCriticReview_paired_with_stageState() {
   fi
 }
 
+# Phase 2: Model provider configuration (docs/model-provider-config-design.md)
+test_model_provider_config() {
+  # configLoader must exist with required exports
+  [ -f "server/src/models/configLoader.js" ] \
+    && pass "models/configLoader.js exists" \
+    || fail "models/configLoader.js exists"
+  grep -q "module.exports.*resolveEnvVar.*resolveEnvVars.*loadConfig" server/src/models/configLoader.js \
+    && pass "configLoader exports resolveEnvVar, resolveEnvVars, loadConfig" \
+    || fail "configLoader exports resolveEnvVar, resolveEnvVars, loadConfig"
+  # models/index.js must integrate configLoader
+  grep -q "loadConfig, getConfigPath" server/src/models/index.js \
+    && pass "models/index.js imports configLoader" \
+    || fail "models/index.js imports configLoader"
+  grep -q "function reloadConfig" server/src/models/index.js \
+    && pass "models/index.js exports reloadConfig()" \
+    || fail "models/index.js exports reloadConfig()"
+  # Example config file must exist
+  [ -f "server/src/models/models.json.example" ] \
+    && pass "models.json.example exists" \
+    || fail "models.json.example exists"
+  # README for config documentation
+  [ -f "server/src/models/README.md" ] \
+    && pass "models/README.md exists" \
+    || fail "models/README.md exists"
+  # Azure OpenAI provider
+  [ -f "server/src/models/providers/azure-openai.js" ] \
+    && pass "providers/azure-openai.js exists" \
+    || fail "providers/azure-openai.js exists"
+  node_test_result test/configLoader.test.js "test/configLoader.test.js (28 cases)"
+
+  # Phase 3: /model-config slash command and SDK integration
+  grep -q "names: \['model-config', 'mc'\]" server/src/slashcmds.js \
+    && pass "slashcmds: /model-config command registered" \
+    || fail "slashcmds: /model-config command registered"
+  grep -q "function handleModelConfig" server/src/slashcmds.js \
+    && pass "slashcmds: handleModelConfig handler defined" \
+    || fail "slashcmds: handleModelConfig handler defined"
+  grep -q "getSessionModelConfig" server/src/sessions.js \
+    && pass "sessions: getSessionModelConfig helper exported" \
+    || fail "sessions: getSessionModelConfig helper exported"
+  grep -q "setSessionModelConfig" server/src/sessions.js \
+    && pass "sessions: setSessionModelConfig helper exported" \
+    || fail "sessions: setSessionModelConfig helper exported"
+  grep -q "const modelsMod = require('./models')" server/src/agent-session.js \
+    && pass "agent-session: models module imported" \
+    || fail "agent-session: models module imported"
+  grep -q "sdkOpts.model = sessionModelConfig?.model || agentScenario.model" server/src/agent-session.js \
+    && pass "agent-session: model config injected into sdkOpts" \
+    || fail "agent-session: model config injected into sdkOpts"
+  grep -q "/api/model-config/validate" server/src/index.js \
+    && pass "index: /api/model-config/validate endpoint registered" \
+    || fail "index: /api/model-config/validate endpoint registered"
+  grep -q "/api/model-config/reload" server/src/index.js \
+    && pass "index: /api/model-config/reload endpoint registered" \
+    || fail "index: /api/model-config/reload endpoint registered"
+  grep -q "kind: 'modelConfig'" server/src/attach.js \
+    && pass "attach: modelConfig broadcast on attach" \
+    || fail "attach: modelConfig broadcast on attach"
+  node_test_result test/slash-model-config.test.js "test/slash-model-config.test.js (6 cases)"
+  node_test_result test/model-config-integration.test.js "test/model-config-integration.test.js (12 cases)"
+
+  # Phase 4: deploy.sh model config commands
+  grep -q "SET_MODEL_PROVIDER=" scripts/deploy.sh \
+    && pass "deploy.sh: SET_MODEL_PROVIDER variable declared" \
+    || fail "deploy.sh: SET_MODEL_PROVIDER variable declared"
+  grep -q "^set_model_provider()" scripts/deploy.sh \
+    && pass "deploy.sh: set_model_provider() function defined" \
+    || fail "deploy.sh: set_model_provider() function defined"
+  grep -q "^set_scenario_model()" scripts/deploy.sh \
+    && pass "deploy.sh: set_scenario_model() function defined" \
+    || fail "deploy.sh: set_scenario_model() function defined"
+  grep -q "^export_models_config()" scripts/deploy.sh \
+    && pass "deploy.sh: export_models_config() function defined" \
+    || fail "deploy.sh: export_models_config() function defined"
+  grep -q "^ensure_models_json_seed()" scripts/deploy.sh \
+    && pass "deploy.sh: ensure_models_json_seed() function defined" \
+    || fail "deploy.sh: ensure_models_json_seed() function defined"
+  grep -q "\-\-set-model-provider" scripts/deploy.sh \
+    && pass "deploy.sh: --set-model-provider flag in usage" \
+    || fail "deploy.sh: --set-model-provider flag in usage"
+  grep -q "\-\-export-models-config" scripts/deploy.sh \
+    && pass "deploy.sh: --export-models-config flag in usage" \
+    || fail "deploy.sh: --export-models-config flag in usage"
+}
+
 run_static_checks() {
   section "Static checks"
   test_server_js_files
@@ -1940,6 +2025,7 @@ run_static_checks() {
   test_no_pipe_to_grep_q_antipattern
   test_no_direct_main_project_write
   test_lastCriticReview_paired_with_stageState
+  test_model_provider_config
 }
 
 # ─── feature checks ──────────────────────────────────────────────────────────
@@ -5322,6 +5408,90 @@ test_logout() {
     || fail "logged-out token no longer authenticates (got: $resp)"
 }
 
+test_deploy_model_config_commands() {
+  # Test deploy.sh model config commands in local mode
+  # Uses a temporary state directory and MYCO_DEPLOY_HOST=localhost
+
+  local DEPLOY_STATE_DIR DEPLOY_PORT deploy_result models_json
+
+  DEPLOY_STATE_DIR=$(mktemp -d)
+  DEPLOY_PORT=$(free_port)
+
+  pass "deploy model config: created temp state dir $DEPLOY_STATE_DIR"
+
+  # ── 1. --export-models-config on empty state dir (should seed + export) ──
+  deploy_result=$(MYCO_DEPLOY_HOST=localhost MYCO_STATE_DIR="$DEPLOY_STATE_DIR" \
+    ./scripts/deploy.sh --export-models-config 2>/dev/null)
+
+  if [ -n "$deploy_result" ] && grep -q '"providers"' <<<"$deploy_result"; then
+    pass "deploy: --export-models-config outputs valid JSON"
+  else
+    fail "deploy: --export-models-config outputs valid JSON (got: ${deploy_result:0:100})"
+  fi
+
+  # ── 2. Verify models.json was seeded with correct permissions ──
+  if [ -f "$DEPLOY_STATE_DIR/models.json" ]; then
+    pass "deploy: models.json seeded after --export-models-config"
+  else
+    fail "deploy: models.json seeded after --export-models-config"
+  fi
+
+  # Check file permissions (should be 0600 or more restrictive)
+  local perms
+  perms=$(stat -f "%Lp" "$DEPLOY_STATE_DIR/models.json" 2>/dev/null || stat -c "%a" "$DEPLOY_STATE_DIR/models.json" 2>/dev/null)
+  if [ "$perms" = "600" ] || [ "$perms" = "400" ]; then
+    pass "deploy: models.json permissions are 0600"
+  else
+    fail "deploy: models.json permissions are 0600 (got: $perms)"
+  fi
+
+  # ── 3. --set-model-provider to update provider config ──
+  MYCO_DEPLOY_HOST=localhost MYCO_STATE_DIR="$DEPLOY_STATE_DIR" \
+    ./scripts/deploy.sh --set-model-provider anthropic \
+      --model-base-url https://api.anthropic.com/v1 \
+      --model-api-key '${ANTHROPIC_API_KEY}' >/dev/null 2>&1
+
+  models_json=$(cat "$DEPLOY_STATE_DIR/models.json")
+  grep -q '"baseUrl":"https://api.anthropic.com/v1"' <<<"$models_json" \
+    && pass "deploy: --set-model-provider updated baseUrl" \
+    || fail "deploy: --set-model-provider updated baseUrl (got: ${models_json:0:200})"
+  grep -q '"apiKey":"\${ANTHROPIC_API_KEY}"' <<<"$models_json" \
+    && pass "deploy: --set-model-provider preserved ${ENV_VAR} syntax" \
+    || fail "deploy: --set-model-provider preserved ${ENV_VAR} syntax (got: ${models_json:0:200})"
+
+  # ── 4. --set-scenario-model to update scenario default ──
+  MYCO_DEPLOY_HOST=localhost MYCO_STATE_DIR="$DEPLOY_STATE_DIR" \
+    ./scripts/deploy.sh --set-scenario-model critic gemini:gemini-2.5-pro >/dev/null 2>&1
+
+  models_json=$(cat "$DEPLOY_STATE_DIR/models.json")
+  grep -q '"provider":"gemini"' <<<"$models_json" \
+    && pass "deploy: --set-scenario-model updated critic provider" \
+    || fail "deploy: --set-scenario-model updated critic provider"
+  grep -q '"model":"gemini-2.5-pro"' <<<"$models_json" \
+    && pass "deploy: --set-scenario-model updated critic model" \
+    || fail "deploy: --set-scenario-model updated critic model"
+
+  # ── 5. Invalid scenario should fail ──
+  if MYCO_DEPLOY_HOST=localhost MYCO_STATE_DIR="$DEPLOY_STATE_DIR" \
+    ./scripts/deploy.sh --set-scenario-model invalid_scenario gemini:gemini-2.5-pro >/dev/null 2>&1; then
+    fail "deploy: invalid scenario should be rejected"
+  else
+    pass "deploy: invalid scenario rejected"
+  fi
+
+  # ── 6. Invalid provider:model format should fail ──
+  if MYCO_DEPLOY_HOST=localhost MYCO_STATE_DIR="$DEPLOY_STATE_DIR" \
+    ./scripts/deploy.sh --set-scenario-model critic invalid_format >/dev/null 2>&1; then
+    fail "deploy: invalid provider:model format should be rejected"
+  else
+    pass "deploy: invalid provider:model format rejected"
+  fi
+
+  # Cleanup
+  rm -rf "$DEPLOY_STATE_DIR"
+  pass "deploy model config: cleaned up temp state dir"
+}
+
 test_non_owner_sees_session_with_owner_tag() {
   # bob (a non-owner) should see alice's seeded session in /sessions?all=1
   # tagged with owned=false and owner="alice", so the client can render the
@@ -5604,6 +5774,7 @@ run_persistence_checks() {
   test_persist_after_redeploy
   test_pat_login_flow
   test_logout
+  test_deploy_model_config_commands
   test_non_owner_sees_session_with_owner_tag
   test_files_api
   test_file_chat_api

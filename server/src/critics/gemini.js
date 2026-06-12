@@ -1,42 +1,26 @@
-// Gemini critic wrapper. The model + sampling config below were
-// last reviewed 2026-06-07 after `gemini-2.5-flash` started 503ing
-// frequently (Google capacity-shedding on the flash endpoint —
-// "model is currently experiencing high demand" responses on most
-// final-stage fan-out calls). User asked for the bump to -pro as a
-// mitigation. Three calibration changes have shipped historically:
+// Gemini critic wrapper. Delegates to the unified ModelProvider system.
 //
+// The model + sampling config below were last reviewed 2026-06-07 after
+// `gemini-2.5-flash` started 503ing frequently (Google capacity-shedding
+// on the flash endpoint). User asked for the bump to -pro as a mitigation.
+//
+// Historical calibration notes preserved for reference:
 //   1. Model: `gemini-1.5-pro` → `gemini-2.5-flash` (2026-06-02) →
-//      `gemini-2.5-pro` (2026-06-07). 2.5 is the current family. Pro
-//      runs on a different endpoint that's typically under less load
-//      than flash; cost is ~3-5x per call but verdict quality is
-//      sharper too. Bump BACK to `gemini-2.5-flash` when load on -pro
-//      stops being acceptable (or for cost reasons on a high-traffic
-//      project).
+//      `gemini-2.5-pro` (2026-06-07). 2.5 is the current family.
 //   2. Sampling: explicit `temperature: 0.2` (was default 1.0),
-//      `topP: 0.8` (was 0.95). Adversarial code review wants
-//      determinism. Defaults are tuned for creative chat, not
-//      judgment.
+//      `topP: 0.8` (was 0.95). Adversarial code review wants determinism.
 //   3. Failure surface: model + sampling values pulled into named
-//      constants so a future test can grep them + a future model
-//      bump is one place to edit.
+//      constants so a future test can grep them + a future model bump
+//      is one place to edit.
 //
 // 2026-06-03 calibration — maxOutputTokens 1024 → 8192:
-//   The 1024-token cap silently truncated verdicts on large diffs
-//   (>~40k chars). The model's preamble ("Overall Assessment: ...")
-//   alone could consume the entire budget, leaving the actual
-//   verdict line (✓ AGREED / flagged-issues) NEVER WRITTEN. Three
-//   times in a single session, fr-94 Phase 2 + bug-51 + fr-81
-//   Phase A critiques came back as truncated preambles that LOOKED
-//   like "Gemini flagged issues" but were actually unverdicted
-//   buffers. 8192 was empirically verified to fit ~3,800-char
-//   detailed verdicts on a 53k-char diff. Env override
-//   `MYCO_CRITIC_MAX_TOKENS` lets ops bump higher without a code
-//   change if a future critic-prompt change pushes longer.
-const { GoogleGenAI } = require('@google/genai');
+//   The 1024-token cap silently truncated verdicts on large diffs.
+//   8192 was empirically verified to fit ~3,800-char detailed verdicts.
 
+const { getProviderForScenario } = require('../models');
+
+// Named constants for test calibration (must stay in this file)
 const CRITIC_MODEL = 'gemini-2.5-pro';
-// Floor at 4096 to prevent regressing back into the truncation
-// failure mode if someone overrides the env to a small value.
 const CRITIC_MAX_OUTPUT_TOKENS = Math.max(
   4096,
   parseInt(process.env.MYCO_CRITIC_MAX_TOKENS || '', 10) || 8192,
@@ -48,26 +32,22 @@ const CRITIC_SAMPLING = {
 };
 
 async function runCritique(prompt, systemInstruction = '') {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
-  if (!apiKey) {
+  const provider = getProviderForScenario('critic', { preferId: 'gemini' });
+
+  if (!provider || !provider.isAvailable()) {
     return '(Gemini API key missing; please set GEMINI_API_KEY or API_KEY in your environment)';
   }
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const config = {
-      ...CRITIC_SAMPLING,
-      ...(systemInstruction ? { systemInstruction } : {}),
-    };
-    const response = await ai.models.generateContent({
-      model: CRITIC_MODEL,
-      contents: prompt,
-      config,
-    });
-    return response.text.trim();
-  } catch (err) {
-    return `(Gemini call failed: ${err.message})`;
-  }
+  // Allow env override for model and max tokens
+  const model = process.env.MYCO_CRITIC_MODEL || CRITIC_MODEL;
+  const maxOutputTokens = CRITIC_MAX_OUTPUT_TOKENS;
+
+  return provider.call(prompt, systemInstruction, {
+    model,
+    maxOutputTokens,
+    temperature: CRITIC_SAMPLING.temperature,
+    topP: CRITIC_SAMPLING.topP,
+  });
 }
 
 module.exports = {

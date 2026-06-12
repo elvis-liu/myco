@@ -87,6 +87,8 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const sessionsMod = require('./sessions');
+const modelsMod = require('./models');  // Phase 3: model config integration
+const { validateConfig } = require('./models/configLoader');  // Phase 3: config validation
 const { listSessions, spawnSession, sessionBelongsToUser, isOwnerOrAdmin, isOwnerAdminOrViewer, resolveAccessTier, workspaceName, listWorkspaceDirs, ensureLiveSession, deleteSession, importExistingTranscripts, loadStore, saveStore, getSessionRecord, readDescriptionForCwd: readDescriptionForCwdPublic, resolveCwd, getFileChat, getRecentFileChatMessages, appendFileChatMessage, deleteFileChatMessage } = sessionsMod;
 const filesApi = require('./files');
 const { askAboutFile, ASSISTANT_USER } = require('./btw');
@@ -1938,6 +1940,56 @@ app.delete('/api/admin/allowlist/:username', requireAdmin, (req, res) => {
   if (!username) return res.status(400).json({ error: 'Username required' });
   const removed = removeUserFromAllowlist(username);
   res.json({ ok: true, removed });
+});
+
+// Phase 3: model config validation and reload endpoints
+// GET /api/model-config/validate - validate current loaded config
+app.get('/api/model-config/validate', requireAdmin, (req, res) => {
+  const config = modelsMod.getConfig();
+  const result = validateConfig(config);
+  res.json({
+    valid: result.valid,
+    errors: result.errors,
+    warnings: result.warnings,
+    configPath: modelsMod.getConfigPath?.() || null,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// POST /api/model-config/validate - dry-run validation of user-provided config
+app.post('/api/model-config/validate', requireAdmin, (req, res) => {
+  const testConfig = req.body;
+  if (!testConfig || typeof testConfig !== 'object') {
+    return res.status(400).json({ error: 'config body required' });
+  }
+  const result = validateConfig(testConfig);
+  res.json({
+    valid: result.valid,
+    errors: result.errors,
+    warnings: result.warnings,
+    note: 'This is a dry-run validation. No changes were persisted.',
+  });
+});
+
+// POST /api/model-config/reload - reload config from file (admin only)
+app.post('/api/model-config/reload', requireAdmin, (req, res) => {
+  try {
+    modelsMod.reloadConfig();
+    const config = modelsMod.getConfig();
+    const result = validateConfig(config);
+    res.json({
+      ok: true,
+      valid: result.valid,
+      errors: result.errors,
+      warnings: result.warnings,
+      message: 'Configuration reloaded successfully.',
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err.message || 'Failed to reload config',
+    });
+  }
 });
 
 const PORT = parseInt(process.env.PORT, 10) || (tlsEnabled ? 443 : 3000);

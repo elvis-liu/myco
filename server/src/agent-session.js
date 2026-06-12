@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { query } = require('@anthropic-ai/claude-agent-sdk');
+const modelsMod = require('./models');  // Phase 3: model config integration
 
 // Per-session in-memory replay buffer cap. The buffer is hydrated
 // from <cwd>/_myco_/events.jsonl on construction, so this cap is
@@ -434,6 +435,32 @@ class AgentSession extends EventEmitter {
           },
         },
       };
+
+      // Phase 3: inject session-level model config into SDK options
+      // Get session model config from session record
+      let sessionModelConfig = null;
+      try {
+        const rec = sessionsMod.getSessionRecord(this.sessionId);
+        if (rec && rec.modelConfig) {
+          sessionModelConfig = rec.modelConfig;
+        }
+      } catch {}
+
+      // Get global config for default values
+      const globalConfig = modelsMod.getConfig();
+      const agentScenario = globalConfig.scenarios?.agent || globalConfig.fallback || {};
+
+      // Apply precedence: session override > global config > SDK default
+      if (sessionModelConfig?.model || agentScenario.model) {
+        sdkOpts.model = sessionModelConfig?.model || agentScenario.model;
+      }
+      if (sessionModelConfig?.thinking) {
+        sdkOpts.thinking = sessionModelConfig.thinking;
+      }
+      if (sessionModelConfig?.effort) {
+        sdkOpts.effort = sessionModelConfig.effort;
+      }
+
       if (this.sdkSessionId) sdkOpts.resume = this.sdkSessionId;
 
       // fr-45: lint sdkOpts keys against the SDK's documented Options

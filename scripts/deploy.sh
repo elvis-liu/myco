@@ -23,6 +23,11 @@
 #   ./scripts/deploy.sh --allow-github-user <login>    # add a GitHub login to the allowlist (no build/ship)
 #   ./scripts/deploy.sh --set-oauth <id>:<secret>      # write OAuth client_id/secret into .env (no build/ship)
 #   ./scripts/deploy.sh --set-anthropic-key sk-ant-…   # write ANTHROPIC_API_KEY into .env + restart (no build/ship)
+#   ./scripts/deploy.sh --set-model-provider anthropic \
+#                          --model-base-url https://api.anthropic.com/v1 \
+#                          --model-api-key '${ANTHROPIC_API_KEY}'  # update models.json provider config
+#   ./scripts/deploy.sh --set-scenario-model critic gemini:gemini-2.5-pro  # set default model for scenario
+#   ./scripts/deploy.sh --export-models-config        # output models.json to stdout (for backup/migration)
 #   MYCO_DEPLOY_HOST=user@host \
 #   MYCO_STATE_DIR=/path/on/remote ./scripts/deploy.sh
 #
@@ -56,6 +61,12 @@ DRY_RUN=0
 ADD_ALLOW=""
 SET_OAUTH=""
 SET_ANTHROPIC_KEY=""
+SET_MODEL_PROVIDER=""
+MODEL_BASE_URL=""
+MODEL_API_KEY=""
+SET_SCENARIO_MODEL=""
+SCENARIO_MODEL_VALUE=""
+EXPORT_MODELS_CONFIG=0
 
 # Populated by verify_deploy; consumed by post_deploy_checks so the
 # HTTP probes can hit the same domain the version-stamp probe used.
@@ -120,6 +131,18 @@ parse_args() {
       --set-anthropic-key)     [ -n "${2:-}" ] || die "--set-anthropic-key requires the key value"
                                SET_ANTHROPIC_KEY="$2"; shift 2 ;;
       --set-anthropic-key=*)   SET_ANTHROPIC_KEY="${1#--set-anthropic-key=}"; shift ;;
+      --set-model-provider)    [ -n "${2:-}" ] || die "--set-model-provider requires a provider id"
+                               SET_MODEL_PROVIDER="$2"; shift 2 ;;
+      --set-model-provider=*)  SET_MODEL_PROVIDER="${1#--set-model-provider=}"; shift ;;
+      --model-base-url)        [ -n "${2:-}" ] || die "--model-base-url requires a URL"
+                               MODEL_BASE_URL="$2"; shift 2 ;;
+      --model-base-url=*)      MODEL_BASE_URL="${1#--model-base-url=}"; shift ;;
+      --model-api-key)         [ -n "${2:-}" ] || die "--model-api-key requires a key value"
+                               MODEL_API_KEY="$2"; shift 2 ;;
+      --model-api-key=*)       MODEL_API_KEY="${1#--model-api-key=}"; shift ;;
+      --set-scenario-model)    [ -n "${2:-}" ] && [ -n "${3:-}" ] || die "--set-scenario-model requires <scenario> <provider:model>"
+                               SET_SCENARIO_MODEL="$2"; SCENARIO_MODEL_VALUE="$3"; shift 3 ;;
+      --export-models-config)  EXPORT_MODELS_CONFIG=1; shift ;;
       --help|-h)
         sed -n '2,28p' "$0" | sed 's/^# \?//'
         exit 0
@@ -200,6 +223,69 @@ EOF
   esac
 }
 
+# Seed models.json if it doesn't exist yet. The file holds model provider
+# configuration (API keys, base URLs, scenario defaults). We seed from
+# the project's models.json.example template on first deploy.
+ensure_models_json_seed() {
+  local result
+  result=$(remote "
+    MJ='$STATE_DIR/models.json'
+    if [ -f \"\$MJ\" ]; then
+      echo unchanged
+    else
+      # Seed from project template (server/src/models/models.json.example)
+      # The template uses ${ENV_VAR} syntax for API keys — actual values
+      # come from .env or runtime environment.
+      cat > \"\$MJ\" <<'MODELS_EOF'
+{
+  \"providers\": {
+    \"anthropic\": {
+      \"apiKey\": \"\${ANTHROPIC_API_KEY}\",
+      \"baseUrl\": \"https://api.anthropic.com/v1\",
+      \"defaultModel\": \"claude-sonnet-4-6\",
+      \"defaultTimeoutMs\": 30000,
+      \"defaultMaxTokens\": 200
+    },
+    \"gemini\": {
+      \"apiKey\": \"\${GEMINI_API_KEY}\",
+      \"baseUrl\": \"https://generativelanguage.googleapis.com/v1beta\",
+      \"defaultModel\": \"gemini-2.5-pro\",
+      \"sampling\": { \"temperature\": 0.2, \"topP\": 0.8, \"maxOutputTokens\": 8192 }
+    },
+    \"openai\": {
+      \"apiKey\": \"\${OPENAI_API_KEY}\",
+      \"baseUrl\": \"https://api.openai.com/v1\",
+      \"defaultModel\": \"gpt-4o\",
+      \"sampling\": { \"temperature\": 0.2 }
+    },
+    \"custom\": {
+      \"apiKey\": \"\${CUSTOM_API_KEY}\",
+      \"baseUrl\": \"http://localhost:11434/v1\",
+      \"defaultModel\": \"llama3\",
+      \"sampling\": { \"temperature\": 0.2 }
+    }
+  },
+  \"scenarios\": {
+    \"agent\": { \"provider\": \"anthropic\", \"model\": \"claude-sonnet-4-6\" },
+    \"critic\": { \"provider\": \"gemini\", \"model\": \"gemini-2.5-pro\", \"alternatives\": [\"openai:gpt-4o\"] },
+    \"summarizer\": { \"provider\": \"anthropic\", \"model\": \"claude-haiku-4-5-20251001\" },
+    \"extractor\": { \"provider\": \"anthropic\", \"model\": \"claude-haiku-4-5-20251001\" },
+    \"btw\": { \"provider\": \"anthropic\", \"model\": \"claude-haiku-4-5-20251001\" }
+  },
+  \"fallback\": { \"provider\": \"anthropic\", \"model\": \"claude-haiku-4-5-20251001\" }
+}
+MODELS_EOF
+      chmod 600 \"\$MJ\"
+      echo created
+    fi
+  ")
+  case "$result" in
+    created)   ok "models.json seeded from template (chmod 600)" ;;
+    unchanged) ok "models.json already present" ;;
+    *)         die "ensure_models_json_seed: unexpected result '$result'" ;;
+  esac
+}
+
 # Warn if OAuth config is missing — the server boots in single-user 'default'
 # mode without it, which is fine for dev but not what production wants.
 warn_if_oauth_unset() {
@@ -261,6 +347,158 @@ REMOTE_SH
     unchanged) ok "allowlist: '$entry' already present" ;;
     *)         die "allow_user: unexpected result '$result'" ;;
   esac
+}
+
+# Set model provider configuration in models.json.
+# Usage: --set-model-provider <provider-id> --model-base-url <url> --model-api-key <key>
+# The api_key can be a literal value or ${ENV_VAR} syntax (recommended for secrets).
+# Does NOT restart container — config reloads via API or next startup.
+set_model_provider() {
+  local provider_id="$1"
+  local base_url="$2"
+  local api_key="$3"
+
+  # Validate provider_id (must be alphanumeric + dash/underscore)
+  if ! [[ "$provider_id" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    die "invalid provider id '$provider_id' (expected alphanumeric, dash, or underscore)"
+  fi
+
+  # Validate base_url (must be a valid URL)
+  if ! [[ "$base_url" =~ ^https?:// ]]; then
+    die "invalid base_url '$base_url' (expected http:// or https:// URL)"
+  fi
+
+  # api_key can be:
+  # 1. Literal value: sk-ant-xxxxx, gsk-xxxxx, etc.
+  # 2. Environment variable reference: ${ENV_VAR} or ${ENV_VAR:default}
+  # We accept both and let configLoader resolve at runtime.
+  if [ -z "$api_key" ]; then
+    die "--model-api-key is required when using --set-model-provider"
+  fi
+
+  step "Setting model provider '$provider_id' in models.json"
+  ensure_state_dir
+  ensure_models_json_seed
+
+  local result
+  result=$(remote "PID='$provider_id' URL='$base_url' KEY='$api_key' MJ='$STATE_DIR/models.json' bash -s" <<'REMOTE_SH'
+    set -e
+    # Check jq availability
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "jq-not-found"
+      exit 1
+    fi
+
+    # Read current config
+    config=$(cat "$MJ")
+
+    # Update provider config using jq
+    # - If provider exists, update baseUrl and apiKey
+    # - If provider doesn't exist, create it with minimal config
+    updated=$(echo "$config" | jq --arg pid "$PID" --arg url "$URL" --arg key "$KEY" '
+      if .providers[$pid] then
+        .providers[$pid].baseUrl = $url |
+        .providers[$pid].apiKey = $key
+      else
+        .providers[$pid] = {
+          "apiKey": $key,
+          "baseUrl": $url,
+          "defaultModel": ""
+        }
+      end
+    ')
+
+    # Write back
+    echo "$updated" > "$MJ"
+    chmod 600 "$MJ"
+    echo "updated"
+REMOTE_SH
+  )
+
+  case "$result" in
+    updated)      ok "models.json: provider '$provider_id' baseUrl/apiKey updated (chmod 600)" ;;
+    jq-not-found) die "jq not installed on remote host — required for models.json editing" ;;
+    *)            die "set_model_provider: unexpected result '$result'" ;;
+  esac
+
+  warn "Config change only takes effect after reload (POST /api/model-config/reload) or container restart"
+}
+
+# Set default model for a scenario in models.json.
+# Usage: --set-scenario-model <scenario> <provider:model>
+# Valid scenarios: agent, critic, summarizer, extractor, btw, fallback
+# Does NOT restart container — config reloads via API or next startup.
+set_scenario_model() {
+  local scenario="$1"
+  local provider_model="$2"
+
+  # Validate scenario name
+  if ! [[ "$scenario" =~ ^(agent|critic|summarizer|extractor|btw|fallback)$ ]]; then
+    die "invalid scenario '$scenario' (expected: agent, critic, summarizer, extractor, btw, or fallback)"
+  fi
+
+  # Validate provider:model format
+  if ! [[ "$provider_model" =~ ^[a-zA-Z0-9_-]+:[a-zA-Z0-9._-]+$ ]]; then
+    die "invalid provider:model format '$provider_model' (expected provider:model, e.g. gemini:gemini-2.5-pro)"
+  fi
+
+  local provider="${provider_model%%:*}"
+  local model="${provider_model#*:}"
+
+  step "Setting scenario '$scenario' default model to '$provider_model' in models.json"
+  ensure_state_dir
+  ensure_models_json_seed
+
+  local result
+  result=$(remote "SC='$scenario' PROV='$provider' MOD='$model' MJ='$STATE_DIR/models.json' bash -s" <<'REMOTE_SH'
+    set -e
+    # Check jq availability
+    if ! command -v jq >/dev/null 2>&1; then
+      echo "jq-not-found"
+      exit 1
+    fi
+
+    # Read current config
+    config=$(cat "$MJ")
+
+    # Update scenario config using jq
+    updated=$(echo "$config" | jq --arg sc "$SC" --arg prov "$PROV" --arg mod "$MOD" '
+      if .scenarios[$sc] then
+        .scenarios[$sc].provider = $prov |
+        .scenarios[$sc].model = $mod
+      else
+        .scenarios[$sc] = {
+          "provider": $prov,
+          "model": $mod
+        }
+      end
+    ')
+
+    # Write back
+    echo "$updated" > "$MJ"
+    chmod 600 "$MJ"
+    echo "updated"
+REMOTE_SH
+  )
+
+  case "$result" in
+    updated)      ok "models.json: scenario '$scenario' set to $provider_model (chmod 600)" ;;
+    jq-not-found) die "jq not installed on remote host — required for models.json editing" ;;
+    *)            die "set_scenario_model: unexpected result '$result'" ;;
+  esac
+
+  warn "Config change only takes effect after reload (POST /api/model-config/reload) or container restart"
+}
+
+# Export models.json configuration to stdout.
+# Usage: --export-models-config > models.json
+# Output: Full JSON config (either existing file or default template)
+# Does NOT require ssh for local mode (can be used without connection).
+export_models_config() {
+  ensure_state_dir
+  ensure_models_json_seed
+
+  remote "cat '$STATE_DIR/models.json'"
 }
 
 # Idempotently write MYCO_GH_CLIENT_ID and MYCO_GH_CLIENT_SECRET into .env.
@@ -605,6 +843,26 @@ main() {
   if [ -n "$SET_ANTHROPIC_KEY" ]; then
     open_ssh
     set_anthropic_key_in_env "$SET_ANTHROPIC_KEY"
+    exit 0
+  fi
+
+  # Model config flags: update models.json, no build/ship.
+  if [ -n "$SET_MODEL_PROVIDER" ]; then
+    if [ -z "$MODEL_BASE_URL" ] || [ -z "$MODEL_API_KEY" ]; then
+      die "--set-model-provider requires --model-base-url and --model-api-key"
+    fi
+    open_ssh
+    set_model_provider "$SET_MODEL_PROVIDER" "$MODEL_BASE_URL" "$MODEL_API_KEY"
+    exit 0
+  fi
+  if [ -n "$SET_SCENARIO_MODEL" ]; then
+    open_ssh
+    set_scenario_model "$SET_SCENARIO_MODEL" "$SCENARIO_MODEL_VALUE"
+    exit 0
+  fi
+  if [ "$EXPORT_MODELS_CONFIG" = "1" ]; then
+    open_ssh
+    export_models_config
     exit 0
   fi
 

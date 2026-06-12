@@ -218,6 +218,12 @@ const COMMANDS = [
     handler: handleGit,
   },
   {
+    names: ['model-config', 'mc'],
+    summary: 'View or update session model configuration (owner+admin for mutations)',
+    usage: '/model-config (view) · /model-config model=claude-sonnet-4-6 · /model-config thinking=enabled effort=high',
+    handler: handleModelConfig,
+  },
+  {
     names: ['help'],
     summary: 'List available chat commands',
     usage: '/help',
@@ -1835,6 +1841,91 @@ function handleStrict(ctx) {
   } else {
     ctx.reply('✓ Strict-mode is now `off`. All chat messages forward to claude as usual.');
   }
+}
+
+// Phase 3: /model-config slash command for session-level model configuration
+function handleModelConfig(ctx) {
+  const modelsMod = require('./models');
+
+  const rec = sessionsMod.getSessionRecord(ctx.sessionId);
+  if (!rec) {
+    ctx.reply('(/model-config: session not found)');
+    return;
+  }
+
+  const args = String((ctx && ctx.args) || '').trim();
+
+  // View mode - no args
+  if (!args) {
+    const currentConfig = rec.modelConfig || {};
+    const globalConfig = modelsMod.getConfig();
+    const scenarioConfig = globalConfig.scenarios?.agent || globalConfig.fallback || {};
+
+    const lines = ['**Session Model Configuration:**'];
+    lines.push(`  • model: \`${currentConfig.model || scenarioConfig.model || 'default'}\``);
+    lines.push(`  • thinking: \`${currentConfig.thinking || 'default'}\``);
+    lines.push(`  • effort: \`${currentConfig.effort || 'default'}\``);
+    lines.push('');
+    lines.push('Global config from models.json:');
+    lines.push(`  • agent scenario: ${scenarioConfig.provider || 'anthropic'}:${scenarioConfig.model || 'claude-sonnet-4-6'}`);
+    lines.push('');
+    lines.push('Usage: `/model-config model=<name>` or `/model-config thinking=<mode> effort=<level>` (owner+admin only for mutations).');
+    ctx.reply(lines.join('\n'));
+    return;
+  }
+
+  // Mutation mode - requires owner+admin
+  if (!sessionsMod.isOwnerOrAdmin(ctx.sessionId, ctx.user)) {
+    ctx.reply(`(/model-config mutation is owner-or-admin only. Session owner is @${rec.user}.)`);
+    return;
+  }
+
+  // Parse key=value pairs
+  const updates = {};
+  const validKeys = ['model', 'thinking', 'effort'];
+  const validThinking = ['enabled', 'disabled', 'auto'];
+  const validEffort = ['low', 'medium', 'high'];
+
+  for (const part of args.split(/\s+/)) {
+    const kv = part.split('=');
+    if (kv.length !== 2) {
+      ctx.reply(`(invalid format: \`${part}\`. Use key=value pairs like \`model=claude-sonnet-4-6\`.)`);
+      return;
+    }
+    const [key, value] = kv;
+    if (!validKeys.includes(key)) {
+      ctx.reply(`(unknown key: \`${key}\`. Valid keys: ${validKeys.join(', ')}.)`);
+      return;
+    }
+    if (key === 'thinking' && !validThinking.includes(value)) {
+      ctx.reply(`(invalid thinking value: \`${value}\`. Valid: ${validThinking.join(', ')}.)`);
+      return;
+    }
+    if (key === 'effort' && !validEffort.includes(value)) {
+      ctx.reply(`(invalid effort value: \`${value}\`. Valid: ${validEffort.join(', ')}.)`);
+      return;
+    }
+    updates[key] = value;
+  }
+
+  // Apply updates
+  if (!rec.modelConfig) rec.modelConfig = {};
+  for (const [k, v] of Object.entries(updates)) {
+    rec.modelConfig[k] = v;
+  }
+  sessionsMod.saveStore();
+
+  // Broadcast state update
+  try {
+    const attachMod = require('./attach');
+    const session = attachMod.getSession(ctx.sessionId);
+    if (session && typeof session.emit === 'function') {
+      session.emit('state-update', { kind: 'modelConfig', config: rec.modelConfig });
+    }
+  } catch {}
+
+  const changed = Object.entries(updates).map(([k, v]) => `${k}=${v}`).join(', ');
+  ctx.reply(`✓ Updated session model config: ${changed}. Changes apply on next Claude turn.`);
 }
 
 // fr-48: run-queue slash commands. All owner+admin gated (mirror

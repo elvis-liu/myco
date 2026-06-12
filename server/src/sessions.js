@@ -729,6 +729,20 @@ function setSessionStrict(sessionId, on) {
   return true;
 }
 
+// Phase 3: per-session model config helpers
+function getSessionModelConfig(sessionId) {
+  const rec = getSessionRecord(sessionId);
+  return rec?.modelConfig || null;
+}
+
+function setSessionModelConfig(sessionId, config) {
+  const rec = getSessionRecord(sessionId);
+  if (!rec) return false;
+  rec.modelConfig = config;
+  saveStore();
+  return true;
+}
+
 function shortId() { return crypto.randomBytes(4).toString('hex'); }
 
 function clamp(v, min, max, fallback) {
@@ -1829,6 +1843,9 @@ Object.assign(module.exports, {
   // fr-38: per-session strict-mode gate (requires [run:plan#<id>] marker on claude-bound messages)
   isSessionStrict,
   setSessionStrict,
+  // Phase 3: per-session model config
+  getSessionModelConfig,
+  setSessionModelConfig,
   importExistingTranscripts,
   getChatHistory,
   getChatHistoryLength,
