@@ -1,0 +1,21 @@
+{
+  "$comment": "极简单模型配置示例 - 使用 glm-4.7 用于所有场景",
+
+  "providers": {
+    "custom": {
+      "apiKey": "${GLM_API_KEY}",
+      "baseUrl": "${GLM_API_ENDPOINT:https://open.bigmodel.cn/api/paas/v4}",
+      "defaultModel": "glm-4.7"
+    }
+  },
+
+  "scenarios": {
+    "agent": { "provider": "custom" },
+    "critic": { "provider": "custom" },
+    "summarizer": { "provider": "custom" },
+    "extractor": { "provider": "custom" },
+    "btw": { "provider": "custom" }
+  },
+
+  "fallback": { "provider": "custom" }
+}
