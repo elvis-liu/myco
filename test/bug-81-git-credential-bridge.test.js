@@ -112,6 +112,22 @@ t('docker/docker-entrypoint.sh registers credential.helper to point at the scrip
     'bug-81: the registered credential.helper path must reference git-credential-myco (the helper this fix ships). Without that name, the registration could point at anything and the test wouldn\'t catch a misconfiguration.');
 });
 
+// CodeHub clone auth support: helper must map codehub-y.huawei.com → codehub provider.
+t('git-credential-myco.sh maps codehub-y.huawei.com host to codehub provider', () => {
+  const body = fs.readFileSync(HELPER, 'utf8');
+  assert.ok(/codehub-y\.huawei\.com/.test(body),
+    'git-credential-myco.sh must include codehub-y.huawei.com host mapping so CodeHub clone can authenticate. Without it, CodeHub clones would fail with no credentials.');
+  assert.ok(/provider\s*=\s*"codehub"/.test(body),
+    'git-credential-myco.sh must set provider="codehub" for CodeHub hosts so the username lookup works correctly.');
+});
+
+// CodeHub uses self-signed SSL: entrypoint must disable SSL verification for CodeHub URLs.
+t('docker-entrypoint.sh disables SSL verification for CodeHub self-signed cert', () => {
+  const ep = fs.readFileSync(ENTRYPOINT, 'utf8');
+  assert.ok(/http\."https:\/\/codehub-y\.huawei\.com\/".sslVerify/.test(ep),
+    'docker-entrypoint.sh must disable SSL verification for CodeHub URLs (http."https://codehub-y.huawei.com/".sslVerify false) so git clone works with CodeHub\'s self-signed certificate.');
+});
+
 // ─────────────────────────────────────────────────────────────────
 // PART B — Runtime: spawn the helper with synthesized stdin and a
 // tmpdir-isolated token store

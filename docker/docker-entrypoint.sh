@@ -142,6 +142,12 @@ else
     echo "[entrypoint] bug-81: WARNING — credential helper missing or not executable at $GIT_CRED_HELPER_PATH" >&2
 fi
 
+# CodeHub uses self-signed SSL certificate. Disable SSL verification for
+# CodeHub URLs so git clone/push works without manual configuration.
+# This is per-URL scoped (not global) to keep other hosts secure.
+git config --global http."https://codehub-y.huawei.com/".sslVerify false 2>/dev/null || true
+echo "[entrypoint] CodeHub SSL verification disabled for https://codehub-y.huawei.com/" >&2
+
 # Start Caddy in background
 caddy run --config /etc/caddy/Caddyfile &
 

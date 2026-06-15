@@ -8,6 +8,7 @@
 
 const github = require('./github');           // kept as legacy back-compat shim
 const gitHosts = require('./git-hosts');       // provider-aware dispatch (github + gitee)
+const gitUsernames = require('./git-usernames'); // git username storage for credential helper
 const permissions = require('./permissions');
 // Lazy property access on sessionsMod — pty.js → slashcmds.js → sessions.js
 // is a circular chain. sessions.js exports its API via Object.assign AFTER
@@ -1418,6 +1419,12 @@ async function handleSetPat(ctx) {
   catch (err) {
     ctx.reply(`(could not save token: ${err.message})`);
     return;
+  }
+  // Store git username for CodeHub (required for credential helper).
+  // GitHub/Gitee use virtual 'x-access-token' which is set during login.
+  if (host.provider === 'codehub') {
+    try { gitUsernames.setUsername(ctx.user, host.provider, profile.login); }
+    catch (err) { console.error('[setpat] stash git username failed:', err.message); }
   }
   const scopeLabel = target ? `@${target.name} (${host.owner}/${host.repo})` : `${host.owner}/${host.repo}`;
   // fr-82: when an alias is set, the user picks it explicitly per

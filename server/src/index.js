@@ -95,6 +95,7 @@ const { askAboutFile, ASSISTANT_USER } = require('./btw');
 const githubMod = require('./github');
 const gitHosts = require('./git-hosts');
 const gitTokens = require('./git-tokens');
+const gitUsernames = require('./git-usernames');
 const slashcmds = require('./slashcmds');
 const oauth = require('./oauth');
 const crypto = require('crypto');
@@ -414,6 +415,17 @@ app.post('/auth/login', async (req, res) => {
     gitTokens.setUserToken(login, provider, pat);
   } catch (err) {
     console.error('[login] stash token failed:', err.message);
+  }
+
+  // Store git username for credential helper.
+  // CodeHub requires real username from API; GitHub/Gitee use virtual 'x-access-token'.
+  try {
+    const gitUsername = provider === 'codehub'
+      ? user.login            // CodeHub API returns real username
+      : 'x-access-token';     // GitHub/Gitee virtual username (server ignores it)
+    gitUsernames.setUsername(login, provider, gitUsername);
+  } catch (err) {
+    console.error('[login] stash git username failed:', err.message);
   }
 
   const mycoTok = mintSession(login, {

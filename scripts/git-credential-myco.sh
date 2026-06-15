@@ -63,6 +63,7 @@ MYCO_CWD="$(pwd)"
 # per CLAUDE.md).
 STATE_DIR="${MYCO_STATE_DIR:-/data}"
 TOKENS_FILE="$STATE_DIR/git-tokens.json"
+USERNAMES_FILE="$STATE_DIR/git-usernames.json"
 
 # Delegate the lookup to node — robust JSON parsing + the same
 # per-repo→user-level precedence the server uses. Helper emits
@@ -75,12 +76,14 @@ TOKENS_FILE="$STATE_DIR/git-tokens.json"
 # node body read undefined for every env var and exited via the
 # emit()-and-return path).
 MYCO_TOKENS_FILE="$TOKENS_FILE" \
+MYCO_USERNAMES_FILE="$USERNAMES_FILE" \
 MYCO_CWD="$MYCO_CWD" \
 MYCO_STDIN_PATH="$STDIN_TMP" \
 node -e '
 const fs = require("fs");
 
 const tokensFile = process.env.MYCO_TOKENS_FILE;
+const usernamesFile = process.env.MYCO_USERNAMES_FILE;
 const myCwd = process.env.MYCO_CWD;
 const stdinPath = process.env.MYCO_STDIN_PATH;
 
@@ -102,12 +105,13 @@ for (const line of raw.split("\n")) {
   ctx[line.slice(0, eq)] = line.slice(eq + 1);
 }
 
-// 3. Map host → provider. github.com → github; gitee.com → gitee.
+// 3. Map host → provider. github.com → github; gitee.com → gitee; codehub → codehub.
 //    Anything else → emit nothing (provider not supported by myco).
 const host = String(ctx.host || "").toLowerCase();
 let provider = null;
 if (host === "github.com" || host.endsWith(".github.com")) provider = "github";
 else if (host === "gitee.com" || host.endsWith(".gitee.com")) provider = "gitee";
+else if (host === "codehub-y.huawei.com") provider = "codehub";
 if (!provider) { emit(); process.exit(0); }
 
 // 4. Load the token store. Tolerate missing file (no /setpat yet).
@@ -116,6 +120,11 @@ try { store = JSON.parse(fs.readFileSync(tokensFile, "utf8")); }
 catch { emit(); process.exit(0); }
 const userEntry = store && store[mycoUser];
 if (!userEntry || typeof userEntry !== "object") { emit(); process.exit(0); }
+
+// Load usernames store for CodeHub (real username required).
+let usernames = null;
+try { usernames = JSON.parse(fs.readFileSync(usernamesFile, "utf8")); } catch {}
+const usernameEntry = usernames && usernames[mycoUser];
 
 // 5. Parse path → owner/repo for the per-repo lookup. Git sends
 //    path=owner/repo.git OR path=owner/repo. Strip .git suffix.
@@ -135,10 +144,17 @@ if (!token && userEntry[provider]) token = userEntry[provider];
 
 if (!token) { emit(); process.exit(0); }
 
-// 6. Emit the credential lines. x-access-token is the conventional
-//    username for both classic and fine-grained GitHub PATs — git
-//    ignores it and the token becomes the actual auth.
-process.stdout.write("username=x-access-token\n");
+// 6. Emit the credential lines.
+//    GitHub/Gitee: x-access-token (server ignores username, uses token as password)
+//    CodeHub: real username from git-usernames.json (required for auth)
+let gitUsername;
+if (provider === "github" || provider === "gitee") {
+  gitUsername = "x-access-token";
+} else if (provider === "codehub") {
+  gitUsername = usernameEntry && usernameEntry[provider];
+  if (!gitUsername) { emit(); process.exit(0); }  // missing username → fallback
+}
+process.stdout.write("username=" + gitUsername + "\n");
 process.stdout.write("password=" + token + "\n");
 ' 2>/dev/null || true
 
