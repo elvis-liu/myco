@@ -15,8 +15,8 @@ const CWD_DIR = path.join(TMP_DIR, 'wks', 'testuser', 'session-abc');
 function extractNodeScript() {
   const shPath = path.join(__dirname, '../scripts/git-credential-myco.sh');
   const sh = fs.readFileSync(shPath, 'utf8');
-  // Find node -e '...' block
-  const match = sh.match(/node -e '\n([\s\S]*?)'\s*2>\/dev\/null/);
+  // Find node -e '...' block (handles both simple and function-wrapped forms)
+  const match = sh.match(/node -e '\n([\s\S]*?)'\s*(?:\|\| true|2>\/dev\/null)/);
   if (!match) throw new Error('Could not extract node script');
   return match[1];
 }
