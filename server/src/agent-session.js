@@ -455,13 +455,13 @@ class AgentSession extends EventEmitter {
         }
       } catch {}
 
-      // Get global config for default values
-      const globalConfig = modelsMod.getConfig();
-      const agentScenario = globalConfig.scenarios?.agent || globalConfig.fallback || {};
-
       // Apply precedence: session override > global config > SDK default
-      if (sessionModelConfig?.model || agentScenario.model) {
-        sdkOpts.model = sessionModelConfig?.model || agentScenario.model;
+      // Use getModelForScenario to correctly fallback to provider's defaultModel
+      // when scenario doesn't specify model explicitly
+      if (sessionModelConfig?.model) {
+        sdkOpts.model = sessionModelConfig.model;
+      } else {
+        sdkOpts.model = modelsMod.getModelForScenario('agent');
       }
       if (sessionModelConfig?.thinking) {
         sdkOpts.thinking = sessionModelConfig.thinking;

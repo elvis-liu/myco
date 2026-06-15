@@ -117,6 +117,30 @@ function reloadConfig() {
 }
 
 /**
+ * Get model for a scenario.
+ * If scenario doesn't specify model explicitly, use provider's defaultModel.
+ * @param {string} scenario - Scenario name
+ * @returns {string} - Model ID to use
+ */
+function getModelForScenario(scenario) {
+  if (!config) {
+    initializeProviders();
+  }
+
+  const scenarioConfig = config.scenarios[scenario] || config.fallback;
+  const providerId = scenarioConfig.provider || 'anthropic';
+
+  // If scenario explicitly specifies model, use it
+  if (scenarioConfig.model) {
+    return scenarioConfig.model;
+  }
+
+  // Otherwise, use provider's defaultModel
+  const providerConfig = config.providers[providerId];
+  return providerConfig?.defaultModel || 'claude-haiku-4-5-20251001';
+}
+
+/**
  * Get current configuration.
  * @returns {object}
  */
@@ -130,6 +154,7 @@ function getConfig() {
 module.exports = {
   getProvider,
   getProviderForScenario,
+  getModelForScenario,
   getAllProviders,
   providers,
   reloadConfig,

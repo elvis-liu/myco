@@ -128,7 +128,8 @@ function mergeProviders(fileProviders, defaultProviders) {
 
 /**
  * Merge scenario configs from file with defaults.
- * File config overrides defaults for specified scenarios.
+ * File config overrides defaults for specified providers, but
+ * does NOT inherit default model (to allow provider.defaultModel fallback).
  * @param {object} fileScenarios - Scenarios from config file
  * @param {object} defaultScenarios - Hardcoded defaults
  * @returns {object} - Merged scenarios config
@@ -138,9 +139,11 @@ function mergeScenarios(fileScenarios, defaultScenarios) {
 
   if (fileScenarios) {
     for (const [scenario, config] of Object.entries(fileScenarios)) {
+      // Only merge provider, not model - let provider.defaultModel be used if model not specified
       merged[scenario] = {
-        ...defaultScenarios[scenario],
-        ...config,
+        provider: config.provider || defaultScenarios[scenario]?.provider,
+        // Only include model if explicitly specified in file config
+        ...(config.model ? { model: config.model } : {}),
       };
     }
   }
