@@ -35,7 +35,7 @@ function sanitize(user) {
 }
 
 // Known Git providers supported by the allowlist.
-const KNOWN_PROVIDERS = new Set(['github', 'gitee']);
+const KNOWN_PROVIDERS = new Set(['github', 'gitee', 'codehub']);
 
 // Parse an allowlist entry with optional provider prefix.
 // Formats: "github:alice", "gitee:bob", or just "alice" (defaults to github).

@@ -21,6 +21,8 @@
 #   ./scripts/deploy.sh --skip-tests                   # skip the pre-flight smoke test
 #   ./scripts/deploy.sh --dry-run                      # plan only; no image transfer or swap
 #   ./scripts/deploy.sh --allow-github-user <login>    # add a GitHub login to the allowlist (no build/ship)
+#   ./scripts/deploy.sh --allow-gitee-user <login>     # add a Gitee login to the allowlist (no build/ship)
+#   ./scripts/deploy.sh --allow-codehub-user <login>   # add a CodeHub login to the allowlist (no build/ship)
 #   ./scripts/deploy.sh --set-oauth <id>:<secret>      # write OAuth client_id/secret into .env (no build/ship)
 #   ./scripts/deploy.sh --set-anthropic-key sk-ant-…   # write ANTHROPIC_API_KEY into .env + restart (no build/ship)
 #   ./scripts/deploy.sh --set-model-provider anthropic \
@@ -125,6 +127,9 @@ parse_args() {
       --allow-gitee-user)      [ -n "${2:-}" ] || die "--allow-gitee-user requires a Gitee login"
                                ADD_ALLOW="gitee:${2}"; shift 2 ;;
       --allow-gitee-user=*)    ADD_ALLOW="gitee:${1#--allow-gitee-user=}"; shift ;;
+      --allow-codehub-user)    [ -n "${2:-}" ] || die "--allow-codehub-user requires a CodeHub login"
+                               ADD_ALLOW="codehub:${2}"; shift 2 ;;
+      --allow-codehub-user=*)  ADD_ALLOW="codehub:${1#--allow-codehub-user=}"; shift ;;
       --set-oauth)             [ -n "${2:-}" ] || die "--set-oauth requires client_id:client_secret"
                                SET_OAUTH="$2"; shift 2 ;;
       --set-oauth=*)           SET_OAUTH="${1#--set-oauth=}"; shift ;;

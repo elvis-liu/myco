@@ -1590,7 +1590,8 @@ async function _refreshConfigPats() {
   const rows = [];
   // User-level (OAuth-fallback) row per provider, even when absent —
   // gives the user a place to PASTE a value if they want to set one.
-  for (const provider of ['github', 'gitee']) {
+  // Now includes CodeHub support alongside GitHub and Gitee.
+  for (const provider of ['github', 'gitee', 'codehub']) {
     const meta = inventory.userLevel && inventory.userLevel[provider];
     rows.push(_renderConfigPatRow({
       kind: 'user-level',

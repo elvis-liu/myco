@@ -37,7 +37,7 @@ const STATE_DIR = process.env.MYCO_STATE_DIR || path.join(os.homedir(), '.myco')
 const TOKENS_FILE = path.join(STATE_DIR, 'git-tokens.json');
 const LEGACY_GH_TOKENS_FILE = path.join(STATE_DIR, 'gh-tokens.json');
 
-const KNOWN_PROVIDERS = new Set(['github', 'gitee']);
+const KNOWN_PROVIDERS = new Set(['github', 'gitee', 'codehub']);
 
 let _cache = null;
 

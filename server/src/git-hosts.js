@@ -54,12 +54,19 @@ function detectHost(absCwd) {
 // (or {} if parsing fails). Never throws — network errors come back as
 // { status: 0, body: { error: '<msg>' } } so callers can branch on
 // status uniformly.
-function _httpsJson({ hostname, path, method, headers, body }) {
+function _httpsJson({ hostname, path, method, headers, body, rejectUnauthorized }) {
   return new Promise((resolve) => {
     const payload = body == null ? '' : (typeof body === 'string' ? body : JSON.stringify(body));
     const hdrs = { ...headers };
     if (payload) hdrs['Content-Length'] = Buffer.byteLength(payload);
-    const req = https.request({ hostname, path, method, headers: hdrs, timeout: 15000 }, (res) => {
+    const req = https.request({
+      hostname,
+      path,
+      method,
+      headers: hdrs,
+      timeout: 15000,
+      rejectUnauthorized: rejectUnauthorized !== false, // default true, allow false for self-signed certs
+    }, (res) => {
       let chunks = '';
       res.on('data', (d) => { chunks += d.toString(); });
       res.on('end', () => {
@@ -211,12 +218,41 @@ async function _fetchUserGitee(token, httpsJson) {
   return result.body;
 }
 
+async function _fetchUserCodehub(token, httpsJson) {
+  const fetcher = httpsJson || _httpsJson;
+  // CodeHub (Huawei) uses GitLab-style API v4 with PRIVATE-TOKEN header.
+  // Uses username field (not login) and requires self-signed cert handling.
+  const result = await fetcher({
+    hostname: 'codehub-y.huawei.com',
+    path: '/api/v4/user',
+    method: 'GET',
+    headers: {
+      'PRIVATE-TOKEN': token,
+      'User-Agent': 'myco/1.0',
+      'Accept': 'application/json',
+    },
+    // CodeHub may use self-signed certs; Node's https.request needs this flag.
+    rejectUnauthorized: false,
+  });
+  if (result.status < 200 || result.status >= 300 || !result.body.username) {
+    throw new Error(result.body.message || result.body.error || `codehub /user HTTP ${result.status}`);
+  }
+  // CodeHub returns 'username' (GitLab style), normalize to 'login' for myco.
+  return {
+    login: result.body.username,
+    id: result.body.id,
+    name: result.body.name,
+    avatar_url: result.body.avatar_url,
+  };
+}
+
 async function fetchUser(opts) {
   const provider = String(opts && opts.provider || '').toLowerCase();
   const token = opts && opts.token;
   if (!token) throw new Error('token required');
   if (provider === 'github') return _fetchUserGithub(token, opts.httpsJson);
   if (provider === 'gitee') return _fetchUserGitee(token, opts.httpsJson);
+  if (provider === 'codehub') return _fetchUserCodehub(token, opts.httpsJson);
   throw new Error(`unknown provider: ${opts && opts.provider}`);
 }
 
