@@ -411,11 +411,7 @@ app.post('/auth/login', async (req, res) => {
   }
 
   try {
-    if (provider === 'gitee') {
-      gitTokens.setUserToken(login, 'gitee', pat);
-    } else {
-      githubMod.setToken(login, pat);
-    }
+    gitTokens.setUserToken(login, provider, pat);
   } catch (err) {
     console.error('[login] stash token failed:', err.message);
   }
