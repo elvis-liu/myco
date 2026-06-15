@@ -18,7 +18,7 @@ const DEFAULT_TIMEOUT_MS = 120000;
 
 async function callClaudeCli({ system, userMessage, cwd, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   if (!userMessage) return null;
-  const { query } = require('@anthropic-ai/claude-agent-sdk');
+  const { query } = await import('@anthropic-ai/claude-agent-sdk');
   const ac = new AbortController();
   const timer = setTimeout(() => {
     try { ac.abort(); } catch {}

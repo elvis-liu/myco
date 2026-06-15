@@ -8,10 +8,21 @@
 //
 // One MCP server is created per AgentSession so the tool handler
 // can capture sessionId in closure. agent-session.js passes
-// `{ myco: createMycoMcpServer(sessionId) }` into sdkOpts.mcpServers.
+// `{ myco: await createMycoMcpServer(sessionId) }` into sdkOpts.mcpServers.
 
-const { createSdkMcpServer, tool } = require('@anthropic-ai/claude-agent-sdk');
 const { z } = require('zod');
+
+// Lazy-load SDK MCP helpers (ES Module package)
+let _createSdkMcpServer = null;
+let _tool = null;
+async function getSdkMcp() {
+  if (!_createSdkMcpServer || !_tool) {
+    const sdk = await import('@anthropic-ai/claude-agent-sdk');
+    _createSdkMcpServer = sdk.createSdkMcpServer;
+    _tool = sdk.tool;
+  }
+  return { createSdkMcpServer: _createSdkMcpServer, tool: _tool };
+}
 
 // Tool-name prefix the SDK applies to MCP server tools:
 //   mcp__<server-name>__<tool-name>
@@ -114,7 +125,8 @@ function _appendPlanItems(sessionId, items) {
   };
 }
 
-function createMycoMcpServer(sessionId) {
+async function createMycoMcpServer(sessionId) {
+  const { createSdkMcpServer, tool } = await getSdkMcp();
   return createSdkMcpServer({
     name: 'myco',
     version: '1.0.0',

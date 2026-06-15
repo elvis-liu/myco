@@ -1853,7 +1853,7 @@ async function _probeGeminiKey(key) {
   // didn't send a key — same pattern as _probeAnthropicKey above.
   if (!key) key = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
   if (!key) return { ok: false, error: 'no Gemini key provided' };
-  const { GoogleGenAI } = require('@google/genai');
+  const { GoogleGenAI } = await import('@google/genai');
   const ai = new GoogleGenAI({ apiKey: key });
   try {
     const response = await ai.models.generateContent({

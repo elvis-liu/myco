@@ -22,8 +22,17 @@ const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
-const { query } = require('@anthropic-ai/claude-agent-sdk');
 const modelsMod = require('./models');  // Phase 3: model config integration
+
+// Lazy-load SDK query function (ES Module package, can't use require())
+let _query = null;
+async function getQuery() {
+  if (!_query) {
+    const sdk = await import('@anthropic-ai/claude-agent-sdk');
+    _query = sdk.query;
+  }
+  return _query;
+}
 
 // Per-session in-memory replay buffer cap. The buffer is hydrated
 // from <cwd>/_myco_/events.jsonl on construction, so this cap is
@@ -411,7 +420,7 @@ class AgentSession extends EventEmitter {
         // the SDK logs and continues — built-in Read/Bash still work,
         // so this fails OPEN, not closed.
         mcpServers: {
-          myco: require('./myco-mcp').createMycoMcpServer(this.sessionId),
+          myco: await require('./myco-mcp').createMycoMcpServer(this.sessionId),
           'lean-ctx': {
             type: 'stdio',
             command: 'lean-ctx',
@@ -472,6 +481,7 @@ class AgentSession extends EventEmitter {
 
       let stream, initErr = null;
       try {
+        const query = await getQuery();
         stream = query({ prompt: this._msgQueue, options: sdkOpts });
       } catch (err) {
         initErr = err;

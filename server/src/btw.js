@@ -62,7 +62,7 @@ function buildPrompt({ chatHistory, scrollback, lastMessage }) {
 // faster (no process startup cost). Output: drains the streaming
 // result to a single text string for caller compatibility.
 async function runClaudeP(cwd, promptBody) {
-  const { query } = require('@anthropic-ai/claude-agent-sdk');
+  const { query } = await import('@anthropic-ai/claude-agent-sdk');
   const ac = new AbortController();
   const timer = setTimeout(() => { try { ac.abort(); } catch {} }, TIMEOUT_MS);
   let stream;

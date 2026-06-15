@@ -4,8 +4,17 @@
 // ${ENV_VAR} syntax for API key, and configurable sampling parameters.
 // The sampling defaults are tuned for adversarial code review (low temperature).
 
-const { GoogleGenAI } = require('@google/genai');
 const { ModelProvider } = require('../provider');
+
+// Lazy-load GoogleGenAI (ES Module package)
+let _GoogleGenAI = null;
+async function getGoogleGenAI() {
+  if (!_GoogleGenAI) {
+    const genai = await import('@google/genai');
+    _GoogleGenAI = genai.GoogleGenAI;
+  }
+  return _GoogleGenAI;
+}
 
 const DEFAULT_SAMPLING = {
   temperature: 0.2,
@@ -55,6 +64,7 @@ class GeminiProvider extends ModelProvider {
     };
 
     try {
+      const GoogleGenAI = await getGoogleGenAI();
       const ai = new GoogleGenAI({ apiKey });
       const config = {
         ...sampling,
