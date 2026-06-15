@@ -1996,6 +1996,66 @@ test_model_provider_config() {
     || fail "deploy.sh: --export-models-config flag in usage"
 }
 
+# codehub-url-auth: git clone URL authentication
+test_git_url_auth() {
+  # New functions must be exported from git-hosts.js
+  grep -q "parseGitUrl" server/src/git-hosts.js \
+    && pass "git-hosts: parseGitUrl function defined" \
+    || fail "git-hosts: parseGitUrl function defined"
+  grep -q "getTokenForUrl" server/src/git-hosts.js \
+    && pass "git-hosts: getTokenForUrl function defined" \
+    || fail "git-hosts: getTokenForUrl function defined"
+  grep -q "getUsernameForUrl" server/src/git-hosts.js \
+    && pass "git-hosts: getUsernameForUrl function defined" \
+    || fail "git-hosts: getUsernameForUrl function defined"
+  grep -q "parseGitUrl," server/src/git-hosts.js \
+    && pass "git-hosts: parseGitUrl exported" \
+    || fail "git-hosts: parseGitUrl exported"
+  grep -q "getTokenForUrl," server/src/git-hosts.js \
+    && pass "git-hosts: getTokenForUrl exported" \
+    || fail "git-hosts: getTokenForUrl exported"
+  grep -q "getUsernameForUrl," server/src/git-hosts.js \
+    && pass "git-hosts: getUsernameForUrl exported" \
+    || fail "git-hosts: getUsernameForUrl exported"
+
+  # Host mapping must include CodeHub
+  grep -q "'codehub-y.huawei.com': 'codehub'" server/src/git-hosts.js \
+    && pass "git-hosts: CodeHub host mapped" \
+    || fail "git-hosts: CodeHub host mapped"
+
+  # git-usernames.js must be imported
+  grep -q "const gitUsernames = require('./git-usernames')" server/src/git-hosts.js \
+    && pass "git-hosts: git-usernames module imported" \
+    || fail "git-hosts: git-usernames module imported"
+
+  # sessions.js must have auth URL builder
+  grep -q "function _buildAuthUrl" server/src/sessions.js \
+    && pass "sessions: _buildAuthUrl function defined" \
+    || fail "sessions: _buildAuthUrl function defined"
+  grep -q "function _resetRemoteUrl" server/src/sessions.js \
+    && pass "sessions: _resetRemoteUrl function defined" \
+    || fail "sessions: _resetRemoteUrl function defined"
+
+  # sessions.js must call auth builder in clone flow
+  grep -q "authInfo = _buildAuthUrl(user, gitUrl)" server/src/sessions.js \
+    && pass "sessions: clone calls _buildAuthUrl" \
+    || fail "sessions: clone calls _buildAuthUrl"
+  grep -q "_resetRemoteUrl(projectAbs, authInfo.originalUrl)" server/src/sessions.js \
+    && pass "sessions: clone success resets remote URL" \
+    || fail "sessions: clone success resets remote URL"
+
+  # docker-entrypoint.sh must have optional credential helper
+  grep -q "MYCO_USE_CREDENTIAL_HELPER" docker/docker-entrypoint.sh \
+    && pass "entrypoint: MYCO_USE_CREDENTIAL_HELPER env var used" \
+    || fail "entrypoint: MYCO_USE_CREDENTIAL_HELPER env var used"
+  grep -q "skipping credential helper registration" docker/docker-entrypoint.sh \
+    && pass "entrypoint: URL auth mode message present" \
+    || fail "entrypoint: URL auth mode message present"
+
+  # Unit tests must pass
+  node_test_result test/git-url-auth.test.js "test/git-url-auth.test.js (14 cases)"
+}
+
 run_static_checks() {
   section "Static checks"
   test_server_js_files
@@ -2026,6 +2086,7 @@ run_static_checks() {
   test_no_direct_main_project_write
   test_lastCriticReview_paired_with_stageState
   test_model_provider_config
+  test_git_url_auth
 }
 
 # ─── feature checks ──────────────────────────────────────────────────────────

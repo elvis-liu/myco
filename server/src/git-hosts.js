@@ -19,8 +19,104 @@
 const { execFile } = require('child_process');
 const https = require('https');
 const gitTokens = require('./git-tokens');
+const gitUsernames = require('./git-usernames');
 
 const KNOWN_PROVIDERS = gitTokens.KNOWN_PROVIDERS;
+
+// ── URL parsing helpers (codehub-url-auth) ────────────────────────────────────
+//
+// Host → Provider mapping for URL parsing. Extends the existing HOST_REGEX
+// to include CodeHub (Huawei internal git host).
+const HOST_TO_PROVIDER = {
+  'github.com': 'github',
+  'gitee.com': 'gitee',
+  'codehub-y.huawei.com': 'codehub',
+};
+
+// Regex for parsing git URLs (HTTPS and SSH formats).
+// Matches: https://host/owner/repo.git, git@host:owner/repo.git
+// Also matches owner/repo shorthand (defaults to github).
+const GIT_URL_REGEX = /^((?:https?|git):\/\/|git@)([^@/:]+)[:/]([^/]+)\/([^/]+?)(?:\.git)?\s*$/i;
+
+/**
+ * Parse a Git URL string and extract provider/owner/repo info.
+ * @param {string} gitUrl - Git URL (HTTPS or SSH format)
+ * @returns {{ provider: string, owner: string, repo: string, host: string, protocol: 'https'|'ssh', originalUrl: string } | null}
+ */
+function parseGitUrl(gitUrl) {
+  if (!gitUrl || typeof gitUrl !== 'string') return null;
+  const url = gitUrl.trim();
+
+  // Try standard URL format (HTTPS or SSH)
+  const m = url.match(GIT_URL_REGEX);
+  if (!m) {
+    // Try owner/repo shorthand (default to github)
+    const shorthand = url.match(/^([a-zA-Z0-9_-]+)\/([a-zA-Z0-9_.-]+)$/);
+    if (shorthand) {
+      return {
+        provider: 'github',
+        owner: shorthand[1],
+        repo: shorthand[2],
+        host: 'github.com',
+        protocol: 'https',
+        originalUrl: url,
+      };
+    }
+    return null;
+  }
+
+  const protocol = m[1].startsWith('git@') ? 'ssh' : 'https';
+  const host = m[2].toLowerCase();
+  const provider = HOST_TO_PROVIDER[host];
+
+  if (!provider) return null;  // Unsupported host
+
+  return {
+    provider,
+    owner: m[3],
+    repo: m[4].replace(/\.git$/, ''),
+    host,
+    protocol,
+    originalUrl: url,
+  };
+}
+
+/**
+ * Find token for a Git URL by combining parseGitUrl + gitTokens.getToken.
+ * @param {string} user - myco username
+ * @param {string} gitUrl - Git URL
+ * @returns {{ token: string, provider: string } | null}
+ */
+function getTokenForUrl(user, gitUrl) {
+  const parsed = parseGitUrl(gitUrl);
+  if (!parsed) return null;
+
+  const { provider, owner, repo } = parsed;
+
+  // Use existing getToken logic (per-repo priority → user-level fallback)
+  const token = gitTokens.getToken(user, provider, owner, repo);
+  if (!token) return null;
+
+  return { token, provider };
+}
+
+/**
+ * Get git username for URL authentication based on provider.
+ * @param {string} user - myco username
+ * @param {string} provider - git provider ('github', 'gitee', 'codehub')
+ * @returns {string | null}
+ */
+function getUsernameForUrl(user, provider) {
+  // GitHub and Gitee use virtual username 'x-access-token' (ignored by API)
+  if (provider === 'github' || provider === 'gitee') {
+    return 'x-access-token';
+  }
+  // CodeHub requires real username from storage
+  if (provider === 'codehub') {
+    return gitUsernames.getUsername(user, provider);
+  }
+  return null;
+}
 
 // ── repo detection ──────────────────────────────────────────────────────────
 //
@@ -470,6 +566,9 @@ async function closeIssue(opts) {
 
 module.exports = {
   detectHost,
+  parseGitUrl,         // codehub-url-auth: URL parsing
+  getTokenForUrl,      // codehub-url-auth: token lookup by URL
+  getUsernameForUrl,   // codehub-url-auth: username lookup by provider
   createIssue,
   closeIssue,
   fetchUser,

@@ -821,6 +821,55 @@ function _projectNameFromGitUrl(url) {
   return safe || 'project';
 }
 
+/**
+ * Build authenticated Git URL for clone (codehub-url-auth).
+ * @param {string} user - myco username (session owner)
+ * @param {string} gitUrl - original Git URL
+ * @returns {{ authUrl: string, originalUrl: string } | null}
+ */
+function _buildAuthUrl(user, gitUrl) {
+  const gitHosts = require('./git-hosts');
+
+  // Parse URL to extract provider/owner/repo
+  const parsed = gitHosts.parseGitUrl(gitUrl);
+  if (!parsed) return null;
+
+  // SSH URLs cannot embed password; return null to fallback to original URL
+  if (parsed.protocol === 'ssh') return null;
+
+  // Find token (per-repo priority → user-level fallback)
+  const tokenInfo = gitHosts.getTokenForUrl(user, gitUrl);
+  if (!tokenInfo) return null;
+
+  // Get username for credential (GitHub/Gitee: virtual, CodeHub: real)
+  const gitUsername = gitHosts.getUsernameForUrl(user, tokenInfo.provider);
+  if (!gitUsername) return null;
+
+  // Build authenticated HTTPS URL
+  const { host, owner, repo } = parsed;
+  const authUrl = `https://${encodeURIComponent(gitUsername)}:${encodeURIComponent(tokenInfo.token)}@${host}/${owner}/${repo}.git`;
+
+  return { authUrl, originalUrl: gitUrl };
+}
+
+/**
+ * Reset remote URL after clone to remove embedded credential (codehub-url-auth).
+ * @param {string} projectAbs - absolute path to cloned project
+ * @param {string} originalUrl - original Git URL (without credential)
+ */
+function _resetRemoteUrl(projectAbs, originalUrl) {
+  const { execFileSync } = require('child_process');
+  try {
+    execFileSync('git', ['-C', projectAbs, 'remote', 'set-url', 'origin', originalUrl], {
+      stdio: 'ignore',
+      timeout: 5000,
+    });
+    console.log(`[clone-auth] reset remote URL to ${originalUrl}`);
+  } catch (err) {
+    console.error(`[clone-auth] failed to reset remote URL: ${err.message}`);
+  }
+}
+
 // fr-94 Phase 3: kick off an asynchronous `git clone --progress` into
 // <absCwd>/<inferred-name>/ and return the inferred project name
 // IMMEDIATELY so spawnSession can finish + the HTTP /sessions POST
@@ -883,10 +932,27 @@ function _kickoffGitCloneAsync(sessionId, absCwd, gitUrl) {
 function _runGitCloneInBackground(sessionId, projectAbs, gitUrl) {
   const { spawn } = require('child_process');
   const startedAt = Date.now();
+
+  // Get session owner user for token lookup (codehub-url-auth)
+  const store = loadStore();
+  const rec = store.sessions[sessionId];
+  const user = rec ? rec.user : null;
+
+  // Build authenticated URL if possible (codehub-url-auth)
+  let authInfo = null;
+  let cloneUrl = gitUrl;  // fallback to original URL
+  if (user) {
+    authInfo = _buildAuthUrl(user, gitUrl);
+    if (authInfo) {
+      cloneUrl = authInfo.authUrl;
+      console.log(`[clone-auth] built auth URL for ${user} clone ${gitUrl}`);
+    }
+  }
+
   _emitCloneMsg(sessionId, `⏳ git clone ${gitUrl} → ${path.basename(projectAbs)}/ …`, 'fr-94/clone-start');
   let child;
   try {
-    child = spawn('git', ['clone', '--progress', gitUrl, projectAbs], {
+    child = spawn('git', ['clone', '--progress', cloneUrl, projectAbs], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (err) {
@@ -924,6 +990,11 @@ function _runGitCloneInBackground(sessionId, projectAbs, gitUrl) {
     clearTimeout(killer);
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
     if (code === 0) {
+      // Reset remote URL to remove embedded credential (codehub-url-auth)
+      if (authInfo) {
+        _resetRemoteUrl(projectAbs, authInfo.originalUrl);
+      }
+
       const store = loadStore();
       const rec = store.sessions[sessionId];
       if (rec) { rec.cloneState = 'success'; saveStore(); }
