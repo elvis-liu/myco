@@ -1618,7 +1618,8 @@ async function _refreshConfigPats() {
   for (const el of rows) listEl.appendChild(el);
   const hasAny = (inventory.perRepo && inventory.perRepo.length)
     || (inventory.userLevel.github && inventory.userLevel.github.present)
-    || (inventory.userLevel.gitee && inventory.userLevel.gitee.present);
+    || (inventory.userLevel.gitee && inventory.userLevel.gitee.present)
+    || (inventory.userLevel.codehub && inventory.userLevel.codehub.present);
   if (emptyEl) emptyEl.hidden = hasAny;
 }
 

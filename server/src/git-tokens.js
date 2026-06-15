@@ -208,22 +208,23 @@ function _maskToken(raw) {
 // entries have alias: null. The key regex correctly splits
 // "github/owner/repo#alias" so the repo field stays as "repo".
 function listAllPats(user) {
-  if (!user) return { userLevel: { github: null, gitee: null }, perRepo: [] };
+  if (!user) return { userLevel: { github: null, gitee: null, codehub: null }, perRepo: [] };
   const store = _load();
   const entry = store[user];
   if (!entry || typeof entry !== 'object') {
-    return { userLevel: { github: null, gitee: null }, perRepo: [] };
+    return { userLevel: { github: null, gitee: null, codehub: null }, perRepo: [] };
   }
   const out = {
     userLevel: {
-      github: _maskToken(entry.github),
-      gitee:  _maskToken(entry.gitee),
+      github:   _maskToken(entry.github),
+      gitee:    _maskToken(entry.gitee),
+      codehub:  _maskToken(entry.codehub),
     },
     perRepo: [],
   };
   for (const key of Object.keys(entry)) {
     // Skip the user-level slots themselves; only collect repo-shaped keys.
-    if (key === 'github' || key === 'gitee') continue;
+    if (key === 'github' || key === 'gitee' || key === 'codehub') continue;
     const m = key.match(/^([a-z]+)\/([^/]+)\/(.+?)(?:#(.+))?$/);
     if (!m) continue;
     const provider = _normalizeProvider(m[1]);

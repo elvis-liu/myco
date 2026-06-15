@@ -68,12 +68,13 @@ function maskToken(raw) {
 function listAllPats(store, user) {
   const entry = store[user];
   if (!entry || typeof entry !== 'object') {
-    return { userLevel: { github: null, gitee: null }, perRepo: [] };
+    return { userLevel: { github: null, gitee: null, codehub: null }, perRepo: [] };
   }
   const out = {
     userLevel: {
-      github: entry.github ? maskToken(entry.github) : null,
-      gitee:  entry.gitee  ? maskToken(entry.gitee)  : null,
+      github:  entry.github  ? maskToken(entry.github)  : null,
+      gitee:   entry.gitee   ? maskToken(entry.gitee)   : null,
+      codehub: entry.codehub ? maskToken(entry.codehub) : null,
     },
     perRepo: [],
   };
@@ -82,7 +83,7 @@ function listAllPats(store, user) {
     const m = key.match(/^([a-z]+)\/([^/]+)\/(.+?)(?:#(.+))?$/);
     if (!m) continue;
     const [, provider, owner, repo, alias] = m;
-    if (!['github', 'gitee'].includes(provider)) continue;
+    if (!['github', 'gitee', 'codehub'].includes(provider)) continue;
     out.perRepo.push({
       provider,
       owner,
@@ -145,7 +146,7 @@ t('maskToken on empty / null / non-string → null', () => {
 
 t('listAllPats on empty user → empty inventory (no throw)', () => {
   assert.deepStrictEqual(listAllPats({}, 'nobody'), {
-    userLevel: { github: null, gitee: null },
+    userLevel: { github: null, gitee: null, codehub: null },
     perRepo: [],
   });
 });
