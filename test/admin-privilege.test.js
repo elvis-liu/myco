@@ -111,5 +111,60 @@ t('static guard: index.js includes enterprise proxy configurations in ENV_KEYS',
   assert.ok(src.includes("'MYCO_ENTERPRISE_TLS_INSECURE'"), 'MYCO_ENTERPRISE_TLS_INSECURE must be present in ENV_KEYS');
 });
 
+// ─── /admin + /share allowlist gate must match any provider ────────────────
+// Regression: after CodeHub PAT login landed, allowed-github-users.txt grew
+// `codehub:login` entries, but /admin and /share still hardcoded
+// isAllowed(target, 'github'). A codehub user's session login is the bare
+// username (no provider tag), so the github-only check always missed and the
+// grant was rejected with a misleading "run --allow-github-user" hint.
+
+t('auth.js: isAllowedAnyProvider matches a login under any provider slot (codehub /admin grant regression)', () => {
+  const auth = require('../server/src/auth');
+  const tempUser = 'testanyprov_' + Math.floor(Math.random() * 100000);
+
+  // CodeHub user: bare login has no provider tag, so the legacy
+  // isAllowed(login, 'github') must miss — that miss is the bug surface.
+  assert.strictEqual(auth.addUserToAllowlist(tempUser, 'codehub'), true, 'codehub user should be added');
+  assert.strictEqual(auth.isAllowed(tempUser, 'github'), false,
+    'isAllowed(github) must NOT match a codehub-only allowlist entry (this is exactly the /admin bug surface)');
+  assert.strictEqual(auth.isAllowed(tempUser, 'codehub'), true,
+    'isAllowed(codehub) must match the codehub entry');
+  assert.strictEqual(auth.isAllowedAnyProvider(tempUser), true,
+    'isAllowedAnyProvider must match a codehub allowlist entry — /admin + /share rely on this');
+  assert.strictEqual(auth.removeUserFromAllowlist(tempUser, 'codehub'), true, 'cleanup codehub entry');
+
+  // Legacy github shape must still match too (no regression on the existing path).
+  assert.strictEqual(auth.addUserToAllowlist(tempUser, 'github'), true, 'github user should be added');
+  assert.strictEqual(auth.isAllowedAnyProvider(tempUser), true,
+    'isAllowedAnyProvider must still match legacy github entries');
+  assert.strictEqual(auth.removeUserFromAllowlist(tempUser, 'github'), true, 'cleanup github entry');
+
+  // Absent from every slot → false.
+  assert.strictEqual(auth.isAllowedAnyProvider(tempUser), false,
+    'isAllowedAnyProvider must return false once the login is removed from every provider slot');
+});
+
+t('static guard: /admin and /share gate on isAllowedAnyProvider, not hardcoded github', () => {
+  const src = _read('server/src/slashcmds.js');
+  assert.ok(/isAllowedAnyProvider\s*\(\s*target\s*\)/.test(src),
+    'slashcmds.js must call isAllowedAnyProvider(target) for the allowlist gate — /admin + /share only know a bare @login');
+  assert.ok(!/isAllowed\s*\(\s*target,\s*['"]github['"]\s*\)/.test(src),
+    'slashcmds.js must NOT hardcode isAllowed(target, "github") — that blocks every gitee/codehub user from being granted admin/viewer');
+});
+
+// ─── @-mention autocomplete must insert bare user (not provider:user) ──────
+// Regression: /users mixes bare logins with "provider:user" allowlist entries.
+// The dropdown label keeps the full form so the operator sees the platform,
+// but the INSERTED text must be bare "@user" — /admin + /share reject
+// "provider:user" because the colon fails the target regex in slashcmds.js.
+
+t('static guard: @-mention autocomplete strips provider prefix on insert (codehub /admin pairing)', () => {
+  const src = _read('web/public/app.js');
+  assert.ok(src.includes('@mention-insert-strips-provider'),
+    'app.js @-mention insert must carry the @mention-insert-strips-provider marker — dropdown shows provider:user but insert must be bare');
+  assert.ok(/bareOf\s*=/.test(src),
+    'app.js must define a bareOf helper that strips the provider: prefix before building the @-mention insert text');
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

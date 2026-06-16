@@ -238,6 +238,21 @@ function isAllowed(login, provider = 'github') {
   return allowlist.has(`${normalizedProvider}:${safe}`);
 }
 
+// Check if `login` is allowed under ANY known provider. Used by /admin and
+// /share where the operator types a bare @login without knowing which
+// provider (github/gitee/codehub) the target signed in through — the
+// allowlist file is the only place that carries the provider tag, so a
+// bare login has to be matched against every provider slot.
+function isAllowedAnyProvider(login) {
+  const safe = sanitize(login);
+  if (!safe) return false;
+  const allowlist = loadAllowlist();
+  for (const provider of KNOWN_PROVIDERS) {
+    if (allowlist.has(`${provider}:${safe}`)) return true;
+  }
+  return false;
+}
+
 // ── share tokens ────────────────────────────────────────────────────────────
 // Share tokens ARE the session ID — links like /?s=<sessionId> survive
 // restarts and need no extra state on disk.
@@ -313,6 +328,7 @@ module.exports = {
   revokeSession,
   loadAllowlist,
   isAllowed,
+  isAllowedAnyProvider,
   createShareToken,
   shareTokenInfo,
   revokeShareTokensForSession,

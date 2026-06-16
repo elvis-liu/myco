@@ -198,13 +198,16 @@ t('static guard: handleAdmin rejects ASSISTANT_USER target', () => {
     'handleAdmin must compare target === ASSISTANT_USER and reject before addAdminToSession');
 });
 
-t('static guard: handleAdmin checks auth.isAllowed for non-allowlisted users', () => {
+t('static guard: handleAdmin checks the allowlist for non-allowlisted users', () => {
   const src = _read('server/src/slashcmds.js');
   const fnStart = src.indexOf('function handleAdmin');
   const fnEnd = src.indexOf('\nfunction ', fnStart + 1);
   const body = src.slice(fnStart, fnEnd > 0 ? fnEnd : fnStart + 3500);
-  assert.ok(/isAllowed\s*\(/.test(body),
-    'handleAdmin must call auth.isAllowed(target) to reject non-invited users');
+  // Accept either isAllowed(...) or isAllowedAnyProvider(...) — the latter
+  // is the post-codehub shape (bare @login can't be pinned to one provider).
+  // admin-privilege.test.js locks down the "no hardcoded github" half.
+  assert.ok(/isAllowed(AnyProvider)?\s*\(/.test(body),
+    'handleAdmin must call auth.isAllowed / isAllowedAnyProvider to reject non-invited users');
   assert.ok(/isAuthRequired\s*\(/.test(body),
     'handleAdmin must gate the isAllowed check on isAuthRequired (allowlist enforcement is auth-mode-only)');
 });

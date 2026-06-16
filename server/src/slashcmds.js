@@ -1684,9 +1684,15 @@ function handleAdmin(ctx) {
   // rec.admins from accumulating logins that can never log in. Skip
   // for the revoke path so the owner can always clean up a previously-
   // granted but now-removed-from-allowlist user.
+  //
+  // Match against ANY provider (github/gitee/codehub): the operator
+  // types a bare @login and the provider tag lives only in the
+  // allowlist file, so we can't know which slot to check. Hard-coding
+  // 'github' here (the pre-codehub shape) silently blocked every
+  // gitee/codehub user from ever being granted admin.
   const auth = require('./auth');
-  if (!revoke && auth.isAuthRequired() && !auth.isAllowed(target, 'github')) {
-    ctx.reply(`(/admin: @${target} is not in the invitation allowlist (allowed-github-users.txt). Run \`./deploy.sh --allow-github-user ${target}\` first, then retry.)`);
+  if (!revoke && auth.isAuthRequired() && !auth.isAllowedAnyProvider(target)) {
+    ctx.reply(`(/admin: @${target} is not in the invitation allowlist (allowed-github-users.txt). Add them first with \`./deploy.sh --allow-github-user ${target}\` (or --allow-gitee-user / --allow-codehub-user for other providers), then retry.)`);
     return;
   }
   if (revoke) {
@@ -1778,9 +1784,11 @@ function handleShare(ctx) {
     }
     // Allowlist gate on grants only (revoke must always work so the
     // owner can clean up a previously-granted but now-removed-from-
-    // allowlist user).
-    if (!revoke && auth.isAuthRequired() && !auth.isAllowed(target, 'github')) {
-      replies.push(`(@${target} is not in the invitation allowlist (allowed-github-users.txt). Run \`./deploy.sh --allow-github-user ${target}\` first, then retry.)`);
+    // allowlist user). Match against ANY provider — see /admin's
+    // isAllowedAnyProvider note for why the bare login can't be pinned
+    // to a single provider slot.
+    if (!revoke && auth.isAuthRequired() && !auth.isAllowedAnyProvider(target)) {
+      replies.push(`(@${target} is not in the invitation allowlist (allowed-github-users.txt). Add them first with \`./deploy.sh --allow-github-user ${target}\` (or --allow-gitee-user / --allow-codehub-user for other providers), then retry.)`);
       continue;
     }
     if (revoke) {

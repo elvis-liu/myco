@@ -11316,23 +11316,38 @@ function bindChatAutocomplete() {
     }
     // @<user> branch: empty q → ALL users; non-empty → prefix match
     // then substring fallback. Self ranks first.
+    //
+    // @mention-insert-strips-provider: allowlist entries arrive as
+    // "provider:user" (e.g. "codehub:alice") but /admin + /share need a
+    // bare @user — the colon in "provider:user" fails slashcmds.js's
+    // target regex. Strip the prefix on insert + matching + self-rank;
+    // keep the full form in the dropdown label so the platform stays
+    // visible to the operator.
     const all = (data.users || []);
     const me = (state.chatUser || '').toLowerCase();
-    let matches = q ? all.filter((u) => u.toLowerCase().startsWith(q)) : all.slice();
+    const bareOf = (u) => (u.includes(':') ? u.slice(u.indexOf(':') + 1) : u);
+    let matches = q ? all.filter((u) =>
+      u.toLowerCase().startsWith(q) || bareOf(u).toLowerCase().startsWith(q)
+    ) : all.slice();
     if (q && !matches.length) {
-      matches = all.filter((u) => u.toLowerCase().includes(q));
+      matches = all.filter((u) =>
+        u.toLowerCase().includes(q) || bareOf(u).toLowerCase().includes(q)
+      );
     }
     matches.sort((a, b) => {
-      const am = a.toLowerCase() === me ? -1 : 0;
-      const bm = b.toLowerCase() === me ? -1 : 0;
+      const am = bareOf(a).toLowerCase() === me ? -1 : 0;
+      const bm = bareOf(b).toLowerCase() === me ? -1 : 0;
       if (am !== bm) return am - bm;
       return a.localeCompare(b);
     });
-    return matches.map((u) => ({
-      name: '@' + u,
-      desc: u.toLowerCase() === me ? '(you)' : 'discussion (no claude routing)',
-      insert: '@' + u + ' ',
-    }));
+    return matches.map((u) => {
+      const bare = bareOf(u);
+      return {
+        name: '@' + u,
+        desc: bare.toLowerCase() === me ? '(you)' : 'discussion (no claude routing)',
+        insert: '@' + bare + ' ',
+      };
+    });
   }
 
   function refresh() {
