@@ -2288,6 +2288,11 @@ function openSession(id, opts = {}) {
       consecutiveHandshakeFailures = 0;
       reconnectDelay = 1000;
       hideConnOverlay();
+      // bug-17 follow-up: clear readOnly on reconnect so a freshly-promoted
+      // admin (whose WS was kicked by addAdminToSession) reconnects with
+      // Send enabled. If the user is still a viewer, the server will send
+      // viewer-mode frame immediately after open, re-triggering applyReadOnly.
+      clearReadOnly();
       _flushOutboundChat();                      // any chat sends queued during reconnect
       _flushOutboundMenuFrames();                // any modal picks/toggles/submits queued during reconnect
     });
