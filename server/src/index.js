@@ -765,13 +765,26 @@ server.on('upgrade', (req, socket, head) => {
       socket.destroy();
       return;
     }
-    readOnly = true;
-    // Prefer the viewer's own auth identity if they provided a token.
+    // bug-89: share-link viewers who are admins should reconnect with full
+    // owner privileges, not readonly. Pre-fix, readOnly was unconditionally
+    // set to true here, so a promoted admin's WS kick + reconnect still
+    // landed them on the viewer branch because the share-token path never
+    // checked rec.admins. Now we check isOwnerOrAdmin for authenticated
+    // viewers and clear readOnly if they have admin tier.
     const viewerTok = url.searchParams.get('token') || '';
     const viewerUser = viewerTok ? userFromToken(viewerTok) : null;
     if (viewerUser) {
       user = viewerUser;
+      // Admin via share-link: same exception as the non-share branch below.
+      // The user is authenticated and in rec.admins, so they get owner-tier
+      // attach (readOnly=false) even though they arrived via a share URL.
+      if (isAuthRequired() && isOwnerOrAdmin(sessionId, user)) {
+        readOnly = false;
+      } else {
+        readOnly = true;
+      }
     } else {
+      readOnly = true;
       // Anonymous viewer: use ?name= if provided, else a generic label.
       const name = (url.searchParams.get('name') || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 24);
       user = name || 'share';
