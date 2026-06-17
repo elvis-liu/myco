@@ -17,7 +17,7 @@
 //   The 1024-token cap silently truncated verdicts on large diffs.
 //   8192 was empirically verified to fit ~3,800-char detailed verdicts.
 
-const { getProviderForScenario } = require('../models');
+const { getProviderForScenario, getModelForScenario } = require('../models');
 
 // Named constants for test calibration (must stay in this file)
 const CRITIC_MODEL = 'gemini-2.5-pro';
@@ -37,11 +37,17 @@ async function runCritique(prompt, systemInstruction = '', opts = {}) {
   const provider = getProviderForScenario('critic', { preferId });
 
   if (!provider || !provider.isAvailable()) {
-    return '(Gemini API key missing; please set GEMINI_API_KEY or API_KEY in your environment)';
+    // Dynamic error message based on provider type
+    const providerName = provider?.name || provider?.id || 'provider';
+    return `(${providerName} API key missing; please check your models.json configuration)`;
   }
 
-  // Allow env override for model and max tokens
-  const model = process.env.MYCO_CRITIC_MODEL || CRITIC_MODEL;
+  // Model selection logic:
+  // - preferId='config' → use scenario config model (getModelForScenario) or provider.defaultModel
+  // - preferId='gemini' → use CRITIC_MODEL (gemini-specific)
+  // - env override MYCO_CRITIC_MODEL always takes precedence
+  const model = process.env.MYCO_CRITIC_MODEL
+    || (preferId === 'config' ? getModelForScenario('critic') : CRITIC_MODEL);
   const maxOutputTokens = CRITIC_MAX_OUTPUT_TOKENS;
 
   return provider.call(prompt, systemInstruction, {

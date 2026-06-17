@@ -4,12 +4,13 @@
 // 1. preferId='config' (default) uses scenario config's provider
 // 2. preferId='gemini' forces gemini provider even if scenario config is custom
 // 3. User manual selection (rec.criticModel set) forces specific provider
+// 4. Model name follows scenario config when preferId='config'
 
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const { getProviderForScenario, reloadConfig, getConfig } = require('../server/src/models');
+const { getProviderForScenario, getModelForScenario, reloadConfig, getConfig } = require('../server/src/models');
 
 // Test helper: create temp config file with custom provider
 function setupCustomCriticConfig() {
@@ -96,10 +97,23 @@ t('preferId="custom" forces custom provider', () => {
   assert.strictEqual(provider.id, 'custom', 'should force custom provider');
 });
 
+t('getModelForScenario returns scenario config model (llama3)', () => {
+  const model = getModelForScenario('critic');
+  assert.strictEqual(model, 'llama3', 'should use llama3 model from scenario config');
+});
+
 t('getConfig returns loaded config with custom as critic provider', () => {
   const config = getConfig();
   assert.ok(config.scenarios.critic, 'critic scenario should exist');
   assert.strictEqual(config.scenarios.critic.provider, 'custom', 'scenario config should have custom as provider');
+});
+
+t('provider.defaultModel matches scenario config model', () => {
+  const provider = getProviderForScenario('critic', { preferId: 'config' });
+  const model = getModelForScenario('critic');
+  // Both should be llama3
+  assert.strictEqual(model, 'llama3', 'scenario model should be llama3');
+  assert.strictEqual(provider.defaultModel, 'llama3', 'provider defaultModel should be llama3');
 });
 
 // Cleanup
