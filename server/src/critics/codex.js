@@ -2,8 +2,10 @@
 
 const { getProviderForScenario } = require('../models');
 
-async function runCritique(prompt, systemInstruction = '') {
-  const provider = getProviderForScenario('critic', { preferId: 'openai' });
+async function runCritique(prompt, systemInstruction = '', opts = {}) {
+  // Use scenario config by default (preferId='config'), unless user explicitly selected openai
+  const preferId = opts.preferId && opts.preferId !== 'config' ? opts.preferId : 'config';
+  const provider = getProviderForScenario('critic', { preferId });
 
   if (!provider || !provider.isAvailable()) {
     return '(OpenAI/Codex API key missing; please set OPENAI_API_KEY or CODEX_API_KEY in your environment)';

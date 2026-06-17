@@ -3,8 +3,10 @@
 
 const { getProviderForScenario } = require('../models');
 
-async function runCritique(prompt, systemInstruction = '') {
-  const provider = getProviderForScenario('critic', { preferId: 'custom' });
+async function runCritique(prompt, systemInstruction = '', opts = {}) {
+  // Use scenario config by default (preferId='config'), unless user explicitly selected custom
+  const preferId = opts.preferId && opts.preferId !== 'config' ? opts.preferId : 'config';
+  const provider = getProviderForScenario('critic', { preferId });
 
   // Custom provider is always available (may not require API key for local Ollama)
 

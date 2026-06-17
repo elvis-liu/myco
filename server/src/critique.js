@@ -279,9 +279,18 @@ async function triggerGeminiCritique(sessionId, session, item, diff, claudeOutpu
     sessionsMod.saveStore();
   }
 
-  // Resolve critic plugin dynamically (default to rec.criticModel, then env, then gemini)
-  const criticId = (rec && rec.criticModel) || process.env.MYCO_CRITIC_MODEL || 'gemini';
+  // Resolve critic plugin dynamically
+  // Check if user explicitly set criticModel (manual selection vs default)
+  const userSelectedCritic = (rec && rec.criticModel) || process.env.MYCO_CRITIC_MODEL;
+
+  // Default to gemini wrapper (for parameter config), but use scenario config for provider
+  const criticId = userSelectedCritic || 'gemini';
   const critic = getCritic(criticId);
+
+  // Map criticId to provider preferId for wrapper
+  // If user explicitly selected, use that provider; otherwise use 'config' (scenario config)
+  const criticToProviderMap = { gemini: 'gemini', codex: 'openai', custom: 'custom' };
+  const preferId = userSelectedCritic ? (criticToProviderMap[userSelectedCritic] || 'config') : 'config';
 
   // bug-65: the basePrompt now lives in
   // server/src/critics/prompts/base.md and is loaded via the
@@ -410,7 +419,7 @@ ${fileContextBlock}${historyBlock}${userFollowupBlock}`;
   for (const specialty of specialties) {
     const systemPromptForSpecialty = systemPromptPrefix + specialty.systemSuffix;
     console.log(`[critique] Invoking critic "${critic.name}" (${critic.id}) — specialty=${specialty.id} for item ${item.id} (${label}${isRetry ? ', retry' : ''})...`);
-    const verdict = await critic.runCritique(userPrompt, systemPromptForSpecialty);
+    const verdict = await critic.runCritique(userPrompt, systemPromptForSpecialty, { preferId });
     const specialtyIsError = _looksLikeCriticError(verdict);
     const specialtyIsAgreed = !specialtyIsError && verdict.includes('✓ AGREED');
     console.log(`[critique] "${critic.name}" specialty=${specialty.id} complete for ${item.id} (${label}). Agreement=${specialtyIsAgreed} isError=${specialtyIsError}`);

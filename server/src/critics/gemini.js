@@ -31,8 +31,10 @@ const CRITIC_SAMPLING = {
   maxOutputTokens: CRITIC_MAX_OUTPUT_TOKENS,
 };
 
-async function runCritique(prompt, systemInstruction = '') {
-  const provider = getProviderForScenario('critic', { preferId: 'gemini' });
+async function runCritique(prompt, systemInstruction = '', opts = {}) {
+  // Use scenario config by default (preferId='config'), unless user explicitly selected gemini
+  const preferId = opts.preferId && opts.preferId !== 'config' ? opts.preferId : 'config';
+  const provider = getProviderForScenario('critic', { preferId });
 
   if (!provider || !provider.isAvailable()) {
     return '(Gemini API key missing; please set GEMINI_API_KEY or API_KEY in your environment)';
