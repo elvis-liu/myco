@@ -1893,7 +1893,8 @@ function handleModelConfig(ctx) {
     lines.push(`  • effort: \`${currentConfig.effort || 'default'}\``);
     lines.push('');
     lines.push('Global config from models.json:');
-    lines.push(`  • agent scenario: ${scenarioConfig.provider || 'anthropic'}:${scenarioConfig.model || 'claude-sonnet-4-6'}`);
+    const agentModel = scenarioConfig.model || globalConfig.providers[scenarioConfig.provider || 'anthropic']?.defaultModel || 'claude-haiku-4-5-20251001';
+    lines.push(`  • agent scenario: ${scenarioConfig.provider || 'anthropic'}:${agentModel}`);
     lines.push('');
     lines.push('Usage: `/model-config model=<name>` or `/model-config thinking=<mode> effort=<level>` (owner+admin only for mutations).');
     ctx.reply(lines.join('\n'));
