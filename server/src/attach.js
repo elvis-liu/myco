@@ -2236,7 +2236,7 @@ function handleChatMessage(sessionId, session, user, text, opts = {}) {
 
   if (text.startsWith('/')) {
     const rec = sessionsMod.loadStore().sessions[sessionId];
-    const absCwd = rec && rec.absCwd;
+    const absCwd = rec && sessionsMod.resolveAgentCwd(rec);
     const ctx = {
       user,
       sessionId,

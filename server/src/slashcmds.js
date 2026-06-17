@@ -1207,7 +1207,7 @@ async function handleIssue(ctx, { kind, labels }) {
   const host = await gitHosts.detectHost(ctx.absCwd);
   if (!host) {
     ctx.reply(
-      `(could not detect a github.com or gitee.com remote for this session's cwd: ${ctx.absCwd}. ` +
+      `(could not detect a github.com, gitee.com, or codehub-y.huawei.com remote for this session's cwd: ${ctx.absCwd}. ` +
       `\`/${kind}\` requires \`git remote get-url origin\` to point at one of those hosts.)`
     );
     return;
@@ -1317,7 +1317,7 @@ async function handleListPat(ctx) {
     host = await gitHosts.detectHost(ctx.absCwd);
     if (!host) {
       ctx.reply(
-        `(no github.com or gitee.com remote in this session's cwd. ` +
+        `(no github.com, gitee.com, or codehub-y.huawei.com remote in this session's cwd. ` +
         `Use \`/listpat @<target>\` to inspect aliases for a registered remote target.)`
       );
       return;
@@ -1412,7 +1412,7 @@ async function handleSetPat(ctx) {
     host = await gitHosts.detectHost(ctx.absCwd);
     if (!host) {
       ctx.reply(
-        `(no github.com or gitee.com remote in this session's cwd: ${ctx.absCwd}. ` +
+        `(no github.com, gitee.com, or codehub-y.huawei.com remote in this session's cwd: ${ctx.absCwd}. ` +
         `\`/setpat\` saves a PAT scoped to the current repo; make sure ` +
         `\`git remote get-url origin\` points at one of those hosts, ` +
         `OR use \`/setpat @<target> <token>\` to scope by remote target.)`

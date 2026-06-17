@@ -1952,4 +1952,6 @@ Object.assign(module.exports, {
   _migrateLegacyMemory,
   // bug-66: exposed for the workspace-purge regression test.
   _removeWorkspaceForDeletedSession,
+  // fr-94: resolve agent cwd (returns mainProject subdir if set)
+  resolveAgentCwd,
 });
