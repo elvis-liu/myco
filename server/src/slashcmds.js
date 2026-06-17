@@ -1213,7 +1213,7 @@ async function handleIssue(ctx, { kind, labels }) {
     return;
   }
   // Per-repo PAT first (set via /setpat), then user-level OAuth token as
-  // fallback (only github has one — gitee has no OAuth flow yet).
+  // fallback (only github has one — gitee/codehub have no OAuth flow yet).
   const token = gitHosts.getToken(ctx.user, host.provider, host.owner, host.repo);
   if (!token) {
     if (host.provider === 'github') {
@@ -1222,11 +1222,22 @@ async function handleIssue(ctx, { kind, labels }) {
         `Sign out and back in via GitHub to refresh the OAuth token (must include \`repo\` scope), ` +
         `or run \`/setpat <token>\` to save a per-repo PAT.)`
       );
-    } else {
+    } else if (host.provider === 'gitee') {
       ctx.reply(
         `(no Gitee PAT on file for @${ctx.user} for ${host.owner}/${host.repo}. ` +
         `Generate a PAT at https://gitee.com/profile/personal_access_tokens (scope: \`issues\`) ` +
         `and run \`/setpat <token>\` from this session.)`
+      );
+    } else if (host.provider === 'codehub') {
+      ctx.reply(
+        `(no CodeHub PAT on file for @${ctx.user} for ${host.owner}/${host.repo}. ` +
+        `Generate a PAT on CodeHub (scope: \`api\`) ` +
+        `and run \`/setpat <token>\` from this session.)`
+      );
+    } else {
+      ctx.reply(
+        `(no token on file for @${ctx.user} for ${host.provider}/${host.owner}/${host.repo}. ` +
+        `Run \`/setpat <token>\` to save a per-repo PAT.)`
       );
     }
     return;
@@ -1242,7 +1253,7 @@ async function handleIssue(ctx, { kind, labels }) {
     token, owner: host.owner, repo: host.repo, title, body, labels,
   });
   if (result.error) {
-    const label = host.provider === 'gitee' ? 'Gitee' : 'GitHub';
+    const label = host.provider === 'gitee' ? 'Gitee' : host.provider === 'codehub' ? 'CodeHub' : 'GitHub';
     ctx.reply(`(${label} error: ${result.error}${result.status ? ` [HTTP ${result.status}]` : ''})`);
     return;
   }

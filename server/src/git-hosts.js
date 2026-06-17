@@ -121,13 +121,17 @@ function getUsernameForUrl(user, provider) {
 // ── repo detection ──────────────────────────────────────────────────────────
 //
 // Returns one of:
-//   { provider: 'github' | 'gitee', owner, repo }
+//   { provider: 'github' | 'gitee' | 'codehub', owner, repo }
 //   null  — no git remote, no recognized host, or git CLI failure.
 //
-// SSH form:  git@github.com:OWNER/REPO(.git)?   or  git@gitee.com:OWNER/REPO(.git)?
-// HTTPS form: https://github.com/OWNER/REPO(.git)?  or https://gitee.com/OWNER/REPO(.git)?
-// User-embedded HTTPS (PAT-in-URL): https://x:y@github.com/OWNER/REPO — still matches.
-const HOST_REGEX = /(github\.com|gitee\.com)[:/]([^/]+)\/([^/]+?)(?:\.git)?\s*$/i;
+// SSH form:  git@host:OWNER/REPO(.git)?
+// HTTPS form: https://host/OWNER/REPO(.git)?
+// User-embedded HTTPS (PAT-in-URL): https://x:y@host/OWNER/REPO — still matches.
+// Supported hosts: github.com, gitee.com, codehub-y.huawei.com
+const HOST_REGEX = new RegExp(
+  '(' + Object.keys(HOST_TO_PROVIDER).map(h => h.replace(/\./g, '\\.')).join('|') + ')[/:]([^/]+)/([^/]+?)(?:\\.git)?\\s*$',
+  'i'
+);
 
 function detectHost(absCwd) {
   return new Promise((resolve) => {
@@ -137,7 +141,8 @@ function detectHost(absCwd) {
       const url = String(stdout || '').trim();
       const m = url.match(HOST_REGEX);
       if (!m) return resolve(null);
-      const provider = m[1].toLowerCase() === 'gitee.com' ? 'gitee' : 'github';
+      const host = m[1].toLowerCase();
+      const provider = HOST_TO_PROVIDER[host];
       resolve({ provider, owner: m[2], repo: m[3] });
     });
   });
@@ -263,10 +268,45 @@ async function _createIssueGitee({ token, owner, repo, title, body, labels }, ht
   };
 }
 
+async function _createIssueCodehub({ token, owner, repo, title, body, labels }, httpsJson) {
+  // CodeHub uses GitLab v4 API:
+  //   - Endpoint is POST /api/v4/projects/:id/issues
+  //   - :id is the encoded project path (owner%2Frepo)
+  //   - Token in PRIVATE-TOKEN header
+  //   - JSON body with title (required) and description (optional)
+  //   - Returns iid (internal issue id) and web_url
+  const fetcher = httpsJson || _httpsJson;
+  const projectId = encodeURIComponent(`${owner}/${repo}`);
+  const result = await fetcher({
+    hostname: 'codehub-y.huawei.com',
+    path: `/api/v4/projects/${projectId}/issues`,
+    method: 'POST',
+    headers: {
+      'PRIVATE-TOKEN': token,
+      'User-Agent': 'myco/1.0',
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: {
+      title: String(title || '').slice(0, 250),
+      description: String(body || ''),
+    },
+    rejectUnauthorized: false,  // CodeHub needs self-signed cert handling
+  });
+  if (result.status >= 200 && result.status < 300 && result.body.iid) {
+    return { number: result.body.iid, url: result.body.web_url };
+  }
+  return {
+    error: result.body.message || result.body.error || `CodeHub API ${result.status}`,
+    status: result.status,
+  };
+}
+
 async function createIssue(opts) {
   const provider = String(opts && opts.provider || '').toLowerCase();
   if (provider === 'github') return _createIssueGithub(opts, opts.httpsJson);
   if (provider === 'gitee') return _createIssueGitee(opts, opts.httpsJson);
+  if (provider === 'codehub') return _createIssueCodehub(opts, opts.httpsJson);
   return { error: `unknown provider: ${opts && opts.provider}`, status: 0 };
 }
 
@@ -482,10 +522,60 @@ async function _fetchIssuesGitee({ token, owner, repo, state, perPage, maxPages 
   return { items, status: lastStatus };
 }
 
+async function _fetchIssuesCodehub({ token, owner, repo, state, perPage, maxPages }, httpsJson) {
+  const fetcher = httpsJson || _httpsJson;
+  const per = Math.max(1, Math.min(100, perPage || _DEFAULT_ISSUES_PER_PAGE));
+  const cap = Math.max(1, Math.min(20, maxPages || _DEFAULT_ISSUES_MAX_PAGES));
+  const items = [];
+  let lastStatus = 0;
+  // CodeHub uses GitLab v4 API with page/per_page pagination
+  const projectId = encodeURIComponent(`${owner}/${repo}`);
+  // GitLab state values: 'opened' | 'closed' | 'all'. Map from myco convention.
+  const codehubState = state === 'closed' ? 'closed'
+                      : state === 'all' ? 'all'
+                      : 'opened';
+  for (let page = 1; page <= cap; page++) {
+    const result = await fetcher({
+      hostname: 'codehub-y.huawei.com',
+      path: `/api/v4/projects/${projectId}/issues?state=${encodeURIComponent(codehubState)}&per_page=${per}&page=${page}`,
+      method: 'GET',
+      headers: {
+        'PRIVATE-TOKEN': token,
+        'User-Agent': 'myco/1.0',
+        'Accept': 'application/json',
+      },
+      rejectUnauthorized: false,
+    });
+    lastStatus = result.status;
+    if (result.status < 200 || result.status >= 300) {
+      return { items, status: result.status, error: result.body && (result.body.message || result.body.error) };
+    }
+    const rows = Array.isArray(result.body) ? result.body : [];
+    for (const r of rows) {
+      items.push({
+        provider: 'codehub',
+        number: r.iid,  // GitLab uses iid (internal issue id)
+        title: String(r.title || '').slice(0, 250),
+        body: String(r.description || ''),  // GitLab uses 'description' not 'body'
+        htmlUrl: r.web_url,  // GitLab uses 'web_url'
+        state: r.state,
+        author: (r.author && r.author.username) || '',
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+        labels: Array.isArray(r.labels) ? r.labels.map((l) => (typeof l === 'string' ? l : l && l.name)).filter(Boolean) : [],
+        isPullRequest: false,
+      });
+    }
+    if (rows.length < per) break;
+  }
+  return { items, status: lastStatus };
+}
+
 async function fetchIssues(opts) {
   const provider = String(opts && opts.provider || '').toLowerCase();
   if (provider === 'github') return _fetchIssuesGithub(opts, opts.httpsJson);
   if (provider === 'gitee') return _fetchIssuesGitee(opts, opts.httpsJson);
+  if (provider === 'codehub') return _fetchIssuesCodehub(opts, opts.httpsJson);
   return { items: [], status: 0, error: `unknown provider: ${opts && opts.provider}` };
 }
 
@@ -554,6 +644,36 @@ async function _closeIssueGitee({ token, owner, repo, number }, httpsJson) {
   };
 }
 
+async function _closeIssueCodehub({ token, owner, repo, number }, httpsJson) {
+  // CodeHub uses GitLab v4 API:
+  //   - Endpoint is PUT /api/v4/projects/:id/issues/:issue_id
+  //   - :id is the encoded project path (owner%2Frepo)
+  //   - :issue_id is the iid (internal issue id)
+  //   - Request body: { state_event: "close" }
+  const fetcher = httpsJson || _httpsJson;
+  const projectId = encodeURIComponent(`${owner}/${repo}`);
+  const r = await fetcher({
+    hostname: 'codehub-y.huawei.com',
+    path: `/api/v4/projects/${projectId}/issues/${encodeURIComponent(number)}`,
+    method: 'PUT',
+    headers: {
+      'PRIVATE-TOKEN': token,
+      'User-Agent': 'myco/1.0',
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: { state_event: 'close' },
+    rejectUnauthorized: false,
+  });
+  if (r.status >= 200 && r.status < 300 && r.body && r.body.iid) {
+    return { ok: true, number: r.body.iid, url: r.body.web_url };
+  }
+  return {
+    error: (r.body && (r.body.message || r.body.error)) || `CodeHub close API ${r.status}`,
+    status: r.status,
+  };
+}
+
 async function closeIssue(opts) {
   const provider = String(opts && opts.provider || '').toLowerCase();
   if (!opts || !opts.token || !opts.owner || !opts.repo || !opts.number) {
@@ -561,6 +681,7 @@ async function closeIssue(opts) {
   }
   if (provider === 'github') return _closeIssueGithub(opts, opts.httpsJson);
   if (provider === 'gitee') return _closeIssueGitee(opts, opts.httpsJson);
+  if (provider === 'codehub') return _closeIssueCodehub(opts, opts.httpsJson);
   return { error: `unknown provider: ${opts.provider}`, status: 0 };
 }
 
